@@ -1,7 +1,9 @@
 # 运行数据（含个人采购数据，绝不入库）
-data/
-seed/
-screenshots/
+# 路径必须以 / 开头锚定到仓库根目录：写成 `data/` 会匹配任意层级的 data 目录，
+# 把安卓源码里的 com/xiaoyuan/renovation/data 包一并忽略掉（安卓 CI 因此一直编译失败）
+/data/
+/seed/
+/screenshots/
 # 依赖本地 seed 原始表格的测试，含真实物料/金额，仅本机保留
 backend/tests/test_import_original.py
 
