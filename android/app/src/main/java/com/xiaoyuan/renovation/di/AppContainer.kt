@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /** 手写依赖容器：这个规模的项目不值得引入 Hilt。 */
 class AppContainer(context: Context) {
@@ -28,14 +29,21 @@ class AppContainer(context: Context) {
     val dataVersion: StateFlow<Int> = _dataVersion.asStateFlow()
 
     private val api: ApiService by lazy {
-        ApiClientFactory.create { settings.baseUrl.value }
+        ApiClientFactory.create({ settings.baseUrl.value }, { settings.token.value })
     }
 
     private val transferApi: ApiService by lazy {
-        ApiClientFactory.createForTransfer { settings.baseUrl.value }
+        ApiClientFactory.createForTransfer({ settings.baseUrl.value }, { settings.token.value })
     }
 
     val repo: RenovationRepository by lazy {
-        RenovationRepository(api, transferApi) { _dataVersion.value += 1 }
+        RenovationRepository(
+            api = api,
+            transferApi = transferApi,
+            onDataChanged = { _dataVersion.value += 1 },
+            // 任何请求撞上 401（token 过期、或在别处改了密码）就清掉本地会话，
+            // 顶层路由监听到 sessionState 变化会自动切回登录页
+            onUnauthorized = { appScope.launch { settings.clearSession() } },
+        )
     }
 }

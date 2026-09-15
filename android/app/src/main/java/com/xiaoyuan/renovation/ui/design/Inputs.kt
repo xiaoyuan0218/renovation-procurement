@@ -22,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -49,6 +51,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xiaoyuan.renovation.ui.theme.Ink
@@ -101,6 +105,7 @@ fun AppTextField(
     supportingText: String? = null,
     accent: Color = Ink.Blue,
     onDone: (() -> Unit)? = null,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     OutlinedTextField(
         value = value,
@@ -118,6 +123,7 @@ fun AppTextField(
             { Icon(icon, contentDescription = null, tint = Ink.TextSecondary, modifier = Modifier.size(18.dp)) }
         },
         trailingIcon = trailing,
+        visualTransformation = visualTransformation,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
         keyboardActions = KeyboardActions(
             onDone = { onDone?.invoke() },
@@ -130,8 +136,52 @@ fun AppTextField(
     )
 }
 
-/** 只允许数字和一个小数点，避免用户在小键盘上误输导致解析失败。 */
-fun sanitizeDecimalInput(input: String): String {
+/** 密码输入：默认遮蔽，右侧眼睛可临时显示。 */
+@Composable
+fun AppPasswordField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isError: Boolean = false,
+    supportingText: String? = null,
+    imeAction: ImeAction = ImeAction.Next,
+    onDone: (() -> Unit)? = null,
+) {
+    var revealed by remember { mutableStateOf(false) }
+
+    AppTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = label,
+        modifier = modifier,
+        singleLine = true,
+        enabled = enabled,
+        isError = isError,
+        keyboardType = KeyboardType.Password,
+        imeAction = imeAction,
+        supportingText = supportingText,
+        onDone = onDone,
+        visualTransformation = if (revealed) {
+            VisualTransformation.None
+        } else {
+            PasswordVisualTransformation()
+        },
+        trailing = {
+            Icon(
+                imageVector = if (revealed) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                contentDescription = if (revealed) "隐藏密码" else "显示密码",
+                tint = Ink.TextSecondary,
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable { revealed = !revealed },
+            )
+        },
+    )
+}
+
+/** 只允许数字和一个小数点，避免用户在小键盘上误输导致解析失败。 */fun sanitizeDecimalInput(input: String): String {
     val filtered = input.filter { it.isDigit() || it == '.' }
     val firstDot = filtered.indexOf('.')
     if (firstDot < 0) return filtered.take(12)
@@ -166,7 +216,13 @@ fun AppNumberField(
     )
 }
 
-/** 下拉选择：用自绘玻璃框 + DropdownMenu，避免 ExposedDropdownMenuBox 的实验 API。 */
+/**
+ * 下拉选择。
+ *
+ * 用只读的 OutlinedTextField 当外框（而不是自绘玻璃框），这样标签和 AppTextField
+ * 一样浮动在边框里：两者并排放在一行时框高与标签位置完全对齐。
+ * 只读输入框会自己吞掉点击，所以上面铺一层透明点击区把点击交给下拉菜单。
+ */
 @Composable
 fun <T> AppSelect(
     label: String,
@@ -185,39 +241,37 @@ fun <T> AppSelect(
     var expanded by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(14.dp)
 
-    Column(modifier) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = Ink.TextSecondary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
-        )
-        Box {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .background(Ink.GlassFill)
-                    .border(1.dp, Ink.GlassBorder, shape)
-                    .clickable(enabled = enabled) { expanded = true }
-                    .padding(horizontal = 14.dp, vertical = 15.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = selected?.let(itemLabel) ?: placeholder,
-                    color = if (selected != null) Ink.TextPrimary else Ink.TextMuted,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
+    Box(modifier) {
+        OutlinedTextField(
+            value = selected?.let(itemLabel).orEmpty(),
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            singleLine = true,
+            label = { Text(label) },
+            placeholder = { Text(placeholder) },
+            textStyle = MaterialTheme.typography.bodyLarge,
+            shape = shape,
+            colors = glassFieldColors(Ink.Blue),
+            trailingIcon = {
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowDown,
                     contentDescription = null,
                     tint = Ink.TextSecondary,
                     modifier = Modifier.size(20.dp),
                 )
-            }
-            DropdownMenu(
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (enabled) {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .clip(shape)
+                    .clickable { expanded = true },
+            )
+        }
+        DropdownMenu(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
                 modifier = Modifier.background(Ink.BgMid),
@@ -253,7 +307,6 @@ fun <T> AppSelect(
                         },
                     )
                 }
-            }
         }
     }
 }

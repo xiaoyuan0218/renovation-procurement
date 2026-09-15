@@ -164,3 +164,31 @@ class ImportReport(BaseModel):
     rooms_created: int = 0
     categories_created: int = 0
     warnings: list[str] = []
+
+
+# ---------------------------------------------------------------- 登录
+
+class CredentialsIn(BaseModel):
+    # 不含空白与竖线：token 的载荷用竖线分隔字段
+    username: str = Field(min_length=1, max_length=50, pattern=r"^[^\s|]+$")
+    password: str = Field(min_length=6, max_length=128)
+
+
+class PasswordChangeIn(BaseModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class AuthStateOut(BaseModel):
+    initialized: bool   # 是否已经创建过管理员账号
+    authenticated: bool
+    username: Optional[str] = None
+
+
+class LoginOut(BaseModel):
+    token: str
+    username: str
+
+
+class OkOut(BaseModel):
+    ok: bool = True

@@ -57,6 +57,20 @@ class SettingsViewModel(
 
     val baseUrl: StateFlow<String?> get() = settings.baseUrl
 
+    val username: StateFlow<String?> get() = settings.username
+
+    /**
+     * 退出登录：先让服务端清掉 Cookie（失败也无所谓，本地才是权威），
+     * 再清本地 token —— 顶层路由监听到 sessionState 变化会自动切回登录页。
+     * 服务器地址保留，不用重新配置。
+     */
+    fun logout() {
+        viewModelScope.launch {
+            repo.logout()
+            settings.clearSession()
+        }
+    }
+
     fun load() {
         if (loading) return
         loading = true
@@ -232,13 +246,17 @@ class SettingsViewModel(
                     if (written == null) {
                         _message.value = "文件写入失败"
                     } else {
-                        _message.value = "已生成 ${written.first.name}（${file.bytes.size / 1024} KB）"
-                        FileUtils.share(
+                        val shared = FileUtils.share(
                             context = appContext,
                             uri = written.second,
                             mime = RenovationRepository.XLSX_MIME,
                             title = if (isTemplate) "分享导入模板" else "分享装修采购清单",
                         )
+                        _message.value = if (shared) {
+                            "已生成 ${written.first.name}（${file.bytes.size / 1024} KB）"
+                        } else {
+                            "文件已生成（${written.first.name}），但系统里没有能接收它的应用"
+                        }
                     }
                 }
 

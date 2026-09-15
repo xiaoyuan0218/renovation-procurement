@@ -1,5 +1,17 @@
+// 由 auth.js 反向注册，避免 api.js 与 auth.js 互相 import 形成循环依赖
+let onUnauthorized = null
+
+export function setUnauthorizedHandler(fn) {
+  onUnauthorized = fn
+}
+
+// 登录、查询登录态这些接口返回 401 是正常结果，不该被当成"会话失效"
+const AUTH_ENDPOINTS = ['/api/auth/']
+
 async function request(method, url, body, isForm = false) {
-  const opts = { method, headers: {} }
+  // 凭证放在 httpOnly Cookie 里，同源请求自动带上；
+  // 设置页那两个 <a href="/api/export"> 下载链接也因此无需改造。
+  const opts = { method, headers: {}, credentials: 'same-origin' }
   if (body !== undefined) {
     if (isForm) {
       opts.body = body
@@ -15,6 +27,9 @@ async function request(method, url, body, isForm = false) {
       const j = await res.json()
       detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail ?? j)
     } catch { /* keep statusText */ }
+    if (res.status === 401 && onUnauthorized && !AUTH_ENDPOINTS.some((p) => url.startsWith(p))) {
+      onUnauthorized()
+    }
     throw new Error(detail)
   }
   const ct = res.headers.get('content-type') || ''

@@ -62,13 +62,17 @@ class ServerSetupViewModel(
             _state.update { it.copy(testing = true, testMessage = null, testOk = false) }
             when (val result = repo.testConnection(url)) {
                 is ApiResult.Ok -> {
-                    val totals = result.data.totals
                     _state.update {
                         it.copy(
                             testing = false,
                             testOk = true,
                             testedAddress = url,
-                            testMessage = "连接成功 · 共 ${totals.itemCount} 项物料，未买齐 ${totals.pendingCount} 项",
+                            // 探针打的是免登录的 /api/auth/state，顺带告诉用户下一步是登录还是建号
+                            testMessage = if (result.data.initialized) {
+                                "连接成功 · 服务器已就绪，下一步用账号登录"
+                            } else {
+                                "连接成功 · 服务器还没有账号，下一步创建管理员"
+                            },
                         )
                     }
                 }

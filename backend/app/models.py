@@ -1,7 +1,22 @@
-from sqlalchemy import Boolean, Column, Float, ForeignKey, Integer, String
+from datetime import datetime
+
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
+                        String)
 from sqlalchemy.orm import relationship
 
 from .db import Base
+
+
+class User(Base):
+    """管理员账号。整个应用只用一个账号，首次打开网页时创建。"""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(50), unique=True, nullable=False)
+    password_hash = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 
 class Category(Base):

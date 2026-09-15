@@ -2,10 +2,17 @@
 
 用法：项目根目录下  .venv/Scripts/python backend/scripts/measure_layout.py
 前置：uvicorn 已在 127.0.0.1:8000 运行（托管前端 dist）。
+
+接口现在都要登录，沿用走查脚本的登录逻辑（凭证走 WALKTHROUGH_USER /
+WALKTHROUGH_PASSWORD，实例没有账号时会自动创建）。
 """
 
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from walkthrough import auth_token  # noqa: E402  同目录，复用登录流程
 
 BASE = os.environ.get("WALKTHROUGH_BASE", "http://127.0.0.1:8000")
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
@@ -76,9 +83,12 @@ def probe(page, label):
 def run():
     from playwright.sync_api import sync_playwright
 
+    token = auth_token()
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+        ctx.set_extra_http_headers({"Authorization": f"Bearer {token}"})
         page = ctx.new_page()
         page.on("console", lambda m: CONSOLE_ERRORS.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: CONSOLE_ERRORS.append(str(e)))

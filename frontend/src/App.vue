@@ -1,8 +1,11 @@
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { auth, loadAuthState, logout } from './auth'
 import Dashboard from './views/Dashboard.vue'
 import Items from './views/Items.vue'
 import Matrix from './views/Matrix.vue'
+import Login from './views/Login.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 
 const tabs = [
@@ -14,13 +17,37 @@ const view = ref('dashboard')
 const settingsVisible = ref(false)
 const reloadKey = ref(0)
 
+// 先问后端登录态，再决定显示登录页还是主界面
+onMounted(loadAuthState)
+
 function onImported() {
   reloadKey.value++
+}
+
+async function onLogout() {
+  try {
+    await ElMessageBox.confirm('退出后需要重新输入密码才能查看数据。', '退出登录', {
+      confirmButtonText: '退出',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return // 用户取消
+  }
+  await logout()
+  view.value = 'dashboard'
+  ElMessage.success('已退出登录')
 }
 </script>
 
 <template>
-  <el-container class="app">
+  <div v-if="auth.status === 'loading'" class="boot">
+    <span class="spinner" aria-label="正在加载" />
+  </div>
+
+  <Login v-else-if="auth.status !== 'ready'" />
+
+  <el-container v-else class="app">
     <el-header class="app-header" height="auto">
       <div class="header-row">
         <div class="brand">
@@ -41,6 +68,9 @@ function onImported() {
           </button>
         </nav>
         <el-button class="settings-btn" text bg @click="settingsVisible = true">设置 / 数据</el-button>
+        <el-button class="logout-btn" text bg @click="onLogout">
+          退出<span v-if="auth.username" class="who">（{{ auth.username }}）</span>
+        </el-button>
       </div>
     </el-header>
     <el-main class="app-main">
@@ -55,6 +85,27 @@ function onImported() {
 </template>
 
 <style scoped>
+.boot {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(0, 122, 255, 0.22);
+  border-top-color: var(--ios-blue);
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2s; }
+}
+
 .app {
   height: 100vh;
 }
@@ -130,6 +181,22 @@ function onImported() {
 }
 .settings-btn:hover {
   background: rgba(255, 255, 255, 0.92) !important;
+}
+.logout-btn {
+  white-space: nowrap;
+  color: var(--ios-label-2);
+  border: none !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+  border-radius: 999px !important;
+  font-weight: 600;
+}
+.logout-btn:hover {
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: var(--ios-red);
+}
+.who {
+  font-weight: 500;
+  color: var(--ios-label-3);
 }
 .app-main {
   width: 100%;

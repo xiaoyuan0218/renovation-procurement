@@ -25,8 +25,9 @@ COPY --from=frontend /build/dist ./frontend/dist
 VOLUME ["/data"]
 EXPOSE 8000
 
+# 探针必须打公开接口。业务接口都要求登录，用它们做探针会让容器一直被判定为不健康。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/summary', timeout=3)" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)" || exit 1
 
 WORKDIR /app/backend
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

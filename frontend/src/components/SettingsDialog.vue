@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { auth, changePassword } from '../auth'
 
 const visible = defineModel({ type: Boolean, default: false })
 const emit = defineEmits(['imported'])
@@ -15,6 +16,11 @@ const importMode = ref('replace')
 const importing = ref(false)
 const importReport = ref(null)
 const fileList = ref([])
+
+const oldPassword = ref('')
+const newPassword = ref('')
+const confirmPassword = ref('')
+const changing = ref(false)
 
 onMounted(async () => {
   ;[rooms.value, categories.value] = await Promise.all([
@@ -100,6 +106,33 @@ function beforeUpload(file) {
   const ok = /\.(xlsx)$/i.test(file.name)
   if (!ok) ElMessage.error('请上传 .xlsx 文件')
   return ok
+}
+
+async function submitPassword() {
+  if (!oldPassword.value) {
+    ElMessage.warning('请输入原密码')
+    return
+  }
+  if (newPassword.value.length < 6) {
+    ElMessage.warning('新密码至少 6 位')
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+  changing.value = true
+  try {
+    await changePassword(oldPassword.value, newPassword.value)
+    oldPassword.value = ''
+    newPassword.value = ''
+    confirmPassword.value = ''
+    ElMessage.success('密码已修改')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    changing.value = false
+  }
 }
 </script>
 
@@ -188,6 +221,34 @@ function beforeUpload(file) {
           <div v-for="(w, i) in importReport.warnings" :key="i">⚠ {{ w }}</div>
         </el-alert>
       </el-tab-pane>
+
+      <el-tab-pane label="账号">
+        <el-form label-width="90px">
+          <el-form-item label="当前账号">
+            <span class="account-name">{{ auth.username || '—' }}</span>
+          </el-form-item>
+          <el-form-item label="原密码">
+            <el-input v-model="oldPassword" type="password" show-password
+                      autocomplete="current-password" class="pwd-input" />
+          </el-form-item>
+          <el-form-item label="新密码">
+            <el-input v-model="newPassword" type="password" show-password
+                      placeholder="至少 6 位" autocomplete="new-password" class="pwd-input" />
+          </el-form-item>
+          <el-form-item label="确认新密码">
+            <el-input v-model="confirmPassword" type="password" show-password
+                      autocomplete="new-password" class="pwd-input"
+                      @keyup.enter="submitPassword" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="changing" @click="submitPassword">
+              修改密码
+            </el-button>
+          </el-form-item>
+        </el-form>
+        <el-alert type="info" :closable="false"
+                  title="修改后，其它设备上已登录的会话会自动失效；当前这个会保持登录。" />
+      </el-tab-pane>
     </el-tabs>
   </el-dialog>
 </template>
@@ -226,4 +287,6 @@ function beforeUpload(file) {
 .dc-text b { font-size: 13px; font-weight: 600; }
 .dc-text i { font-size: 11px; color: var(--ios-label-2); font-style: normal; }
 .mt12 { margin-top: 12px; }
+.account-name { font-weight: 600; }
+.pwd-input { width: 220px; }
 </style>

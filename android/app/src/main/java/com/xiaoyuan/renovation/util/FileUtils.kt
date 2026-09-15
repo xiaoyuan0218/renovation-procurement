@@ -1,5 +1,6 @@
 package com.xiaoyuan.renovation.util
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -37,12 +38,34 @@ object FileUtils {
         }.getOrNull()
     }
 
-    fun share(context: Context, uri: Uri, mime: String, title: String) {
-        val intent = Intent(Intent.ACTION_SEND).apply {
+    /**
+     * 唤起系统分享面板。
+     *
+     * 注意这里拿到的是 Application context（ViewModel 里没有 Activity），
+     * 从非 Activity 上下文启动 Activity **必须**带 FLAG_ACTIVITY_NEW_TASK，
+     * 否则抛 AndroidRuntimeException —— 表现就是点"导出数据"直接闪退。
+     *
+     * 返回 false 表示没有应用能接收，交给调用方提示，不要让整个 App 挂掉。
+     */
+    fun share(context: Context, uri: Uri, mime: String, title: String): Boolean {
+        val send = Intent(Intent.ACTION_SEND).apply {
             type = mime
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, title))
+        // createChooser 只迁移 URI 授权相关的 flag，不会带上 NEW_TASK，
+        // 而 ACTION_SEND 走的是 EXTRA_STREAM、没有 ClipData，所以授权 flag 也要补一次
+        val chooser = Intent.createChooser(send, title).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        return try {
+            context.startActivity(chooser)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
     }
 }

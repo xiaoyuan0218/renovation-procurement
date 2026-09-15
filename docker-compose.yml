@@ -31,3 +31,8 @@ services:
       TZ: Asia/Shanghai
       # 与 Dockerfile 里的默认值一致，这里显式写出，方便一眼看出数据目录就是挂载点 /data
       RENOVATION_DATA_DIR: /data
+      # 登录 token 的签名密钥会自动生成到 /data/.secret_key 并一直用下去，
+      # 跟着数据卷一起持久化，所以容器重建不会把所有人登出。想自己管就设 RENOVATION_SECRET。
+      #
+      # 若之后放到 HTTPS 后面，加上 RENOVATION_COOKIE_SECURE: "true"；
+      # 局域网明文 HTTP 下千万别开，开了浏览器会丢弃登录 Cookie（表现为登录成功后立刻又未登录）。

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
@@ -28,6 +29,9 @@ import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,7 +62,6 @@ import com.xiaoyuan.renovation.ui.design.GlassDivider
 import com.xiaoyuan.renovation.ui.design.GlassIconButton
 import com.xiaoyuan.renovation.ui.design.HintText
 import com.xiaoyuan.renovation.ui.design.InfoDialog
-import com.xiaoyuan.renovation.ui.design.InlineBanner
 import com.xiaoyuan.renovation.ui.design.KeyValueRow
 import com.xiaoyuan.renovation.ui.design.LoadingState
 import com.xiaoyuan.renovation.ui.design.NeonButton
@@ -66,7 +69,6 @@ import com.xiaoyuan.renovation.ui.design.SectionTitle
 import com.xiaoyuan.renovation.ui.design.TagPill
 import com.xiaoyuan.renovation.ui.design.TextPromptDialog
 import com.xiaoyuan.renovation.ui.theme.Ink
-import kotlinx.coroutines.delay
 
 @Composable
 fun SettingsScreen(
@@ -84,6 +86,7 @@ fun SettingsScreen(
     val importMode by vm.importMode.collectAsStateWithLifecycle()
     val report by vm.report.collectAsStateWithLifecycle()
     val connectionOk by vm.connectionOk.collectAsStateWithLifecycle()
+    val username by vm.username.collectAsStateWithLifecycle()
 
     var newRoom by remember { mutableStateOf("") }
     var newCategory by remember { mutableStateOf("") }
@@ -91,298 +94,337 @@ fun SettingsScreen(
     var renamingCategory by remember { mutableStateOf<Pair<Int, String>?>(null) }
     var deletingRoom by remember { mutableStateOf<Pair<Int, String>?>(null) }
     var deletingCategory by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var confirmLogout by remember { mutableStateOf(false) }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.importFrom(uri)
     }
 
     LaunchedEffect(refreshKey) { vm.load() }
+
+    // 导出/导入的按钮在页面最底部，把结果做成底部浮动提示，
+    // 否则提示条在顶部、用户在底部，点了什么反馈都看不到
+    val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(message) {
-        if (message != null) {
-            delay(2800)
+        val text = message
+        if (text != null) {
+            snackbarHostState.showSnackbar(
+                message = text,
+                withDismissAction = true,
+                duration = SnackbarDuration.Long,
+            )
             vm.consumeMessage()
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        Spacer(Modifier.height(12.dp))
-        BrandHeader(
-            title = "设置",
-            subtitle = "服务器 · 房间 · 类目 · 数据备份",
-            trailing = {
-                GlassIconButton(icon = Icons.Filled.Refresh, onClick = vm::load, contentDescription = "刷新")
-            },
-        )
-
-        if (message != null) {
-            InlineBanner(
-                text = message!!,
-                accent = if (connectionOk == false) Ink.DangerSoft else Ink.Mint,
-            )
-        }
-
-        /* ---------- 服务器 ---------- */
-        Column {
-            SectionTitle("服务器", caption = "地址随时可改，改完立即生效")
-            Spacer(Modifier.height(10.dp))
-            GlassCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(9.dp)
-                            .clip(CircleShape)
-                            .background(
-                                when (connectionOk) {
-                                    true -> Ink.Mint
-                                    false -> Ink.DangerSoft
-                                    null -> Ink.TextMuted
-                                },
-                            ),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = baseUrl ?: "未配置",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Ink.Blue,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GhostButton(
-                        text = "修改地址",
-                        onClick = onEditServerAddress,
-                        icon = Icons.Filled.Dns,
-                    )
-                    GhostButton(
-                        text = if (busy) "测试中…" else "测试连接",
-                        onClick = vm::testConnection,
-                        icon = Icons.Filled.MonitorHeart,
-                        enabled = !busy,
-                    )
-                }
-            }
-        }
-
-        when (val current = state) {
-            is LoadState.Loading -> LoadingState(text = "正在读取房间与类目…")
-
-            is LoadState.Failed -> ErrorState(
-                message = current.message,
-                serverUrl = baseUrl,
-                hint = current.hint,
-                onRetry = vm::load,
-                onOpenSettings = onEditServerAddress,
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Spacer(Modifier.height(12.dp))
+            BrandHeader(
+                title = "设置",
+                subtitle = "服务器 · 房间 · 类目 · 数据备份",
+                trailing = {
+                    GlassIconButton(icon = Icons.Filled.Refresh, onClick = vm::load, contentDescription = "刷新")
+                },
             )
 
-            is LoadState.Ready -> {
-                val data = current.data
-
-                /* ---------- 房间 ---------- */
-                Column {
-                    SectionTitle("房间", caption = "共 ${data.rooms.size} 个 · 删除会同时清掉该房间的布点")
-                    Spacer(Modifier.height(10.dp))
-                    GlassCard {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            AppTextField(
-                                value = newRoom,
-                                onValueChange = { newRoom = it },
-                                label = "新增房间",
-                                placeholder = "例如：书房",
-                                imeAction = ImeAction.Done,
-                                modifier = Modifier.weight(1f),
-                                onDone = {
-                                    vm.addRoom(newRoom)
-                                    newRoom = ""
-                                },
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            NeonButton(
-                                text = "添加",
-                                onClick = {
-                                    vm.addRoom(newRoom)
-                                    newRoom = ""
-                                },
-                                icon = Icons.Filled.Add,
-                                enabled = newRoom.isNotBlank() && !busy,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    GlassCard(padding = 0.dp) {
-                        data.rooms.forEachIndexed { index, room ->
-                            if (index > 0) GlassDivider(Modifier.padding(horizontal = 14.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = room.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Ink.TextPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TagPill(
-                                    text = "改名",
-                                    color = Ink.Indigo,
-                                    onClick = { renamingRoom = room.id to room.name },
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                TagPill(
-                                    text = "删除",
-                                    color = Ink.DangerSoft,
-                                    onClick = { deletingRoom = room.id to room.name },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                /* ---------- 类目 ---------- */
-                Column {
-                    SectionTitle("类目", caption = "共 ${data.categories.size} 个 · 类目下还有物料时不能删除")
-                    Spacer(Modifier.height(10.dp))
-                    GlassCard {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            AppTextField(
-                                value = newCategory,
-                                onValueChange = { newCategory = it },
-                                label = "新增类目",
-                                placeholder = "例如：五金",
-                                imeAction = ImeAction.Done,
-                                accent = Ink.Indigo,
-                                modifier = Modifier.weight(1f),
-                                onDone = {
-                                    vm.addCategory(newCategory)
-                                    newCategory = ""
-                                },
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            NeonButton(
-                                text = "添加",
-                                onClick = {
-                                    vm.addCategory(newCategory)
-                                    newCategory = ""
-                                },
-                                icon = Icons.Filled.Add,
-                                enabled = newCategory.isNotBlank() && !busy,
-                                gradient = Ink.IndigoGradient,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    GlassCard(padding = 0.dp) {
-                        data.categories.forEachIndexed { index, category ->
-                            if (index > 0) GlassDivider(Modifier.padding(horizontal = 14.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = category.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Ink.TextPrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TagPill(
-                                    text = "改名",
-                                    color = Ink.Indigo,
-                                    onClick = { renamingCategory = category.id to category.name },
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                TagPill(
-                                    text = "删除",
-                                    color = Ink.DangerSoft,
-                                    onClick = { deletingCategory = category.id to category.name },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        /* ---------- 数据备份 ---------- */
-        Column {
-            SectionTitle("数据备份", caption = "xlsx 与网页版共用同一套格式")
-            Spacer(Modifier.height(10.dp))
-            GlassCard {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    GhostButton(
-                        text = "导出数据",
-                        onClick = vm::exportToShare,
-                        icon = Icons.Filled.CloudDownload,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                    )
-                    GhostButton(
-                        text = "下载模板",
-                        onClick = vm::downloadTemplateToShare,
-                        icon = Icons.Filled.CloudUpload,
-                        enabled = !busy,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                HintText("导出后会弹出系统分享面板，可以存到文件、发到微信或云盘。")
-
-                Spacer(Modifier.height(18.dp))
-                Text(
-                    text = "导入方式",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Ink.TextSecondary,
-                )
-                Spacer(Modifier.height(8.dp))
-                ChoiceChips(
-                    options = ImportMode.entries.map { it to it.label },
-                    selected = importMode,
-                    onSelect = vm::setImportMode,
-                    accent = Ink.Indigo,
-                )
-                Spacer(Modifier.height(6.dp))
-                HintText(
-                    when (importMode) {
-                        ImportMode.Replace -> "覆盖：先清空现有物料，再按表格重建。"
-                        ImportMode.Merge -> "合并：按物料名称匹配，已存在的更新，新的追加。"
-                    },
-                )
-                Spacer(Modifier.height(14.dp))
-                NeonButton(
-                    text = "选择 xlsx 并导入",
-                    onClick = { filePicker.launch(arrayOf("*/*")) },
-                    icon = Icons.Filled.UploadFile,
-                    enabled = !busy,
-                    loading = busy,
-                    gradient = Ink.IndigoGradient,
-                    fillWidth = true,
-                )
-            }
-        }
-
-        /* ---------- 关于 ---------- */
-        Column {
-            SectionTitle("关于")
-            Spacer(Modifier.height(10.dp))
-            GlassCard {
-                KeyValueRow("应用", "装修采购 Android 1.0.0")
-                Spacer(Modifier.height(8.dp))
-                KeyValueRow("数据存放", "服务器的 SQLite 文件")
-                Spacer(Modifier.height(8.dp))
-                KeyValueRow("登录", "无需登录")
+            /* ---------- 服务器 ---------- */
+            Column {
+                SectionTitle("服务器", caption = "地址随时可改，改完立即生效")
                 Spacer(Modifier.height(10.dp))
-                HintText("这个 App 只是服务器上那份数据的另一个入口，手机上不存业务数据。")
+                GlassCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when (connectionOk) {
+                                        true -> Ink.Mint
+                                        false -> Ink.DangerSoft
+                                        null -> Ink.TextMuted
+                                    },
+                                ),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = baseUrl ?: "未配置",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Ink.Blue,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        GhostButton(
+                            text = "修改地址",
+                            onClick = onEditServerAddress,
+                            icon = Icons.Filled.Dns,
+                        )
+                        GhostButton(
+                            text = if (busy) "测试中…" else "测试连接",
+                            onClick = vm::testConnection,
+                            icon = Icons.Filled.MonitorHeart,
+                            enabled = !busy,
+                        )
+                    }
+                }
+            }
+
+            when (val current = state) {
+                is LoadState.Loading -> LoadingState(text = "正在读取房间与类目…")
+
+                is LoadState.Failed -> ErrorState(
+                    message = current.message,
+                    serverUrl = baseUrl,
+                    hint = current.hint,
+                    onRetry = vm::load,
+                    onOpenSettings = onEditServerAddress,
+                )
+
+                is LoadState.Ready -> {
+                    val data = current.data
+
+                    /* ---------- 房间 ---------- */
+                    Column {
+                        SectionTitle("房间", caption = "共 ${data.rooms.size} 个 · 删除会同时清掉该房间的布点")
+                        Spacer(Modifier.height(10.dp))
+                        GlassCard {
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                AppTextField(
+                                    value = newRoom,
+                                    onValueChange = { newRoom = it },
+                                    label = "新增房间",
+                                    placeholder = "例如：书房",
+                                    imeAction = ImeAction.Done,
+                                    modifier = Modifier.weight(1f),
+                                    onDone = {
+                                        vm.addRoom(newRoom)
+                                        newRoom = ""
+                                    },
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                NeonButton(
+                                    text = "添加",
+                                    onClick = {
+                                        vm.addRoom(newRoom)
+                                        newRoom = ""
+                                    },
+                                    icon = Icons.Filled.Add,
+                                    enabled = newRoom.isNotBlank() && !busy,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        GlassCard(padding = 0.dp) {
+                            data.rooms.forEachIndexed { index, room ->
+                                if (index > 0) GlassDivider(Modifier.padding(horizontal = 14.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = room.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = Ink.TextPrimary,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TagPill(
+                                        text = "改名",
+                                        color = Ink.Indigo,
+                                        onClick = { renamingRoom = room.id to room.name },
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    TagPill(
+                                        text = "删除",
+                                        color = Ink.DangerSoft,
+                                        onClick = { deletingRoom = room.id to room.name },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    /* ---------- 类目 ---------- */
+                    Column {
+                        SectionTitle("类目", caption = "共 ${data.categories.size} 个 · 类目下还有物料时不能删除")
+                        Spacer(Modifier.height(10.dp))
+                        GlassCard {
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                AppTextField(
+                                    value = newCategory,
+                                    onValueChange = { newCategory = it },
+                                    label = "新增类目",
+                                    placeholder = "例如：五金",
+                                    imeAction = ImeAction.Done,
+                                    accent = Ink.Indigo,
+                                    modifier = Modifier.weight(1f),
+                                    onDone = {
+                                        vm.addCategory(newCategory)
+                                        newCategory = ""
+                                    },
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                NeonButton(
+                                    text = "添加",
+                                    onClick = {
+                                        vm.addCategory(newCategory)
+                                        newCategory = ""
+                                    },
+                                    icon = Icons.Filled.Add,
+                                    enabled = newCategory.isNotBlank() && !busy,
+                                    gradient = Ink.IndigoGradient,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        GlassCard(padding = 0.dp) {
+                            data.categories.forEachIndexed { index, category ->
+                                if (index > 0) GlassDivider(Modifier.padding(horizontal = 14.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = category.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = Ink.TextPrimary,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TagPill(
+                                        text = "改名",
+                                        color = Ink.Indigo,
+                                        onClick = { renamingCategory = category.id to category.name },
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    TagPill(
+                                        text = "删除",
+                                        color = Ink.DangerSoft,
+                                        onClick = { deletingCategory = category.id to category.name },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            /* ---------- 数据备份 ---------- */
+            Column {
+                SectionTitle("数据备份", caption = "xlsx 与网页版共用同一套格式")
+                Spacer(Modifier.height(10.dp))
+                GlassCard {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        GhostButton(
+                            text = "导出数据",
+                            onClick = vm::exportToShare,
+                            icon = Icons.Filled.CloudDownload,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                        )
+                        GhostButton(
+                            text = "下载模板",
+                            onClick = vm::downloadTemplateToShare,
+                            icon = Icons.Filled.CloudUpload,
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    HintText("导出后会弹出系统分享面板，可以存到文件、发到微信或云盘。")
+
+                    Spacer(Modifier.height(18.dp))
+                    Text(
+                        text = "导入方式",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Ink.TextSecondary,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    ChoiceChips(
+                        options = ImportMode.entries.map { it to it.label },
+                        selected = importMode,
+                        onSelect = vm::setImportMode,
+                        accent = Ink.Indigo,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    HintText(
+                        when (importMode) {
+                            ImportMode.Replace -> "覆盖：先清空现有物料，再按表格重建。"
+                            ImportMode.Merge -> "合并：按物料名称匹配，已存在的更新，新的追加。"
+                        },
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    NeonButton(
+                        text = "选择 xlsx 并导入",
+                        onClick = { filePicker.launch(arrayOf("*/*")) },
+                        icon = Icons.Filled.UploadFile,
+                        enabled = !busy,
+                        loading = busy,
+                        gradient = Ink.IndigoGradient,
+                        fillWidth = true,
+                    )
+                }
+            }
+
+            /* ---------- 关于 ---------- */
+            Column {
+                SectionTitle("关于")
+                Spacer(Modifier.height(10.dp))
+                GlassCard {
+                    KeyValueRow("应用", "装修采购 Android 1.1.0")
+                    Spacer(Modifier.height(8.dp))
+                    KeyValueRow("数据存放", "服务器的 SQLite 文件")
+                    Spacer(Modifier.height(8.dp))
+                    KeyValueRow("登录账号", username ?: "—")
+                    Spacer(Modifier.height(12.dp))
+                    GhostButton(
+                        text = "退出登录",
+                        onClick = { confirmLogout = true },
+                        icon = Icons.AutoMirrored.Filled.Logout,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    HintText("这个 App 只是服务器上那份数据的另一个入口，手机上不存业务数据。")
+                }
+            }
+        }
+
+        if (confirmLogout) {
+            ConfirmDialog(
+                title = "退出登录",
+                message = "退出后需要重新输入密码才能查看数据。服务器地址会保留。",
+                confirmText = "退出",
+                danger = true,
+                onConfirm = {
+                    confirmLogout = false
+                    vm.logout()
+                },
+                onDismiss = { confirmLogout = false },
+            )
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) { data ->
+            GlassCard(corner = 16.dp, padding = 14.dp) {
+                Text(
+                    text = data.visuals.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Ink.TextPrimary,
+                )
             }
         }
     }

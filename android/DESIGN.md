@@ -104,8 +104,9 @@
 | 组件 | 用途 | 关键约定 |
 |---|---|---|
 | `AppTextField` | 单行/多行文本 | 玻璃底 + 圆角 14dp，聚焦时描边变主色 |
+| `AppPasswordField` | 密码 | 默认 `PasswordVisualTransformation` 遮蔽，右侧眼睛可临时显示；键盘类型 `Password` |
 | `AppNumberField` | 数字输入 | 只允许数字和一个小数点，最多 12 字符 |
-| `AppSelect` | 下拉选择 | 自绘玻璃框 + `DropdownMenu`，避开实验 API；支持禁用选项（如已占用的房间） |
+| `AppSelect` | 下拉选择 | 只读 `OutlinedTextField` 当外框（标签浮动在边框内，和 `AppTextField` 并排时框高与标签完全对齐）+ 透明点击层 + `DropdownMenu`；支持禁用选项（如已占用的房间） |
 | `ChoiceChips` | 横向单选 | 选中态实心主色，未选中玻璃底 |
 | `AppDateField` | 日期 | `yyyy-MM-dd` 字符串 + 日历弹窗 + 今天/昨天/前天快捷键；`showQuickChips=false` 用于列表内 |
 | `ConfirmDialog` | 确认 | 危险操作用 `danger=true`（红色确认按钮） |
@@ -187,16 +188,18 @@
 ## 9. 布局约定
 
 - 屏幕左右边距 16dp，卡片间距 12dp，卡片内边距 14~16dp
+- **并排的输入控件必须共用同一套外框**：`AppTextField` 与 `AppSelect` 底层都是 `OutlinedTextField`，这样框高、内边距、标签浮动高度由同一个组件决定。自绘外框（标签画在框外）和它们并排时必然错开一行 —— 布点行的「房间 + 数量」踩过这个坑
 - 页面结构：`BrandHeader`（标题+副标题+刷新）→ 筛选区 → 内容 → 主操作按钮
 - 顶部筛选区固定在滚动区之外（搜索框 + 类目 + 状态胶囊 + 合计条），列表只滚内容
 - 手机上不做宽表：物料用卡片列表，矩阵用「列表态 / 矩阵态」双模式
 - 弹层只用于短表单（记一笔、改布点），长表单（物料编辑）用全屏页
+- **登录页**照引导页（`setup/ServerSetupScreen`）的版式：大标题两行（第二行走 PrimaryGradient）+ 说明文字 + 一张 `GlassCard` 装表单 + 主操作 `NeonButton(fillWidth=true)`，错误用 `InlineBanner(accent = Ink.Danger)`。它和引导页一样是整屏页面，**不套 AppShell**（没有底部导航）
 
 ## 10. 验证方式
 
 改完视觉必须**截图验收**，不能只看代码：
 1. `./gradlew installDebug` 装到模拟器
-2. 逐屏截图（配置页 / 总览 / 清单 / 编辑 / 记一笔 / 矩阵两态 / 设置）
+2. 逐屏截图（配置页 / 登录页 / 总览 / 清单 / 编辑 / 记一笔 / 矩阵两态 / 设置）
 3. 至少跑一次 1440×3200@560 尺寸和一次 1.3 倍字体，确认不截断
 4. 跨页数字要对得上（总览合计 = 清单筛选合计 = 后端 `/api/summary`）
 
