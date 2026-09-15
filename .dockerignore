@@ -1,0 +1,18 @@
+# 构建上下文排除项：只把源码送进 Docker
+.git/
+.github/
+.venv/
+node_modules/
+frontend/dist/
+frontend/node_modules/
+data/
+seed/
+screenshots/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+README.md
+docker-compose.yml
+启动服务.bat
+启动服务-后台运行.bat

@@ -1,0 +1,11 @@
+# 统一换行符：源码在仓库内一律 LF（Docker 构建、CI 更安全）
+* text=auto eol=lf
+
+# Windows 批处理需要 CRLF
+*.bat text eol=crlf
+
+# 二进制
+*.xlsx binary
+*.png binary
+*.jpg binary
+*.ico binary

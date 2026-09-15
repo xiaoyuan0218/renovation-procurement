@@ -1,0 +1,33 @@
+# 部署用 compose：直接拉取 GitHub Actions 构建好的镜像，不需要在服务器上装 Node/Python。
+#
+# 用法（在服务器上）：
+#   1. 把本文件放到 /opt/renovation-procurement/docker-compose.yml
+#   2. 若镜像仓库是私有的，先登录一次：docker login ghcr.io -u xiaoyuan0218
+#   3. docker compose up -d
+#   4. 浏览器打开 http://<服务器IP>:8000
+#
+# 更新到最新构建：docker compose pull && docker compose up -d
+
+services:
+  app:
+    image: ghcr.io/xiaoyuan0218/renovation-procurement:latest
+    container_name: renovation-procurement
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+
+    # ---- 数据持久化 ----
+    # 格式是「宿主机路径 : 容器内路径」。冒号左边的 ./data 相对于本文件所在目录
+    # （即 /opt/renovation-procurement/data），由 Docker 自动创建；右边的 /data 是容器内路径。
+    # 应用把 SQLite 写到 $RENOVATION_DATA_DIR/renovation.db，也就是容器内 /data/renovation.db，
+    # 于是最终落在宿主机：
+    #     /opt/renovation-procurement/data/renovation.db   ← 真正的持久化文件
+    # 备份 = 停容器后拷这个文件（或整个 data 目录）；迁移 = 把它放到目标机的同名位置再启动。
+    # 想换位置就改冒号左边，例如：  /mnt/ssd/renovation:/data
+    volumes:
+      - ./data:/data
+
+    environment:
+      TZ: Asia/Shanghai
+      # 与 Dockerfile 里的默认值一致，这里显式写出，方便一眼看出数据目录就是挂载点 /data
+      RENOVATION_DATA_DIR: /data

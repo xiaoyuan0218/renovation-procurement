@@ -1,0 +1,604 @@
+/* ============================================================
+   iOS 毛玻璃设计系统 — 装修采购清单
+   Tokens: iOS 系统色 / 分组背景 / 玻璃面板 / 发丝分隔线
+   ============================================================ */
+
+:root {
+  /* iOS system palette */
+  --ios-blue: #007aff;
+  --ios-green: #34c759;
+  --ios-orange: #ff9f0a;
+  --ios-red: #ff375f;
+  --ios-gray: #8e8e93;
+  --ios-label: #1c1c1e;
+  --ios-label-2: rgba(60, 60, 67, 0.6);
+  --ios-label-3: rgba(60, 60, 67, 0.35);
+  --ios-separator: rgba(60, 60, 67, 0.085);
+  --ios-fill: transparent;
+
+  /* glass */
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-bg-strong: rgba(252, 252, 255, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.65);
+  --glass-blur: blur(24px) saturate(180%);
+  /* 阴影只落在卡片下方：模糊半径/扩散过大会横向渗进 12px 卡缝，
+     两张卡一叠加就把缝隙压成灰条（看起来像"留白与内容不同色"） */
+  --glass-shadow: 0 6px 14px -6px rgba(31, 38, 135, 0.10);
+
+  --r-lg: 20px;
+  --r-md: 12px;
+  --r-sm: 8px;
+
+  /* Element Plus token remap */
+  --el-color-primary: var(--ios-blue);
+  --el-color-success: var(--ios-green);
+  --el-color-warning: var(--ios-orange);
+  --el-color-danger: var(--ios-red);
+  --el-border-radius-base: 10px;
+  --el-text-color-primary: var(--ios-label);
+  --el-text-color-regular: var(--ios-label);
+  --el-text-color-secondary: var(--ios-label-2);
+  --el-border-color: rgba(60, 60, 67, 0.13);
+  --el-border-color-light: var(--ios-separator);
+  --el-fill-color-blank: rgba(255, 255, 255, 0.75);
+  --el-bg-color-overlay: rgba(250, 250, 253, 0.92);
+  --el-switch-on-color: var(--ios-green);
+  --el-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Segoe UI",
+    "Microsoft YaHei", sans-serif;
+}
+
+/* ---------- 壁纸：iOS 风格柔和渐变色块 ---------- */
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden; /* 整页永不滚动：滚动只发生在 el-main 内容区 */
+}
+
+body {
+  margin: 0;
+  color: var(--ios-label);
+  font-family: var(--el-font-family);
+  background-color: #f0f2f8;
+  background-image:
+    radial-gradient(56rem 36rem at 6% -6%, rgba(94, 158, 255, 0.32), transparent 62%),
+    radial-gradient(48rem 34rem at 104% 4%, rgba(175, 142, 255, 0.26), transparent 60%),
+    radial-gradient(52rem 40rem at 46% 118%, rgba(255, 154, 194, 0.13), transparent 62%),
+    radial-gradient(40rem 30rem at -8% 86%, rgba(90, 200, 250, 0.20), transparent 60%),
+    linear-gradient(180deg, #f5f7fc, #f3f5fb);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 主内容区滚动条（总览页长内容在这里滚动） */
+.el-main::-webkit-scrollbar {
+  width: 12px;
+}
+.el-main::-webkit-scrollbar-thumb {
+  background: rgba(60, 60, 67, 0.22);
+  border: 4px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+.el-main::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(60, 60, 67, 0.45);
+}
+.el-main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 玻璃面板工具类 ---------- */
+
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--r-lg);
+}
+.glass.panel { overflow: auto; }
+
+/* 表格内部滚动：使用原生滚动条 + gutter 预留，滚动条永不覆盖内容 */
+.el-table .el-scrollbar__wrap {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.el-table .el-scrollbar__wrap::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.el-table .el-scrollbar__wrap::-webkit-scrollbar-thumb {
+  background: rgba(60, 60, 67, 0.22);
+  border: 4px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+.el-table .el-scrollbar__wrap::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(60, 60, 67, 0.38);
+}
+.el-table .el-scrollbar__wrap::-webkit-scrollbar-track,
+.el-table .el-scrollbar__wrap::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* 隐藏 Element Plus 自绘的覆盖式滚动条（会压在最后一列上） */
+.el-table .el-scrollbar__bar {
+  display: none !important;
+}
+/* 表头不滚动、无 gutter，用等宽 padding 与表体对齐 */
+.el-table .el-table__header-wrapper {
+  padding-right: 8px;
+  box-sizing: border-box;
+}
+
+/* ---------- Element Plus 组件玻璃化 ---------- */
+
+.el-card {
+  --el-card-bg-color: transparent;
+  --el-card-border-color: transparent;
+  --el-card-border-radius: var(--r-lg);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow) !important;
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .el-card:hover {
+    box-shadow: 0 10px 28px rgba(31, 38, 135, 0.09) !important;
+    transform: translateY(-2px);
+  }
+}
+
+.el-card__header {
+  border-bottom: 0.5px solid var(--ios-separator);
+  font-weight: 600;
+  padding: 14px 18px;
+}
+.el-card__body { padding: 16px 18px; }
+
+/* 表格：透明底 + 发丝分隔线（iOS 分组列表质感） */
+.el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: transparent;
+  --el-table-header-text-color: var(--ios-label-2);
+  --el-table-text-color: var(--ios-label);
+  --el-table-row-hover-bg-color: rgba(0, 122, 255, 0.06);
+  --el-table-border-color: transparent;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.el-table .el-table__cell,
+.el-table tr {
+  background: transparent;
+}
+.el-table__inner-wrapper::before,
+.el-table::before {
+  display: none;
+}
+.el-table__footer .el-table__cell {
+  background: transparent;
+  font-weight: 700;
+}
+
+/* 固定列与中间列同底色（透明，透出玻璃面板的浅蓝调）——
+   由 Element Plus 的 var(--el-table-bg-color) 控制，无需额外规则 */
+
+/* 弹窗玻璃 */
+.el-overlay-dialog {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.el-dialog {
+  background: var(--glass-bg-strong) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: 22px;
+  box-shadow: 0 24px 80px rgba(31, 38, 135, 0.25);
+  max-width: 94vw;
+  display: flex;
+  flex-direction: column;
+  margin: auto !important; /* flex 容器里 auto 外边距 = 水平垂直都居中 */
+  max-height: 92vh;
+}
+.el-dialog__header {
+  flex-shrink: 0;
+  padding: 16px 20px 10px;
+  margin-right: 12px; /* 给右上角关闭按钮让位 */
+}
+.el-dialog__body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden; /* 抵消表单栅格 gutter 负边距的几像素横向溢出 */
+}
+.el-dialog__footer {
+  flex-shrink: 0;
+}
+/* 分隔条文字融入玻璃背景（默认白底在毛玻璃上很突兀） */
+.el-dialog .el-divider--horizontal {
+  margin: 18px 0 12px;
+}
+.el-dialog .el-divider__text {
+  background: var(--glass-bg-strong);
+  color: var(--ios-label-2);
+  font-size: 12px;
+}
+.el-dialog__title {
+  font-weight: 700;
+}
+
+.el-overlay {
+  background-color: rgba(18, 32, 68, 0.32) !important;
+}
+
+.el-message-box {
+  border-radius: 18px;
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+}
+
+/* 下拉/浮层玻璃 */
+.el-select__popper.el-popper,
+.el-select-dropdown {
+  background: var(--el-bg-color-overlay) !important;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--r-md) !important;
+}
+
+/* 输入控件 */
+.el-input__wrapper,
+.el-textarea__inner {
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 0 1px rgba(60, 60, 67, 0.16) inset !important;
+}
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.45) inset !important;
+}
+
+/* 按钮微交互（尊重系统减少动态设置） */
+.el-button {
+  font-weight: 600;
+  border-radius: var(--r-md);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .el-button:not(.is-disabled):hover { transform: translateY(-1px); }
+  .el-button--primary:not(.is-disabled):hover {
+    box-shadow: 0 6px 18px rgba(0, 122, 255, 0.36);
+  }
+}
+.el-button--primary {
+  --el-button-bg-color: var(--ios-blue);
+  --el-button-border-color: transparent;
+  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.28);
+}
+
+/* 表头排版 */
+.el-table th.el-table__cell {
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  border-bottom: 0.5px solid transparent !important;
+  border-right: 0.5px solid transparent !important;
+}
+/* 选中行边框淡化 */
+.el-table .el-table__cell.is-selection,
+.el-table .el-table__cell[style*="border"] {
+  border-color: var(--ios-separator) !important;
+}
+/* 去掉 selection 列右侧黑线 */
+.el-table .el-table-column--selection .cell {
+  padding-right: 0;
+}
+.el-table .el-table__cell.el-table-column--selection {
+  border-right: none !important;
+}
+
+/* el-radio-button → iOS 分段控件 */
+.el-radio-group {
+  background: var(--ios-fill);
+  border-radius: 10px;
+  padding: 2px;
+  gap: 2px;
+  --el-radio-button-checked-bg-color: #ffffff;
+  --el-radio-button-checked-text-color: var(--ios-blue);
+}
+.el-radio-button__inner {
+  border: none !important;
+  background: transparent !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ios-label);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.el-radio-button__inner:hover {
+  color: var(--ios-blue);
+  background: rgba(255, 255, 255, 0.65) !important;
+}
+.el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: #ffffff !important;
+  color: var(--ios-blue) !important;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14) !important;
+}
+
+/* 标签：胶囊 */
+.el-tag {
+  border-radius: 7px;
+  border: none;
+  font-weight: 500;
+}
+
+/* 开关：iOS 绿（组件行内样式优先，需要 !important 覆盖） */
+.el-switch.is-checked .el-switch__core {
+  background-color: var(--ios-green) !important;
+  border-color: var(--ios-green) !important;
+}
+
+/* Tabs（设置弹窗）→ 分段控件式 */
+.el-tabs__nav-wrap::after,
+.el-tabs__active-bar { display: none; }
+.el-tabs__nav {
+  background: var(--ios-fill);
+  border-radius: 10px;
+  padding: 2px;
+  width: 100%;
+  display: flex;
+}
+.el-tabs__item {
+  flex: 1;
+  height: 32px;
+  line-height: 32px;
+  border-radius: 8px;
+  color: var(--ios-label);
+  font-weight: 500;
+  padding: 0 !important;
+}
+.el-tabs__item.is-active {
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+  color: var(--ios-blue);
+  font-weight: 600;
+}
+
+/* 状态弹层 / 气泡玻璃化 */
+.el-popover.el-popper {
+  background: var(--el-bg-color-overlay) !important;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--r-md) !important;
+  box-shadow: var(--glass-shadow);
+}
+.el-popper__arrow { display: none; }
+
+/* 弹窗标题图标芯片 */
+.dlg-title { display: flex; align-items: center; gap: 9px; font-size: 16px; }
+.dlg-chip {
+  width: 28px; height: 28px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.dlg-blue { background: linear-gradient(135deg, #0a84ff, #5ac8fa); box-shadow: 0 3px 10px rgba(10, 132, 255, 0.32); }
+.dlg-indigo { background: linear-gradient(135deg, #5856d6, #8e8ef7); box-shadow: 0 3px 10px rgba(88, 86, 214, 0.32); }
+.dlg-teal { background: linear-gradient(135deg, #30b0c7, #64d2ff); box-shadow: 0 3px 10px rgba(48, 176, 199, 0.3); }
+.dlg-green { background: linear-gradient(135deg, #34c759, #7ce38b); box-shadow: 0 3px 10px rgba(52, 199, 89, 0.3); }
+.dlg-orange { background: linear-gradient(135deg, #ff9f0a, #ffd60a); box-shadow: 0 3px 10px rgba(255, 159, 10, 0.32); }
+
+/* 日期选择器：月份导航玻璃化 */
+.el-date-picker .el-date-picker__header-label-group .el-date-picker__header-label,
+.el-date-picker .el-picker-panel__content {
+  border-radius: 12px;
+}
+.el-date-picker .el-date-picker__header {
+  background: transparent;
+  border-radius: 12px 12px 0 0;
+  padding: 10px 16px 8px;
+  border-bottom: none !important;
+}
+.el-date-picker .el-picker-panel__content {
+  padding: 4px;
+}
+.el-date-picker .el-date-table td.today > .el-date-table-cell {
+  background: rgba(0, 122, 255, 0.08);
+  border-radius: 8px;
+}
+
+/* 轻提示：玻璃胶囊 */
+.el-message {
+  border-radius: 999px;
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow);
+  top: 72px !important;
+  z-index: 9999;
+}
+
+/* iOS 弹窗式确认框：居中排版 + 发丝分隔按钮 */
+.el-overlay {
+  background-color: rgba(18, 32, 68, 0.32) !important;
+}
+
+.el-message-box {
+  width: 360px !important;
+  max-width: 360px !important;
+  min-width: auto;
+  padding: 18px 20px 16px;
+  border-radius: 20px;
+  background: var(--glass-bg-strong) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 24px 80px rgba(31, 38, 135, 0.25);
+}
+/* 覆盖 EP 默认宽度 */
+.el-message-box__wrapper {
+  width: auto !important;
+}
+.el-message-box__header {
+  padding: 0 0 10px;
+}
+.el-message-box__title {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ios-label);
+}
+.el-message-box__content {
+  color: var(--ios-label-2);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 0;
+}
+.el-message-box__btns {
+  display: flex;
+  border-top: 0.5px solid var(--ios-separator);
+  padding: 12px 0 8px;
+  margin-top: 14px;
+  gap: 10px;
+}
+.el-message-box__btns .el-button {
+  flex: 1;
+  border-radius: 10px !important;
+  padding: 10px 0;
+  font-weight: 600;
+  font-size: 14px;
+}
+.el-message-box__btns .el-button--default {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border: 1px solid var(--ios-separator) !important;
+}
+.el-message-box__btns .el-button--primary {
+  background: var(--ios-blue) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* 键盘焦点可见性 */
+:focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.55);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* 空状态 */
+.el-empty__description p { color: var(--ios-label-3); }
+
+/* 加载遮罩：默认是 90% 不透明白，切换页面时会整片闪白 → 换成玻璃薄纱 + 更快淡出 */
+.el-loading-mask {
+  --el-mask-color: rgba(255, 255, 255, 0.22);
+  -webkit-backdrop-filter: blur(3px) saturate(140%);
+  backdrop-filter: blur(3px) saturate(140%);
+  transition: opacity 0.12s ease;
+}
+.el-loading-spinner .circular { width: 26px; height: 26px; }
+
+/* 页面切换微过渡（尊重减少动态设置） */
+.page-enter-active,
+.page-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.page-enter-from { opacity: 0; transform: translateY(5px); }
+.page-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active { transition: none; }
+}
+
+/* 消息提示跟随主色即可，无需额外处理 */
+
+/* ====== 表格彻底无边框（EP2 表头/表体所有 cell） ====== */
+.el-table td.el-table__cell,
+.el-table th.el-table__cell,
+.el-table .el-table__cell,
+.el-table th.el-table__cell > .cell,
+.el-table td.el-table__cell > .cell {
+  border-right: none !important;
+  border-left: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+}
+.el-table .el-table-column--selection.el-table__cell,
+.el-table .el-table-column--selection .cell,
+.el-table .el-table__inner-wrapper tr > td:first-child,
+.el-table .el-table__inner-wrapper tr > th:first-child {
+  border-right: none !important;
+  border-left: none !important;
+}
+/* 表头底部分隔线（唯一可见线） */
+.el-table thead .el-table__cell {
+  border-bottom: 0.5px solid rgba(60, 60, 67, 0.09) !important;
+}
+/* EP 表格 inner-wrapper 边框覆盖 */
+.el-table__inner-wrapper { border: none !important; }
+.el-table { border: none !important; }
+.el-table__header-wrapper,
+.el-table__body-wrapper,
+.el-table__footer-wrapper { border: none !important; }
+
+/* EP 表格内边框覆盖 */
+.el-table .el-table__inner-wrapper .el-table__cell,
+.el-table .el-table__header .el-table__cell,
+.el-table .el-table__body .el-table__cell {
+  border-right: none !important;
+}
+.el-table .el-table-column--selection.el-table__cell,
+.el-table .el-table-column--selection .cell {
+  border-right: transparent !important;
+  border-bottom: transparent !important;
+}
+.el-table thead .el-table__cell {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+
+/* ====== 日期选择器月份导航彻底无边框 ====== */
+.el-date-picker__header,
+.el-date-picker .el-date-picker__header,
+.el-date-picker .el-date-picker__header-label,
+.el-picker-panel .el-date-picker__header,
+.el-picker-panel .el-date-picker__header-label,
+.el-picker-panel .el-picker-panel__header {
+  border-bottom: none !important;
+  border: none !important;
+  background: transparent !important;
+}
+.el-date-picker .el-date-picker__header-label-group .el-date-picker__header-label {
+  border: none !important;
+}
+.el-picker-panel__content {
+  border-top: none !important;
+}
+
+/* ====== 表格表头/数据区间距优化 ====== */
+.el-table .el-table__header-wrapper {
+  min-height: auto !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+}
+.el-table .el-table__header {
+  min-height: auto !important;
+}
+.el-table .el-table__body-wrapper {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+.el-table .el-table__row td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
