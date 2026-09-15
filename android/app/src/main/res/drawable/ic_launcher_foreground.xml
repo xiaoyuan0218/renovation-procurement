@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 清单卡片：蓝到青的渐变玻璃板 -->
+    <path
+        android:pathData="M36,30 h36 a9,9 0 0 1 9,9 v33 a9,9 0 0 1 -9,9 h-36 a9,9 0 0 1 -9,-9 v-33 a9,9 0 0 1 9,-9 z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="27"
+                android:startY="30"
+                android:endX="81"
+                android:endY="81">
+                <item android:offset="0" android:color="#FF2E7BFF" />
+                <item android:offset="0.5" android:color="#FF22D3EE" />
+                <item android:offset="1" android:color="#FF4F46E5" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- 挂夹 -->
+    <path
+        android:pathData="M47,24 h14 a4,4 0 0 1 4,4 v3 h-22 v-3 a4,4 0 0 1 4,-4 z"
+        android:fillColor="#FFE8EEF9" />
+    <!-- 勾 -->
+    <path
+        android:pathData="M40,53 l6,6 l13,-13"
+        android:strokeColor="#FF07142B"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- 第二条待办 -->
+    <path
+        android:pathData="M40,68 h22"
+        android:strokeColor="#CC07142B"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round" />
+</vector>

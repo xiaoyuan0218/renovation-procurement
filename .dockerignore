@@ -8,6 +8,11 @@ frontend/node_modules/
 data/
 seed/
 screenshots/
+# 安卓客户端不参与镜像构建：把整个目录挡在构建上下文外，
+# 否则 android/.gradle 与 app/build 会给每次 docker build 凭空加几百 MB
+android/
+dist/
+screenshots-android/
 __pycache__/
 *.pyc
 .pytest_cache/

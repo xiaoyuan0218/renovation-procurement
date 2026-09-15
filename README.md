@@ -40,6 +40,30 @@ Windows 下也可直接双击根目录的 `启动服务.bat`（前台）或 `启
 
 > 注意：改**后端**代码需要重启服务才会生效（uvicorn 未开 `--reload`）。
 
+## 安卓 App
+
+`android/` 下是同一套数据的原生安卓客户端（Kotlin + Jetpack Compose），功能对齐网页版：总览看板、物料清单（增删改 + 记一笔采购）、布点矩阵（列表 / 矩阵双模式）、房间与类目管理、Excel 导入导出。**后端不需要任何改动**。
+
+**服务器地址可自定义**：首次启动填写后端地址，之后可在「设置」里随时修改，改完立即生效、不用重启。地址规则很宽松 —— 省略 `http://` 和端口都行，默认按 `8000` 处理，输入时界面会实时回显最终连接的地址（如「将连接到 `http://192.168.1.9:8000`」）。连接失败时会明确显示连的是哪个地址，并提供「重试」与「修改地址」。
+
+### 构建
+
+```bash
+cd android
+./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleRelease    # 经 R8 压缩，约 1.9MB
+```
+
+需要 JDK 17 与 Android SDK（platform 35 / build-tools 35）。SDK 路径写在 `android/local.properties`（该文件不入库）；依赖仓库配置了阿里云镜像，国内网络可直接构建。
+
+### 安装与使用
+
+把 APK 传到手机点击安装即可（debug 与 release 都使用 debug 签名，个人自用足够）。手机需与后端在同一个局域网。模拟器里调试宿主机上的后端，地址填 `10.0.2.2:8000`。
+
+界面是深色玻璃拟态 + 霓虹蓝配色，视觉规范见 [`android/DESIGN.md`](android/DESIGN.md)。
+
+也可以由 GitHub Actions 自动构建：`.github/workflows/android.yml` 在 `android/` 有改动时产出 APK artifact。
+
 ## Docker 部署
 
 镜像由 GitHub Actions 构建并推送到 GitHub Container Registry，`main` 分支每次推送自动更新：
@@ -123,6 +147,7 @@ backend/    FastAPI + SQLAlchemy + SQLite
               walkthrough.py 功能走查、measure_layout.py 布局回归
   tests/      pytest
 frontend/   Vue3 + Vite + Element Plus + ECharts（总览 / 物料清单 / 布点矩阵）
+android/    Kotlin + Jetpack Compose 原生客户端（服务器地址可自定义）
 data/       renovation.db（运行时生成，备份拷这个文件即可）
 ```
 
@@ -132,3 +157,4 @@ data/       renovation.db（运行时生成，备份拷这个文件即可）
 - **采购状态**由采购记录推导：未买 / 部分已买 / 已买完；无数量需求时显示"无需采购"
 - **表格撑满容器**：面板 flex 布局 + 独立滚动视口 + `ResizeObserver` 同步 `<el-table :height>`，表头固定、只有内容区滚动
 - **玻璃卡片间隙**：阴影用负 spread 只向下投射，避免相邻卡片阴影在窄缝里叠加成灰条
+- **安卓端口径一致**：客户端把 `compute.py` 的公式复刻了一份用于表单实时预览，但保存后的权威结果始终以后端返回为准；任何写操作成功后只发一个版本号，各页面据此重新拉数据

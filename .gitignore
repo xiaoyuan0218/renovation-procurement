@@ -9,6 +9,8 @@ backend/tests/test_import_original.py
 .venv/
 node_modules/
 frontend/dist/
+# APK 分发目录（构建产物，用 GitHub Release 或 Actions artifact 分发）
+/dist/
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -11,7 +11,11 @@ on:
       - ".gitignore"
       - ".gitattributes"
       - "screenshots/**"
+      - "screenshots-android/**"
       - "seed/**"
+      # 安卓客户端是独立产物，改动它不该重建后端镜像（它有自己的 android.yml）
+      - "android/**"
+      - "dist/**"
   workflow_dispatch:
 
 env:
