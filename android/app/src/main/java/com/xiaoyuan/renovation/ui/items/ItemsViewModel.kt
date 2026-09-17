@@ -24,7 +24,7 @@ enum class StatusFilter(val label: String) {
     Done("已买完"),
 }
 
-/** 清单页需要的数据：物料 + 类目（筛选下拉）+ 房间（编辑弹层里用）。 */
+/** 清单页需要的数据：物料 + 分类（筛选下拉）+ 分组（编辑弹层里用）。 */
 data class ItemsData(
     val items: List<ItemDto> = emptyList(),
     val categories: List<CategoryDto> = emptyList(),
@@ -154,7 +154,7 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
             _busy.value = true
             when (val result = repo.batchDeleteItems(ids)) {
                 is ApiResult.Ok -> {
-                    _message.value = "已删除 ${result.data.deleted} 项物料"
+                    _message.value = "已移入回收站 ${result.data.deleted} 项（设置 → 回收站里可恢复）"
                     _selected.value = emptySet()
                     _selectionMode.value = false
                     load()
@@ -172,7 +172,7 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
             _busy.value = true
             when (val result = repo.deleteItem(id)) {
                 is ApiResult.Ok -> {
-                    _message.value = "已删除"
+                    _message.value = "已移入回收站（设置 → 回收站里可恢复）"
                     load()
                     onDone()
                 }
@@ -185,17 +185,15 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
 
     /* ---------- 记一笔采购 ---------- */
 
+    /** 记一笔采购：整条 RecordInDto 传进来，商家/订单号/涉及分组都在里面。 */
     fun addRecord(
         itemId: Int,
-        qty: Double,
-        amount: Double,
-        date: String,
-        note: String,
+        body: RecordInDto,
         onDone: () -> Unit = {},
     ) {
         viewModelScope.launch {
             _busy.value = true
-            val result = repo.addRecord(itemId, RecordInDto(qty = qty, amount = amount, date = date, note = note))
+            val result = repo.addRecord(itemId, body)
             when (result) {
                 is ApiResult.Ok -> {
                     _message.value = "已记录一笔"

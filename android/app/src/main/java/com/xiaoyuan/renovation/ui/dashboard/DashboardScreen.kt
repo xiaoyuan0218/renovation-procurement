@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +51,7 @@ import com.xiaoyuan.renovation.ui.design.GlassDivider
 import com.xiaoyuan.renovation.ui.design.GlassIconButton
 import com.xiaoyuan.renovation.ui.design.LoadingState
 import com.xiaoyuan.renovation.ui.design.SectionTitle
+import com.xiaoyuan.renovation.ui.design.StatFootnote
 import com.xiaoyuan.renovation.ui.design.StatTile
 import com.xiaoyuan.renovation.ui.design.TagPill
 import com.xiaoyuan.renovation.ui.theme.Ink
@@ -105,7 +107,7 @@ private fun DashboardContent(
     ) {
         Spacer(Modifier.height(12.dp))
         BrandHeader(
-            title = "装修采购",
+            title = "采购清单",
             subtitle = "共 ${totals.itemCount} 项物料 · 未买齐 ${totals.pendingCount} 项",
             trailing = {
                 GlassIconButton(
@@ -137,6 +139,8 @@ private fun DashboardContent(
                 accent = Ink.Blue,
                 caption = "${totals.itemCount} 项物料 · ${totals.pendingCount} 项未买齐",
                 modifier = Modifier.weight(1f).fillMaxHeight(),
+                // 两张合计卡没有可拆的数字，用留白补齐副行数，四张卡才会一样高
+                footnotes = listOf(null, null),
             )
             StatTile(
                 label = "日常价合计",
@@ -144,6 +148,7 @@ private fun DashboardContent(
                 accent = Ink.Indigo,
                 caption = savingCaption(totals.listTotal, totals.discountTotal),
                 modifier = Modifier.weight(1f).fillMaxHeight(),
+                footnotes = listOf(null, null),
             )
         }
         Spacer(Modifier.height(12.dp))
@@ -168,6 +173,18 @@ private fun DashboardContent(
                         color = Ink.Mint,
                     )
                 },
+                footnotes = listOf(
+                    StatFootnote(
+                        label = "实际优惠",
+                        value = Fmt.money(totals.actualDiscountTotal),
+                        valueColor = savingColor(totals.actualDiscountTotal),
+                    ),
+                    StatFootnote(
+                        label = "日常价优惠",
+                        value = Fmt.money(totals.dailyDiscountTotal),
+                        valueColor = savingColor(totals.dailyDiscountTotal),
+                    ),
+                ),
             )
             StatTile(
                 label = "未付",
@@ -175,6 +192,14 @@ private fun DashboardContent(
                 accent = Ink.Amber,
                 caption = "未买清单 ${totals.pendingCount} 项",
                 modifier = Modifier.weight(1f).fillMaxHeight(),
+                footnotes = listOf(
+                    StatFootnote(
+                        label = "日常价未付",
+                        value = Fmt.money(totals.dailyUnpaidTotal),
+                        valueColor = Ink.Cyan,
+                    ),
+                    null,
+                ),
             )
         }
 
@@ -248,10 +273,10 @@ private fun DashboardContent(
             )
         }
 
-        /* ---------- 类目对比柱状图 ---------- */
+        /* ---------- 分类对比柱状图 ---------- */
         if (summary.byCategory.isNotEmpty()) {
             Spacer(Modifier.height(22.dp))
-            SectionTitle("类目对比", caption = "原价 / 日常价 / 实付")
+            SectionTitle("分类对比", caption = "原价 / 日常价 / 实付")
             Spacer(Modifier.height(12.dp))
             GlassCard {
                 val cats = summary.byCategory.sortedByDescending { it.listTotal }.take(6)
@@ -266,14 +291,14 @@ private fun DashboardContent(
             }
         }
 
-        /* ---------- 房间金额分布 ---------- */
+        /* ---------- 分组金额分布 ---------- */
         val roomBars = summary.byRoom
             .filter { it.listTotal > 0 }
             .sortedByDescending { it.listTotal }
             .take(8)
         if (roomBars.isNotEmpty()) {
             Spacer(Modifier.height(22.dp))
-            SectionTitle("房间金额分布", caption = "按原价口径，最多显示 8 个房间")
+            SectionTitle("分组金额分布", caption = "按原价口径，最多显示 8 个分组")
             Spacer(Modifier.height(12.dp))
             GlassCard {
                 HorizontalBarChart(
@@ -397,3 +422,6 @@ private fun savingCaption(listTotal: Double, discountTotal: Double): String {
     val diff = listTotal - discountTotal
     return if (diff > 0.01) "比原价省 ${Fmt.money(diff)}" else "与预算持平"
 }
+
+/** 优惠是「省下的钱」，为负说明实付价高于原价/日常价，用警示色而非隐藏。 */
+private fun savingColor(amount: Double): Color = if (amount < 0) Ink.Amber else Ink.Mint

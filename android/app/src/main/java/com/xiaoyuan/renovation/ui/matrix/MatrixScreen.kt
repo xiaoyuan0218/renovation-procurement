@@ -117,7 +117,7 @@ fun MatrixScreen(
     }
 
     when (val current = state) {
-        is LoadState.Loading -> LoadingState(text = "正在读取布点…")
+        is LoadState.Loading -> LoadingState(text = "正在读取分配…")
 
         is LoadState.Failed -> ErrorState(
             message = current.message,
@@ -135,8 +135,8 @@ fun MatrixScreen(
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     Spacer(Modifier.height(12.dp))
                     com.xiaoyuan.renovation.ui.design.BrandHeader(
-                        title = "布点矩阵",
-                        subtitle = "${data.rooms.size} 个房间 · ${data.items.size} 项物料",
+                        title = "分配矩阵",
+                        subtitle = "${data.rooms.size} 个分组 · ${data.items.size} 项物料",
                         trailing = {
                             GlassIconButton(
                                 icon = Icons.Filled.Refresh,
@@ -221,7 +221,7 @@ fun MatrixScreen(
     addingTo?.let { item ->
         val used = item.cells.keys.mapNotNull { it.toIntOrNull() }.toSet()
         RoomPickerSheet(
-            title = "为「${item.name}」选择房间",
+            title = "为「${item.name}」选择分组",
             rooms = (state.dataOrNull?.rooms ?: emptyList()).filter { it.id !in used },
             onDismiss = { addingTo = null },
             onPick = { room ->
@@ -293,7 +293,7 @@ private fun ModeChip(
 private fun LegendRow() {
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         LegendItem(Ink.Indigo, "未买齐")
-        LegendItem(Ink.Mint, "该房间已买齐")
+        LegendItem(Ink.Mint, "该分组已买齐")
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
@@ -322,7 +322,7 @@ private fun LegendItem(color: Color, text: String) {
 }
 
 /* ============================================================
-   列表态：一项物料一张卡，房间以标签铺开
+   列表态：一项物料一张卡，分组以标签铺开
    ============================================================ */
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -393,7 +393,7 @@ private fun ListView(
                         val fullyPaid = cell.qty > 0 && cell.paidQty >= cell.qty - 1e-9
                         val color = if (fullyPaid) Ink.Mint else Ink.Indigo
                         AllocationChip(
-                            roomName = room?.name ?: "房间$roomId",
+                            roomName = room?.name ?: "分组$roomId",
                             qty = cell.qty,
                             unit = item.unit,
                             color = color,
@@ -417,7 +417,7 @@ private fun ListView(
                             modifier = Modifier.size(14.dp),
                         )
                         Spacer(Modifier.width(4.dp))
-                        Text("房间", fontSize = 12.sp, color = Ink.Blue)
+                        Text("分组", fontSize = 12.sp, color = Ink.Blue)
                     }
                 }
 
@@ -486,7 +486,7 @@ private fun AllocationChip(
 }
 
 /* ============================================================
-   矩阵态：冻结物料列 + 房间列横滑 + 底部合计行
+   矩阵态：冻结物料列 + 分组列横滑 + 底部合计行
    ============================================================ */
 
 @Composable
@@ -618,7 +618,7 @@ private fun GridView(
         }
 
         Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            HintText("左右滑动查看各房间；点格子填数量、覆盖单价与备注。")
+            HintText("左右滑动查看各分组；点格子填数量、覆盖单价与备注。")
         }
     }
 }
@@ -689,7 +689,7 @@ private fun MatrixCellBox(
 }
 
 /* ============================================================
-   弹层：改布点 / 选房间
+   弹层：改分配 / 选分组
    ============================================================ */
 
 @Composable
@@ -717,7 +717,7 @@ private fun CellEditSheet(
                 value = qty,
                 onValueChange = { qty = it },
                 label = "数量",
-                placeholder = "0 表示不在该房间",
+                placeholder = "0 表示不在该分组",
                 modifier = Modifier.weight(1f),
             )
             AppNumberField(
@@ -738,12 +738,12 @@ private fun CellEditSheet(
             accent = Ink.Indigo,
         )
         Spacer(Modifier.height(8.dp))
-        HintText("数量填 0 即清空这个房间的布点。")
+        HintText("数量填 0 即清空这个分组的分配。")
 
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             GhostButton(
-                text = "清空布点",
+                text = "清空分配",
                 onClick = { onSave(0.0, null, "") },
                 enabled = cell != null && !saving,
                 contentColor = Ink.DangerSoft,
@@ -770,7 +770,7 @@ private fun RoomPickerSheet(
 ) {
     GlassBottomSheet(title = title, onDismiss = onDismiss) {
         if (rooms.isEmpty()) {
-            EmptyState(title = "所有房间都排过了", hint = "到「设置」里可以新增房间")
+            EmptyState(title = "所有分组都排过了", hint = "到「设置」里可以新增分组")
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rooms.forEach { room ->

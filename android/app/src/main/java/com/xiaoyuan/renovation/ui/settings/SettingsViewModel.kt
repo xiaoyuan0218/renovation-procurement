@@ -5,14 +5,19 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xiaoyuan.renovation.data.model.CategoryDto
+import com.xiaoyuan.renovation.data.model.ExpenseDto
+import com.xiaoyuan.renovation.data.model.ExpenseInDto
 import com.xiaoyuan.renovation.data.model.ImportReportDto
+import com.xiaoyuan.renovation.data.model.ItemDto
 import com.xiaoyuan.renovation.data.model.RoomDto
+import com.xiaoyuan.renovation.data.model.TrashItemDto
 import com.xiaoyuan.renovation.data.prefs.SettingsStore
 import com.xiaoyuan.renovation.data.repo.ApiResult
 import com.xiaoyuan.renovation.data.repo.RenovationRepository
 import com.xiaoyuan.renovation.data.repo.okData
 import com.xiaoyuan.renovation.ui.common.LoadState
 import com.xiaoyuan.renovation.util.FileUtils
+import com.xiaoyuan.renovation.util.Fmt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +26,12 @@ import kotlinx.coroutines.launch
 data class SettingsData(
     val rooms: List<RoomDto> = emptyList(),
     val categories: List<CategoryDto> = emptyList(),
+    /** 回收站里的条目（删掉的物料，可以捞回来） */
+    val trash: List<TrashItemDto> = emptyList(),
+    /** 额外费用：运费/安装费这类不进单价的支出 */
+    val expenses: List<ExpenseDto> = emptyList(),
+    /** 费用可以关联到某条物料的货，这里给它备着选项 */
+    val items: List<ItemDto> = emptyList(),
 )
 
 /** 导入方式：覆盖 or 按名称合并。 */
@@ -71,6 +82,12 @@ class SettingsViewModel(
         }
     }
 
+    /** 动作完之后刷新：先把闸门放开，否则连着的 load() 会被挡掉 */
+    fun reload() {
+        loading = false
+        load()
+    }
+
     fun load() {
         if (loading) return
         loading = true
@@ -78,7 +95,11 @@ class SettingsViewModel(
             if (_state.value !is LoadState.Ready) _state.value = LoadState.Loading
             val roomsResult = repo.rooms()
             val categoriesResult = repo.categories()
-            val failure = listOf(roomsResult, categoriesResult)
+            val trashResult = repo.trash()
+            val expensesResult = repo.expenses()
+            // 关联物料只是费用表单里的选填项，拉不到不影响页面
+            val itemsResult = repo.items()
+            val failure = listOf(roomsResult, categoriesResult, trashResult, expensesResult)
                 .filterIsInstance<ApiResult.Err>()
                 .firstOrNull()
 
@@ -89,6 +110,9 @@ class SettingsViewModel(
                     SettingsData(
                         rooms = roomsResult.okData.orEmpty(),
                         categories = categoriesResult.okData.orEmpty(),
+                        trash = trashResult.okData.orEmpty(),
+                        expenses = expensesResult.okData.orEmpty(),
+                        items = itemsResult.okData.orEmpty(),
                     ),
                 )
             }
@@ -116,7 +140,7 @@ class SettingsViewModel(
         }
     }
 
-    /* ---------- 房间 ---------- */
+    /* ---------- 分组 ---------- */
 
     fun addRoom(name: String) {
         val trimmed = name.trim()
@@ -125,7 +149,7 @@ class SettingsViewModel(
             _busy.value = true
             when (val result = repo.createRoom(trimmed)) {
                 is ApiResult.Ok -> {
-                    _message.value = "已添加房间「${result.data.name}」"
+                    _message.value = "已添加分组「${result.data.name}」"
                     load()
                 }
 
@@ -157,7 +181,7 @@ class SettingsViewModel(
             _busy.value = true
             when (val result = repo.deleteRoom(id)) {
                 is ApiResult.Ok -> {
-                    _message.value = "已删除房间"
+                    _message.value = "已删除分组"
                     load()
                     onDone()
                 }
@@ -168,7 +192,7 @@ class SettingsViewModel(
         }
     }
 
-    /* ---------- 类目 ---------- */
+    /* ---------- 分类 ---------- */
 
     fun addCategory(name: String) {
         val trimmed = name.trim()
@@ -177,7 +201,7 @@ class SettingsViewModel(
             _busy.value = true
             when (val result = repo.createCategory(trimmed)) {
                 is ApiResult.Ok -> {
-                    _message.value = "已添加类目「${result.data.name}」"
+                    _message.value = "已添加分类「${result.data.name}」"
                     load()
                 }
 
@@ -209,7 +233,7 @@ class SettingsViewModel(
             _busy.value = true
             when (val result = repo.deleteCategory(id)) {
                 is ApiResult.Ok -> {
-                    _message.value = "已删除类目"
+                    _message.value = "已删除分类"
                     load()
                     onDone()
                 }
@@ -228,7 +252,7 @@ class SettingsViewModel(
 
     /** 导出 xlsx 并唤起系统分享（可存文件、发微信、发邮件）。 */
     fun exportToShare() {
-        downloadAndShare(fallbackName = "装修采购清单.xlsx", isTemplate = false)
+        downloadAndShare(fallbackName = "采购清单.xlsx", isTemplate = false)
     }
 
     fun downloadTemplateToShare() {
@@ -250,7 +274,7 @@ class SettingsViewModel(
                             context = appContext,
                             uri = written.second,
                             mime = RenovationRepository.XLSX_MIME,
-                            title = if (isTemplate) "分享导入模板" else "分享装修采购清单",
+                            title = if (isTemplate) "分享导入模板" else "分享采购清单",
                         )
                         _message.value = if (shared) {
                             "已生成 ${written.first.name}（${file.bytes.size / 1024} KB）"
@@ -296,5 +320,69 @@ class SettingsViewModel(
 
     fun consumeMessage() {
         _message.value = null
+    }
+
+    /* ---------- 回收站 ---------- */
+
+    fun restoreItem(id: Int) {
+        viewModelScope.launch {
+            when (val r = repo.restoreItem(id)) {
+                is ApiResult.Ok -> {
+                    _message.value = "已恢复「${r.data.name}」"
+                    reload()
+                }
+                is ApiResult.Err -> _message.value = r.message
+            }
+        }
+    }
+
+    fun purgeItem(id: Int) {
+        viewModelScope.launch {
+            when (val r = repo.purgeItem(id)) {
+                is ApiResult.Ok -> {
+                    _message.value = "已彻底删除（分配与采购记录一并清掉）"
+                    reload()
+                }
+                is ApiResult.Err -> _message.value = r.message
+            }
+        }
+    }
+
+    fun purgeTrash() {
+        viewModelScope.launch {
+            when (val r = repo.purgeTrash()) {
+                is ApiResult.Ok -> {
+                    _message.value = "已清空回收站（${r.data.deleted} 条）"
+                    reload()
+                }
+                is ApiResult.Err -> _message.value = r.message
+            }
+        }
+    }
+
+    /* ---------- 额外费用 ---------- */
+
+    fun addExpense(body: ExpenseInDto) {
+        viewModelScope.launch {
+            when (val r = repo.createExpense(body)) {
+                is ApiResult.Ok -> {
+                    _message.value = "已记一笔 ${r.data.kind} ${Fmt.money(r.data.amount)}"
+                    reload()
+                }
+                is ApiResult.Err -> _message.value = r.message
+            }
+        }
+    }
+
+    fun deleteExpense(id: Int) {
+        viewModelScope.launch {
+            when (val r = repo.deleteExpense(id)) {
+                is ApiResult.Ok -> {
+                    _message.value = "已删除这笔费用"
+                    reload()
+                }
+                is ApiResult.Err -> _message.value = r.message
+            }
+        }
     }
 }

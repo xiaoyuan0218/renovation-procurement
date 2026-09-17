@@ -40,6 +40,7 @@ import com.xiaoyuan.renovation.data.model.statusLabel
 import com.xiaoyuan.renovation.di.AppContainer
 import com.xiaoyuan.renovation.ui.common.containerViewModel
 import com.xiaoyuan.renovation.ui.design.AppDateField
+import com.xiaoyuan.renovation.ui.design.MultiChoiceChips
 import com.xiaoyuan.renovation.ui.design.AppNumberField
 import com.xiaoyuan.renovation.ui.design.AppSelect
 import com.xiaoyuan.renovation.ui.design.AppTextField
@@ -63,7 +64,7 @@ import kotlinx.coroutines.delay
 
 /**
  * 新增 / 编辑物料的全屏页。
- * 手机上放不下网页版那个四列弹窗，所以整页展开：基础信息 + 价格 + 采购记录 + 布点明细。
+ * 手机上放不下网页版那个四列弹窗，所以整页展开：基础信息 + 价格 + 采购记录 + 分配明细。
  */
 @Composable
 fun ItemEditScreen(
@@ -181,7 +182,7 @@ fun ItemEditScreen(
                             }
                             Spacer(Modifier.height(12.dp))
                             AppSelect(
-                                label = "类目",
+                                label = "分类",
                                 items = categories,
                                 selected = categories.firstOrNull { it.id == form.categoryId },
                                 itemLabel = { it.name },
@@ -204,7 +205,7 @@ fun ItemEditScreen(
                                     onValueChange = { v -> vm.edit { it.copy(qtyTotal = v) } },
                                     label = "数量",
                                     enabled = !form.hasAllocations,
-                                    supportingText = if (form.hasAllocations) "总量由布点合计决定" else null,
+                                    supportingText = if (form.hasAllocations) "总量由分配合计决定" else null,
                                     modifier = Modifier.weight(1f),
                                 )
                             }
@@ -323,6 +324,49 @@ fun ItemEditScreen(
                                     onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(date = v) } },
                                     showQuickChips = false,
                                 )
+                                // 这条记录涉及哪几间：只列这条物料分到的分组
+                                val rowRooms = rooms.filter { r ->
+                                    form.allocations.any { it.roomId == r.id }
+                                }
+                                if (rowRooms.isNotEmpty()) {
+                                    Spacer(Modifier.height(10.dp))
+                                    HintText("涉及分组（勾了谁就只往谁身上算）")
+                                    Spacer(Modifier.height(6.dp))
+                                    MultiChoiceChips(
+                                        options = rowRooms.map { it.id to it.name },
+                                        selected = row.roomIds,
+                                        onToggle = { id ->
+                                            vm.updateRecordRow(row.key) {
+                                                it.copy(
+                                                    roomIds = if (id in it.roomIds) {
+                                                        it.roomIds - id
+                                                    } else {
+                                                        it.roomIds + id
+                                                    },
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    AppTextField(
+                                        value = row.vendor,
+                                        onValueChange = { v ->
+                                            vm.updateRecordRow(row.key) { it.copy(vendor = v) }
+                                        },
+                                        label = "商家",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AppTextField(
+                                        value = row.orderNo,
+                                        onValueChange = { v ->
+                                            vm.updateRecordRow(row.key) { it.copy(orderNo = v) }
+                                        },
+                                        label = "订单号",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                                 Spacer(Modifier.height(10.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     AppTextField(
@@ -352,12 +396,12 @@ fun ItemEditScreen(
                         }
                     }
 
-                    /* ---------- 布点明细 ---------- */
+                    /* ---------- 分配明细 ---------- */
                     Column {
                         SectionTitle(
-                            title = "布点（按房间）",
+                            title = "分配（按分组）",
                             caption = if (form.allocations.isEmpty()) {
-                                "还没有布点 · 总数量按上面的数量字段走"
+                                "还没有分配 · 总数量按上面的数量字段走"
                             } else {
                                 "共 ${Fmt.qtyUnit(preview.totalQty, form.unit)} · 原价小计 ${Fmt.money(preview.listTotal)}"
                             },
@@ -372,7 +416,7 @@ fun ItemEditScreen(
                         Spacer(Modifier.height(10.dp))
                         if (form.allocations.isEmpty()) {
                             GlassCard(corner = 16.dp) {
-                                HintText("填了布点后，总数量会自动按各房间加起来，数量输入框会锁定。")
+                                HintText("填了分配后，总数量会自动按各分组加起来，数量输入框会锁定。")
                             }
                         }
                         form.allocations.forEach { row ->
@@ -384,14 +428,14 @@ fun ItemEditScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Box(Modifier.weight(1.1f)) {
                                         AppSelect(
-                                            label = "房间",
+                                            label = "分组",
                                             items = rooms,
                                             selected = rooms.firstOrNull { it.id == row.roomId },
                                             itemLabel = { it.name },
                                             onSelect = { room ->
                                                 vm.updateAllocRow(row.key) { it.copy(roomId = room?.id) }
                                             },
-                                            placeholder = "选房间",
+                                            placeholder = "选分组",
                                             isItemEnabled = { room -> room.id !in usedElsewhere },
                                         )
                                     }
@@ -427,7 +471,7 @@ fun ItemEditScreen(
                                     val unitPrice = Fmt.parseNumber(row.priceOverride)
                                         ?: Fmt.parseNumber(form.price)
                                         ?: 0.0
-                                    HintText("该房间小计 ${Fmt.money(unitPrice * Fmt.parseNumberOrZero(row.qty))}")
+                                    HintText("该分组小计 ${Fmt.money(unitPrice * Fmt.parseNumberOrZero(row.qty))}")
                                     Spacer(Modifier.weight(1f))
                                     GhostButton(
                                         text = "移除",
@@ -450,7 +494,7 @@ fun ItemEditScreen(
                             contentColor = Ink.DangerSoft,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        HintText("删除会连同它的采购记录与布点一起清掉，无法撤销。")
+                        HintText("删除会连同它的采购记录与分配一起清掉，无法撤销。")
                     }
                 }
             }
@@ -459,8 +503,9 @@ fun ItemEditScreen(
 
     if (confirmDelete) {
         ConfirmDialog(
-            title = "删除物料",
-            message = "确定删除「${form.name}」吗？它的 ${form.records.size} 条采购记录与 ${form.allocations.size} 条布点也会一起删除。",
+            title = "移入回收站",
+            message = "把「${form.name}」移入回收站？它的 ${form.records.size} 条采购记录与 "
+                + "${form.allocations.size} 条分配都会留着，之后可以在「设置 → 回收站」里恢复。",
             confirmText = "删除",
             danger = true,
             onConfirm = {

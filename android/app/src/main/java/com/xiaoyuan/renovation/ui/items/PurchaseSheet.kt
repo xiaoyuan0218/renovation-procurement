@@ -35,7 +35,10 @@ import com.xiaoyuan.renovation.data.model.ItemDto
 import com.xiaoyuan.renovation.data.model.statusLabel
 import com.xiaoyuan.renovation.ui.design.AppDateField
 import com.xiaoyuan.renovation.ui.design.AppNumberField
+import com.xiaoyuan.renovation.data.model.RecordInDto
+import com.xiaoyuan.renovation.data.model.RoomDto
 import com.xiaoyuan.renovation.ui.design.AppTextField
+import com.xiaoyuan.renovation.ui.design.MultiChoiceChips
 import com.xiaoyuan.renovation.ui.design.ConfirmDialog
 import com.xiaoyuan.renovation.ui.design.GhostButton
 import com.xiaoyuan.renovation.ui.design.GlassBottomSheet
@@ -55,9 +58,10 @@ import com.xiaoyuan.renovation.util.Fmt
 @Composable
 fun PurchaseSheet(
     item: ItemDto,
+    rooms: List<RoomDto>,
     busy: Boolean,
     onDismiss: () -> Unit,
-    onAdd: (qty: Double, amount: Double, date: String, note: String) -> Unit,
+    onAdd: (RecordInDto) -> Unit,
     onClear: () -> Unit,
     onDeleteRecord: (Int) -> Unit,
 ) {
@@ -66,6 +70,15 @@ fun PurchaseSheet(
     var amount by remember(item.id) { mutableStateOf("") }
     var date by remember(item.id) { mutableStateOf(Fmt.today()) }
     var note by remember(item.id) { mutableStateOf("") }
+    var vendor by remember(item.id) { mutableStateOf("") }
+    var orderNo by remember(item.id) { mutableStateOf("") }
+    var roomIds by remember(item.id) { mutableStateOf<Set<Int>>(emptySet()) }
+
+    // 只能勾这条物料实际分到的分组 —— 归到一个它没分到的分组没有意义
+    val allocRooms = remember(item.id, rooms) {
+        val ids = item.allocations.map { it.roomId }.toSet()
+        rooms.filter { it.id in ids }
+    }
     var confirmClear by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -73,6 +86,12 @@ fun PurchaseSheet(
         // 记录变化后刷新默认值（比如刚点了"付清"）
         if (item.unpaidQty > 0) qty = Fmt.qty(item.unpaidQty)
     }
+
+    fun recordInput(q: Double, a: Double) = RecordInDto(
+        qty = q, amount = a, date = date, note = note.trim(),
+        vendor = vendor.trim(), orderNo = orderNo.trim(),
+        roomIds = roomIds.toList(),
+    )
 
     GlassBottomSheet(
         title = "记一笔采购",
@@ -115,6 +134,41 @@ fun PurchaseSheet(
             Spacer(Modifier.height(12.dp))
             AppDateField(value = date, onValueChange = { date = it })
 
+            if (allocRooms.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "涉及分组（可多选，勾了谁就只往谁身上算）",
+                    color = Ink.TextSecondary,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                MultiChoiceChips(
+                    options = allocRooms.map { it.id to it.name },
+                    selected = roomIds,
+                    onToggle = { id ->
+                        roomIds = if (id in roomIds) roomIds - id else roomIds + id
+                    },
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                AppTextField(
+                    value = vendor,
+                    onValueChange = { vendor = it },
+                    label = "商家",
+                    placeholder = "选填",
+                    modifier = Modifier.weight(1f),
+                )
+                AppTextField(
+                    value = orderNo,
+                    onValueChange = { orderNo = it },
+                    label = "订单号",
+                    placeholder = "选填",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
             Spacer(Modifier.height(12.dp))
             AppTextField(
                 value = note,
@@ -140,7 +194,7 @@ fun PurchaseSheet(
                         } else {
                             error = null
                             val unitPrice = item.discountPrice ?: item.price
-                            onAdd(remaining, remaining * unitPrice, date, note.trim())
+                            onAdd(recordInput(remaining, remaining * unitPrice))
                         }
                     },
                     icon = Icons.Filled.RestartAlt,
@@ -162,7 +216,7 @@ fun PurchaseSheet(
                             q < 0 || a < 0 -> "不能填负数"
                             else -> null
                         }
-                        if (error == null) onAdd(q, a, date, note.trim())
+                        if (error == null) onAdd(recordInput(q, a))
                     },
                     icon = Icons.Filled.Add,
                     enabled = !busy,

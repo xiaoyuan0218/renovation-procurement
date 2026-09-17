@@ -25,7 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xiaoyuan.renovation.ui.theme.Ink
 
-/** 统一的底部弹层：记一笔、改布点、导入选项都用它。 */
+/** 统一的底部弹层：记一笔、改分配、导入选项都用它。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GlassBottomSheet(

@@ -6,9 +6,13 @@ import com.xiaoyuan.renovation.data.model.BatchDeleteResultDto
 import com.xiaoyuan.renovation.data.model.CategoryDto
 import com.xiaoyuan.renovation.data.model.CellSaveResultDto
 import com.xiaoyuan.renovation.data.model.CredentialsInDto
+import com.xiaoyuan.renovation.data.model.ExpenseDto
+import com.xiaoyuan.renovation.data.model.ExpenseInDto
 import com.xiaoyuan.renovation.data.model.ImportReportDto
 import com.xiaoyuan.renovation.data.model.ItemDto
 import com.xiaoyuan.renovation.data.model.ItemInDto
+import com.xiaoyuan.renovation.data.model.ItemListDto
+import com.xiaoyuan.renovation.data.model.ListInDto
 import com.xiaoyuan.renovation.data.model.LoginResultDto
 import com.xiaoyuan.renovation.data.model.MatrixCellInDto
 import com.xiaoyuan.renovation.data.model.MatrixDto
@@ -16,7 +20,9 @@ import com.xiaoyuan.renovation.data.model.NameInDto
 import com.xiaoyuan.renovation.data.model.OkDto
 import com.xiaoyuan.renovation.data.model.RecordInDto
 import com.xiaoyuan.renovation.data.model.RecordPatchDto
+import com.xiaoyuan.renovation.data.model.PurgeResultDto
 import com.xiaoyuan.renovation.data.model.RoomDto
+import com.xiaoyuan.renovation.data.model.TrashItemDto
 import com.xiaoyuan.renovation.data.model.SummaryDto
 import com.xiaoyuan.renovation.data.remote.ApiClientFactory
 import com.xiaoyuan.renovation.data.remote.ApiService
@@ -58,6 +64,49 @@ class RenovationRepository(
 
     suspend fun logout(): ApiResult<OkDto> = call { api.logout() }
 
+    /* ---------- 清单 ---------- */
+
+    suspend fun lists(): ApiResult<List<ItemListDto>> = call { api.lists() }
+
+    /**
+     * 新建清单。[copyFrom] 传另一份清单的 id 时，只把它的分组与分类结构照抄过来
+     * （不带物料），不传就是一张空白清单。
+     */
+    suspend fun createList(name: String, note: String = "", copyFrom: Int? = null): ApiResult<ItemListDto> =
+        mutate { api.createList(ListInDto(name, note, sort = 0, copyFrom = copyFrom)) }
+
+    suspend fun renameList(id: Int, name: String, note: String = "", sort: Int = 0): ApiResult<ItemListDto> =
+        mutate { api.updateList(id, ListInDto(name, note, sort)) }
+
+    /** 删清单会连它里面的物料、分组、分类一起删掉（服务端级联），最后一份不允许删。 */
+    suspend fun deleteList(id: Int): ApiResult<OkDto> = mutate { api.deleteList(id) }
+
+    /* ---------- 额外费用（运费/安装费）----------
+     *
+     * 这类钱独立于物料：不参与原价/日常价的三段拆分，只在总览单独汇总。
+     */
+
+    suspend fun expenses(): ApiResult<List<ExpenseDto>> = call { api.expenses() }
+
+    suspend fun createExpense(body: ExpenseInDto): ApiResult<ExpenseDto> =
+        mutate { api.createExpense(body) }
+
+    suspend fun updateExpense(id: Int, body: ExpenseInDto): ApiResult<ExpenseDto> =
+        mutate { api.updateExpense(id, body) }
+
+    suspend fun deleteExpense(id: Int): ApiResult<OkDto> = mutate { api.deleteExpense(id) }
+
+    /* ---------- 回收站 ---------- */
+
+    suspend fun trash(): ApiResult<List<TrashItemDto>> = call { api.trash() }
+
+    suspend fun restoreItem(id: Int): ApiResult<TrashItemDto> = mutate { api.restoreItem(id) }
+
+    /** 彻底删除：连它的分配与采购记录一起，不可恢复。 */
+    suspend fun purgeItem(id: Int): ApiResult<OkDto> = mutate { api.purgeItem(id) }
+
+    suspend fun purgeTrash(): ApiResult<PurgeResultDto> = mutate { api.purgeTrash() }
+
     /* ---------- 总览 ---------- */
 
     suspend fun summary(): ApiResult<SummaryDto> = call { api.summary() }
@@ -89,7 +138,7 @@ class RenovationRepository(
 
     suspend fun deleteRecord(recordId: Int): ApiResult<ItemDto> = mutate { api.deleteRecord(recordId) }
 
-    /* ---------- 房间 ---------- */
+    /* ---------- 分组 ---------- */
 
     suspend fun rooms(): ApiResult<List<RoomDto>> = call { api.rooms() }
 
@@ -100,7 +149,7 @@ class RenovationRepository(
 
     suspend fun deleteRoom(id: Int): ApiResult<OkDto> = mutate { api.deleteRoom(id) }
 
-    /* ---------- 类目 ---------- */
+    /* ---------- 分类 ---------- */
 
     suspend fun categories(): ApiResult<List<CategoryDto>> = call { api.categories() }
 
@@ -112,7 +161,7 @@ class RenovationRepository(
 
     suspend fun deleteCategory(id: Int): ApiResult<OkDto> = mutate { api.deleteCategory(id) }
 
-    /* ---------- 布点矩阵 ---------- */
+    /* ---------- 分配矩阵 ---------- */
 
     suspend fun matrix(): ApiResult<MatrixDto> = call { api.matrix() }
 
@@ -145,7 +194,7 @@ class RenovationRepository(
     /* ---------- 导入导出 ---------- */
 
     suspend fun downloadExport(): ApiResult<DownloadedFile> = call {
-        readFile(transferApi.export(), "装修采购清单.xlsx")
+        readFile(transferApi.export(), "采购清单.xlsx")
     }
 
     suspend fun downloadTemplate(): ApiResult<DownloadedFile> = call {

@@ -27,10 +27,12 @@ object ApiClientFactory {
     fun create(
         baseUrlProvider: () -> String?,
         tokenProvider: () -> String? = { null },
+        listIdProvider: () -> Int? = { null },
     ): ApiService {
         val client = OkHttpClient.Builder()
             .addInterceptor(DynamicHostInterceptor(baseUrlProvider))
             .addInterceptor(AuthInterceptor(tokenProvider))
+            .addInterceptor(ListInterceptor(listIdProvider))
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -49,11 +51,14 @@ object ApiClientFactory {
     fun createForTransfer(
         baseUrlProvider: () -> String?,
         tokenProvider: () -> String? = { null },
+        listIdProvider: () -> Int? = { null },
     ): ApiService {
         val client = OkHttpClient.Builder()
             .addInterceptor(DynamicHostInterceptor(baseUrlProvider))
             // 导出的 xlsx 与导入模板也要带凭证，否则会 401
             .addInterceptor(AuthInterceptor(tokenProvider))
+            // 导出/导入同样只作用于当前清单
+            .addInterceptor(ListInterceptor(listIdProvider))
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)

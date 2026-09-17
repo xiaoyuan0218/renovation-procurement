@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class SettingsStore(
     private val keyBaseUrl = stringPreferencesKey("base_url")
     private val keyToken = stringPreferencesKey("auth_token")
     private val keyUsername = stringPreferencesKey("auth_username")
+    private val keyListId = intPreferencesKey("current_list_id")
 
     val baseUrl: StateFlow<String?> = context.dataStore.data
         .map { it[keyBaseUrl]?.takeIf { url -> url.isNotBlank() } }
@@ -49,6 +51,15 @@ class SettingsStore(
 
     val username: StateFlow<String?> = context.dataStore.data
         .map { it[keyUsername]?.takeIf { n -> n.isNotBlank() } }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    /**
+     * 当前清单。每个业务请求都会带上它（见 ListInterceptor），后端据此决定动哪一份。
+     * 为 null 时后端落到第一份清单 —— 刚登录还没拉到清单列表时就是这样，
+     * 看到的仍是默认那份（升级前的数据）。
+     */
+    val currentListId: StateFlow<Int?> = context.dataStore.data
+        .map { it[keyListId] }
         .stateIn(scope, SharingStarted.Eagerly, null)
 
     /**
@@ -90,6 +101,10 @@ class SettingsStore(
             it.remove(keyToken)
             it.remove(keyUsername)
         }
+    }
+
+    suspend fun setCurrentListId(id: Int) {
+        context.dataStore.edit { it[keyListId] = id }
     }
 
     /** 首次读取前先等一次磁盘，避免启动瞬间拦截器拿到 null。 */

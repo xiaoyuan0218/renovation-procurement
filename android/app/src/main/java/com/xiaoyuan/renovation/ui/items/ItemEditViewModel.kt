@@ -25,9 +25,13 @@ data class DraftRecord(
     val amount: String = "",
     val date: String = Fmt.today(),
     val note: String = "",
+    val vendor: String = "",
+    val orderNo: String = "",
+    /** 这笔钱涉及的分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 */
+    val roomIds: List<Int> = emptyList(),
 )
 
-/** 编辑中的一条布点。 */
+/** 编辑中的一条分配。 */
 data class DraftAlloc(
     val key: Long,
     val roomId: Int? = null,
@@ -97,7 +101,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
         _form.update(transform)
     }
 
-    /** 首次进入时加载：物料本身（编辑模式）+ 类目 + 房间。 */
+    /** 首次进入时加载：物料本身（编辑模式）+ 分类 + 分组。 */
     fun start(itemId: Int) {
         if (started) return
         started = true
@@ -140,6 +144,9 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
                                     amount = if (it.amount > 0) Fmt.qty(it.amount) else "",
                                     date = it.date,
                                     note = it.note,
+                                    vendor = it.vendor,
+                                    orderNo = it.orderNo,
+                                    roomIds = it.roomIds,
                                 )
                             },
                             allocations = item.allocations.map {
@@ -183,7 +190,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
         }
     }
 
-    /* ---------- 布点行 ---------- */
+    /* ---------- 分配行 ---------- */
 
     fun addAllocRow() {
         _form.update { it.copy(allocations = it.allocations + DraftAlloc(key = nextKey++)) }
@@ -246,6 +253,9 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
                 amount = Fmt.parseNumberOrZero(row.amount),
                 date = row.date.trim(),
                 note = row.note.trim(),
+                vendor = row.vendor.trim(),
+                orderNo = row.orderNo.trim(),
+                roomIds = row.roomIds,
             )
         }
 
@@ -265,7 +275,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
             brand = form.brand.trim(),
             model = form.model.trim(),
             unit = form.unit.trim().ifBlank { "个" },
-            // 有布点时总量由布点决定，这里同步成布点合计，避免两处数字不一致
+            // 有分配时总量由分配决定，这里同步成分配合计，避免两处数字不一致
             qtyTotal = if (allocs.isNotEmpty()) {
                 Compute.totalQty(allocs, 0.0)
             } else {

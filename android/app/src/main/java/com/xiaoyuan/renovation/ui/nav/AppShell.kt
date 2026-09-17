@@ -16,17 +16,30 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DonutLarge
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -48,10 +61,12 @@ import com.xiaoyuan.renovation.di.AppContainer
 import com.xiaoyuan.renovation.ui.common.containerViewModel
 import com.xiaoyuan.renovation.ui.dashboard.DashboardScreen
 import com.xiaoyuan.renovation.ui.dashboard.DashboardViewModel
+import com.xiaoyuan.renovation.ui.lists.NewListDialog
 import com.xiaoyuan.renovation.ui.items.ItemEditScreen
 import com.xiaoyuan.renovation.ui.items.ItemsScreen
 import com.xiaoyuan.renovation.ui.items.ItemsViewModel
 import com.xiaoyuan.renovation.ui.items.NEW_ITEM_ID
+import com.xiaoyuan.renovation.ui.lists.ListsViewModel
 import com.xiaoyuan.renovation.ui.matrix.MatrixScreen
 import com.xiaoyuan.renovation.ui.matrix.MatrixViewModel
 import com.xiaoyuan.renovation.ui.settings.SettingsScreen
@@ -113,56 +128,198 @@ private fun AppShell(
 ) {
     var tab by rememberSaveable { mutableStateOf(ShellTab.Dashboard) }
     val dataVersion by container.dataVersion.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // ViewModel 挂在 "main" 这个导航条目上，切 Tab 不会丢筛选条件与已加载数据
     val dashboardVm: DashboardViewModel = containerViewModel(container) { DashboardViewModel(it.repo) }
     val itemsVm: ItemsViewModel = containerViewModel(container) { ItemsViewModel(it.repo) }
     val matrixVm: MatrixViewModel = containerViewModel(container) { MatrixViewModel(it.repo) }
+    val listsVm: ListsViewModel = containerViewModel(container) {
+        ListsViewModel(it.repo, it.settings, it::bumpDataVersion)
+    }
 
-    Column(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .imePadding(),
-        ) {
-            when (tab) {
-                ShellTab.Dashboard -> DashboardScreen(
-                    vm = dashboardVm,
-                    serverUrl = baseUrl,
-                    refreshKey = dataVersion,
-                    onGoItems = {
-                        itemsVm.focusPending()
-                        tab = ShellTab.Items
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            // 跟着 dataVersion 刷新：加了几条物料之后，下拉里的「X 项」也是新的
+            ListSwitcherBar(listsVm, snackbarHostState, dataVersion)
+
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .imePadding(),
+            ) {
+                when (tab) {
+                    ShellTab.Dashboard -> DashboardScreen(
+                        vm = dashboardVm,
+                        serverUrl = baseUrl,
+                        refreshKey = dataVersion,
+                        onGoItems = {
+                            itemsVm.focusPending()
+                            tab = ShellTab.Items
+                        },
+                        onOpenServerSettings = onEditServerAddress,
+                    )
+
+                    ShellTab.Items -> ItemsScreen(
+                        vm = itemsVm,
+                        serverUrl = baseUrl,
+                        refreshKey = dataVersion,
+                        onEditItem = onEditItem,
+                        onOpenServerSettings = onEditServerAddress,
+                    )
+
+                    ShellTab.Matrix -> MatrixScreen(
+                        vm = matrixVm,
+                        serverUrl = baseUrl,
+                        refreshKey = dataVersion,
+                        onOpenServerSettings = onEditServerAddress,
+                    )
+
+                    ShellTab.Settings -> SettingsScreen(
+                        container = container,
+                        listsVm = listsVm,
+                        refreshKey = dataVersion,
+                        onEditServerAddress = onEditServerAddress,
+                    )
+                }
+            }
+
+            GlassBottomBar(current = tab, onSelect = { tab = it })
+        }
+
+        // 提示浮在最下面（底部导航之上），切换清单/新建清单的结果都从这里冒出来
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 96.dp),
+        )
+    }
+}
+
+/**
+ * 顶部清单切换栏。
+ *
+ * 清单是全局上下文：这里选哪一份，后面所有页面拉到的都是那一份的数据，
+ * 所以它固定在最上面，切 Tab 也一直在。
+ */
+@Composable
+private fun ListSwitcherBar(
+    vm: ListsViewModel,
+    snackbarHostState: SnackbarHostState,
+    refreshKey: Int,
+) {
+    val lists by vm.lists.collectAsStateWithLifecycle()
+    val currentId by vm.currentId.collectAsStateWithLifecycle()
+    val message by vm.message.collectAsStateWithLifecycle()
+    val current = lists.firstOrNull { it.id == currentId } ?: lists.firstOrNull()
+
+    var menuOpen by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+
+    LaunchedEffect(refreshKey) { vm.load() }
+
+    LaunchedEffect(message) {
+        message?.let {
+            vm.clearMessage()
+            snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short)
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Ink.BgMid.copy(alpha = 0.94f))
+            .statusBarsPadding()
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Box {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Ink.GlassFill)
+                    .border(1.dp, Ink.Blue.copy(alpha = 0.28f), RoundedCornerShape(12.dp))
+                    .clickable { menuOpen = true }
+                    .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = current?.name ?: "清单",
+                    color = Ink.TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Icon(
+                    imageVector = Icons.Filled.ArrowDropDown,
+                    contentDescription = "切换清单",
+                    tint = Ink.BlueSoft,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                containerColor = Ink.BgMid,
+            ) {
+                lists.forEach { list ->
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(list.name, color = Ink.TextPrimary, fontSize = 14.sp)
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = "${list.itemCount} 项",
+                                    color = Ink.TextMuted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            if (list.id == currentId) {
+                                Icon(Icons.Filled.Check, null, tint = Ink.Blue, modifier = Modifier.size(18.dp))
+                            }
+                        },
+                        onClick = {
+                            menuOpen = false
+                            vm.select(list.id)
+                        },
+                    )
+                }
+                HorizontalDivider(color = Ink.Divider)
+                DropdownMenuItem(
+                    text = { Text("新建清单…", color = Ink.Blue, fontSize = 14.sp) },
+                    leadingIcon = { Icon(Icons.Filled.Add, null, tint = Ink.Blue, modifier = Modifier.size(18.dp)) },
+                    onClick = {
+                        menuOpen = false
+                        creating = true
                     },
-                    onOpenServerSettings = onEditServerAddress,
-                )
-
-                ShellTab.Items -> ItemsScreen(
-                    vm = itemsVm,
-                    serverUrl = baseUrl,
-                    refreshKey = dataVersion,
-                    onEditItem = onEditItem,
-                    onOpenServerSettings = onEditServerAddress,
-                )
-
-                ShellTab.Matrix -> MatrixScreen(
-                    vm = matrixVm,
-                    serverUrl = baseUrl,
-                    refreshKey = dataVersion,
-                    onOpenServerSettings = onEditServerAddress,
-                )
-
-                ShellTab.Settings -> SettingsScreen(
-                    container = container,
-                    refreshKey = dataVersion,
-                    onEditServerAddress = onEditServerAddress,
                 )
             }
         }
 
-        GlassBottomBar(current = tab, onSelect = { tab = it })
+        IconButton(onClick = { creating = true }) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = "新建清单",
+                tint = Ink.BlueSoft,
+            )
+        }
+    }
+
+    if (creating) {
+        NewListDialog(
+            lists = lists,
+            defaultSourceId = currentId,
+            onConfirm = { name, copyFrom ->
+                creating = false
+                vm.create(name, copyFrom)
+            },
+            onDismiss = { creating = false },
+        )
     }
 }
 
@@ -238,4 +395,3 @@ private fun BottomBarItem(tab: ShellTab, selected: Boolean, onClick: () -> Unit)
         )
     }
 }
-

@@ -6,10 +6,14 @@ import com.xiaoyuan.renovation.data.model.BatchDeleteResultDto
 import com.xiaoyuan.renovation.data.model.CategoryDto
 import com.xiaoyuan.renovation.data.model.CellSaveResultDto
 import com.xiaoyuan.renovation.data.model.CredentialsInDto
+import com.xiaoyuan.renovation.data.model.ExpenseDto
+import com.xiaoyuan.renovation.data.model.ExpenseInDto
 import com.xiaoyuan.renovation.data.model.HealthDto
 import com.xiaoyuan.renovation.data.model.ImportReportDto
 import com.xiaoyuan.renovation.data.model.ItemDto
 import com.xiaoyuan.renovation.data.model.ItemInDto
+import com.xiaoyuan.renovation.data.model.ItemListDto
+import com.xiaoyuan.renovation.data.model.ListInDto
 import com.xiaoyuan.renovation.data.model.LoginResultDto
 import com.xiaoyuan.renovation.data.model.MatrixCellInDto
 import com.xiaoyuan.renovation.data.model.MatrixDto
@@ -18,7 +22,9 @@ import com.xiaoyuan.renovation.data.model.OkDto
 import com.xiaoyuan.renovation.data.model.RecordInDto
 import com.xiaoyuan.renovation.data.model.RecordPatchDto
 import com.xiaoyuan.renovation.data.model.RoomDto
+import com.xiaoyuan.renovation.data.model.PurgeResultDto
 import com.xiaoyuan.renovation.data.model.SummaryDto
+import com.xiaoyuan.renovation.data.model.TrashItemDto
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
@@ -58,6 +64,21 @@ interface ApiService {
     /** 免登录的连通性探针，用于「测试连接」。 */
     @GET("api/health")
     suspend fun health(): HealthDto
+
+    /* ---------- 清单 ---------- */
+
+    /** 全部清单。请求头里那个「当前清单」由拦截器统一加，这个接口不看它。 */
+    @GET("api/lists")
+    suspend fun lists(): List<ItemListDto>
+
+    @POST("api/lists")
+    suspend fun createList(@Body body: ListInDto): ItemListDto
+
+    @PUT("api/lists/{id}")
+    suspend fun updateList(@Path("id") id: Int, @Body body: ListInDto): ItemListDto
+
+    @DELETE("api/lists/{id}")
+    suspend fun deleteList(@Path("id") id: Int): OkDto
 
     /* ---------- 总览 ---------- */
 
@@ -102,7 +123,7 @@ interface ApiService {
     @DELETE("api/records/{id}")
     suspend fun deleteRecord(@Path("id") recordId: Int): ItemDto
 
-    /* ---------- 房间 ---------- */
+    /* ---------- 分组 ---------- */
 
     @GET("api/rooms")
     suspend fun rooms(): List<RoomDto>
@@ -116,7 +137,7 @@ interface ApiService {
     @DELETE("api/rooms/{id}")
     suspend fun deleteRoom(@Path("id") id: Int): OkDto
 
-    /* ---------- 类目 ---------- */
+    /* ---------- 分类 ---------- */
 
     @GET("api/categories")
     suspend fun categories(): List<CategoryDto>
@@ -130,13 +151,41 @@ interface ApiService {
     @DELETE("api/categories/{id}")
     suspend fun deleteCategory(@Path("id") id: Int): OkDto
 
-    /* ---------- 布点矩阵 ---------- */
+    /* ---------- 分配矩阵 ---------- */
 
     @GET("api/matrix")
     suspend fun matrix(): MatrixDto
 
     @PUT("api/matrix/cell")
     suspend fun saveCell(@Body body: MatrixCellInDto): CellSaveResultDto
+
+    /* ---------- 额外费用（运费/安装费）---------- */
+
+    @GET("api/expenses")
+    suspend fun expenses(): List<ExpenseDto>
+
+    @POST("api/expenses")
+    suspend fun createExpense(@Body body: ExpenseInDto): ExpenseDto
+
+    @PUT("api/expenses/{id}")
+    suspend fun updateExpense(@Path("id") id: Int, @Body body: ExpenseInDto): ExpenseDto
+
+    @DELETE("api/expenses/{id}")
+    suspend fun deleteExpense(@Path("id") id: Int): OkDto
+
+    /* ---------- 回收站 ---------- */
+
+    @GET("api/trash")
+    suspend fun trash(): List<TrashItemDto>
+
+    @POST("api/trash/{id}/restore")
+    suspend fun restoreItem(@Path("id") id: Int): TrashItemDto
+
+    @DELETE("api/trash/{id}")
+    suspend fun purgeItem(@Path("id") id: Int): OkDto
+
+    @DELETE("api/trash")
+    suspend fun purgeTrash(): PurgeResultDto
 
     /* ---------- 导入导出 ---------- */
 

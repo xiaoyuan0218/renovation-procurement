@@ -28,12 +28,22 @@ class AppContainer(context: Context) {
     private val _dataVersion = MutableStateFlow(0)
     val dataVersion: StateFlow<Int> = _dataVersion.asStateFlow()
 
+    /**
+     * 清单切换这类"不是写操作、但各页面看到的完全是另一批数据"的场合，
+     * 走这里让界面重新拉一遍。
+     */
+    fun bumpDataVersion() {
+        _dataVersion.value += 1
+    }
+
     private val api: ApiService by lazy {
-        ApiClientFactory.create({ settings.baseUrl.value }, { settings.token.value })
+        ApiClientFactory.create({ settings.baseUrl.value }, { settings.token.value },
+            { settings.currentListId.value })
     }
 
     private val transferApi: ApiService by lazy {
-        ApiClientFactory.createForTransfer({ settings.baseUrl.value }, { settings.token.value })
+        ApiClientFactory.createForTransfer({ settings.baseUrl.value }, { settings.token.value },
+            { settings.currentListId.value })
     }
 
     val repo: RenovationRepository by lazy {

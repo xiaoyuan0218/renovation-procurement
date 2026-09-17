@@ -51,6 +51,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xiaoyuan.renovation.di.AppContainer
 import com.xiaoyuan.renovation.ui.common.LoadState
 import com.xiaoyuan.renovation.ui.common.containerViewModel
+import com.xiaoyuan.renovation.ui.design.AppDateField
+import com.xiaoyuan.renovation.ui.design.AppNumberField
+import com.xiaoyuan.renovation.ui.design.AppSelect
 import com.xiaoyuan.renovation.ui.design.AppTextField
 import com.xiaoyuan.renovation.ui.design.BrandHeader
 import com.xiaoyuan.renovation.ui.design.ChoiceChips
@@ -64,15 +67,21 @@ import com.xiaoyuan.renovation.ui.design.HintText
 import com.xiaoyuan.renovation.ui.design.InfoDialog
 import com.xiaoyuan.renovation.ui.design.KeyValueRow
 import com.xiaoyuan.renovation.ui.design.LoadingState
+import com.xiaoyuan.renovation.data.model.ExpenseInDto
+import com.xiaoyuan.renovation.data.model.ItemListDto
 import com.xiaoyuan.renovation.ui.design.NeonButton
 import com.xiaoyuan.renovation.ui.design.SectionTitle
 import com.xiaoyuan.renovation.ui.design.TagPill
 import com.xiaoyuan.renovation.ui.design.TextPromptDialog
+import com.xiaoyuan.renovation.ui.lists.ListsViewModel
+import com.xiaoyuan.renovation.ui.lists.NewListDialog
 import com.xiaoyuan.renovation.ui.theme.Ink
+import com.xiaoyuan.renovation.util.Fmt
 
 @Composable
 fun SettingsScreen(
     container: AppContainer,
+    listsVm: ListsViewModel,
     refreshKey: Int,
     onEditServerAddress: () -> Unit,
 ) {
@@ -100,7 +109,22 @@ fun SettingsScreen(
         if (uri != null) vm.importFrom(uri)
     }
 
-    LaunchedEffect(refreshKey) { vm.load() }
+    LaunchedEffect(refreshKey) { vm.load(); listsVm.load() }
+
+    // 清单管理用的是主壳那一份 ListsViewModel（同一导航条目里是同一个实例），
+    // 所以在这里切换/改名/删除，顶部那条切换栏和各页面会一起更新。
+    val listItems by listsVm.lists.collectAsStateWithLifecycle()
+    val currentListId by listsVm.currentId.collectAsStateWithLifecycle()
+    var creatingList by remember { mutableStateOf(false) }
+    // 额外费用的录入草稿
+    var expKind by remember { mutableStateOf("运费") }
+    var expAmount by remember { mutableStateOf("") }
+    var expDate by remember { mutableStateOf(Fmt.today()) }
+    var expVendor by remember { mutableStateOf("") }
+    var expOrderNo by remember { mutableStateOf("") }
+    var expItemId by remember { mutableStateOf<Int?>(null) }
+    var renamingList by remember { mutableStateOf<ItemListDto?>(null) }
+    var deletingList by remember { mutableStateOf<ItemListDto?>(null) }
 
     // 导出/导入的按钮在页面最底部，把结果做成底部浮动提示，
     // 否则提示条在顶部、用户在底部，点了什么反馈都看不到
@@ -129,7 +153,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
             BrandHeader(
                 title = "设置",
-                subtitle = "服务器 · 房间 · 类目 · 数据备份",
+                subtitle = "服务器 · 分组 · 分类 · 数据备份",
                 trailing = {
                     GlassIconButton(icon = Icons.Filled.Refresh, onClick = vm::load, contentDescription = "刷新")
                 },
@@ -180,7 +204,7 @@ fun SettingsScreen(
             }
 
             when (val current = state) {
-                is LoadState.Loading -> LoadingState(text = "正在读取房间与类目…")
+                is LoadState.Loading -> LoadingState(text = "正在读取分组与分类…")
 
                 is LoadState.Failed -> ErrorState(
                     message = current.message,
@@ -193,16 +217,99 @@ fun SettingsScreen(
                 is LoadState.Ready -> {
                     val data = current.data
 
-                    /* ---------- 房间 ---------- */
+                    /* ---------- 清单 ---------- */
                     Column {
-                        SectionTitle("房间", caption = "共 ${data.rooms.size} 个 · 删除会同时清掉该房间的布点")
+                        SectionTitle(
+                            "清单",
+                            caption = "共 ${listItems.size} 份 · 每份的物料、分组、分类互相独立",
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        GlassCard(padding = 0.dp) {
+                            listItems.forEachIndexed { index, list ->
+                                if (index > 0) GlassDivider(Modifier.padding(horizontal = 14.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (list.id == currentListId) {
+                                                "${list.name}（当前）"
+                                            } else {
+                                                list.name
+                                            },
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = if (list.id == currentListId) {
+                                                Ink.Blue
+                                            } else {
+                                                Ink.TextPrimary
+                                            },
+                                        )
+                                        Text(
+                                            text = "${list.itemCount} 条物料 · ${list.roomCount} 个分组",
+                                            color = Ink.TextMuted,
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                    if (list.id != currentListId) {
+                                        TagPill(
+                                            text = "切换",
+                                            color = Ink.Blue,
+                                            onClick = { listsVm.select(list.id) },
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    TagPill(
+                                        text = "改名",
+                                        color = Ink.Indigo,
+                                        onClick = { renamingList = list },
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    // 最后一份不允许删：删了界面就没东西可看了
+                                    TagPill(
+                                        text = "删除",
+                                        color = if (listItems.size > 1) Ink.Danger else Ink.TextMuted,
+                                        onClick = {
+                                            if (listItems.size > 1) deletingList = list
+                                        },
+                                    )
+                                }
+                            }
+                            GlassDivider(Modifier.padding(horizontal = 14.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "新建时可以选空白清单，也可以照抄某份现有清单的分组与分类",
+                                    color = Ink.TextMuted,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                NeonButton(
+                                    text = "新建清单",
+                                    onClick = { creatingList = true },
+                                    icon = Icons.Filled.Add,
+                                )
+                            }
+                        }
+                    }
+
+                    /* ---------- 分组 ---------- */
+                    Column {
+                        SectionTitle("分组", caption = "共 ${data.rooms.size} 个 · 删除会同时清掉该分组的分配")
                         Spacer(Modifier.height(10.dp))
                         GlassCard {
                             Row(verticalAlignment = Alignment.Bottom) {
                                 AppTextField(
                                     value = newRoom,
                                     onValueChange = { newRoom = it },
-                                    label = "新增房间",
+                                    label = "新增分组",
                                     placeholder = "例如：书房",
                                     imeAction = ImeAction.Done,
                                     modifier = Modifier.weight(1f),
@@ -255,16 +362,220 @@ fun SettingsScreen(
                         }
                     }
 
-                    /* ---------- 类目 ---------- */
+                    /* ---------- 分类 ---------- */
                     Column {
-                        SectionTitle("类目", caption = "共 ${data.categories.size} 个 · 类目下还有物料时不能删除")
+                        /* ---------- 回收站 ---------- */
+                        Column {
+                            SectionTitle(
+                                "回收站",
+                                caption = if (data.trash.isEmpty()) {
+                                    "空的 · 删掉的物料会先放这里，可以捞回来"
+                                } else {
+                                    "${data.trash.size} 条 · 恢复它，分配和采购记录一起回来"
+                                },
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            GlassCard(padding = 0.dp) {
+                                if (data.trash.isEmpty()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 14.dp),
+                                    ) {
+                                        Text("回收站是空的", color = Ink.TextMuted, fontSize = 12.sp)
+                                    }
+                                } else {
+                                    data.trash.forEachIndexed { index, row ->
+                                        if (index > 0) {
+                                            GlassDivider(Modifier.padding(horizontal = 14.dp))
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(
+                                                    row.name,
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    color = Ink.TextPrimary,
+                                                )
+                                                Text(
+                                                    "${Fmt.money(row.listTotal)} · 移入于 ${row.deletedAt}",
+                                                    color = Ink.TextMuted,
+                                                    fontSize = 11.sp,
+                                                )
+                                            }
+                                            TagPill(
+                                                text = "恢复",
+                                                color = Ink.Blue,
+                                                onClick = { vm.restoreItem(row.id) },
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            TagPill(
+                                                text = "彻底删除",
+                                                color = Ink.Danger,
+                                                onClick = { vm.purgeItem(row.id) },
+                                            )
+                                        }
+                                    }
+                                    GlassDivider(Modifier.padding(horizontal = 14.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            "彻底删除会连分配与采购记录一起清掉，无法恢复",
+                                            color = Ink.TextMuted,
+                                            fontSize = 11.sp,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        GhostButton(text = "清空", onClick = vm::purgeTrash)
+                                    }
+                                }
+                            }
+                        }
+
+                        /* ---------- 额外费用 ---------- */
+                        Column {
+                            SectionTitle(
+                                "额外费用",
+                                caption = "运费、安装费这类不进物料单价的支出 · 合计 " +
+                                    Fmt.money(data.expenses.sumOf { it.amount }),
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            GlassCard {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    AppTextField(
+                                        value = expKind,
+                                        onValueChange = { expKind = it },
+                                        label = "类型",
+                                        placeholder = "运费 / 安装费 …",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AppNumberField(
+                                        value = expAmount,
+                                        onValueChange = { expAmount = it },
+                                        label = "金额",
+                                        accent = Ink.Mint,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                AppDateField(
+                                    value = expDate,
+                                    onValueChange = { expDate = it },
+                                    showQuickChips = false,
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    AppTextField(
+                                        value = expVendor,
+                                        onValueChange = { expVendor = it },
+                                        label = "商家",
+                                        placeholder = "选填",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AppTextField(
+                                        value = expOrderNo,
+                                        onValueChange = { expOrderNo = it },
+                                        label = "订单号",
+                                        placeholder = "选填",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                if (data.items.isNotEmpty()) {
+                                    Spacer(Modifier.height(10.dp))
+                                    AppSelect(
+                                        label = "关联物料（选填）",
+                                        items = data.items,
+                                        selected = data.items.firstOrNull { it.id == expItemId },
+                                        itemLabel = {
+                                            if (it.model.isNotBlank()) "${it.name} · ${it.model}"
+                                            else it.name
+                                        },
+                                        onSelect = { expItemId = it?.id },
+                                        allowClear = true,
+                                        clearLabel = "不关联",
+                                    )
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                NeonButton(
+                                    text = "记一笔费用",
+                                    onClick = {
+                                        vm.addExpense(
+                                            ExpenseInDto(
+                                                kind = expKind.ifBlank { "运费" },
+                                                amount = Fmt.parseNumberOrZero(expAmount),
+                                                date = expDate,
+                                                vendor = expVendor,
+                                                orderNo = expOrderNo,
+                                                itemId = expItemId,
+                                            ),
+                                        )
+                                        expAmount = ""
+                                        expVendor = ""
+                                        expOrderNo = ""
+                                        expItemId = null
+                                    },
+                                    icon = Icons.Filled.Add,
+                                    fillWidth = true,
+                                    enabled = Fmt.parseNumberOrZero(expAmount) > 0,
+                                )
+                            }
+                            if (data.expenses.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                GlassCard(padding = 0.dp) {
+                                    data.expenses.forEachIndexed { index, row ->
+                                        if (index > 0) {
+                                            GlassDivider(Modifier.padding(horizontal = 14.dp))
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                val linked = row.itemName.takeIf { it.isNotBlank() }
+                                                Text(
+                                                    "${row.kind}  ${Fmt.money(row.amount)}" +
+                                                        (linked?.let { " · $it" } ?: ""),
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    color = Ink.TextPrimary,
+                                                )
+                                                val meta = listOfNotNull(
+                                                    row.date.takeIf { it.isNotBlank() },
+                                                    row.vendor.takeIf { it.isNotBlank() },
+                                                    row.orderNo.takeIf { it.isNotBlank() },
+                                                ).joinToString(" · ")
+                                                if (meta.isNotBlank()) {
+                                                    Text(
+                                                        meta,
+                                                        color = Ink.TextMuted,
+                                                        fontSize = 11.sp,
+                                                    )
+                                                }
+                                            }
+                                            TagPill(
+                                                text = "删除",
+                                                color = Ink.Danger,
+                                                onClick = { vm.deleteExpense(row.id) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        SectionTitle("分类", caption = "共 ${data.categories.size} 个 · 分类下还有物料时不能删除")
                         Spacer(Modifier.height(10.dp))
                         GlassCard {
                             Row(verticalAlignment = Alignment.Bottom) {
                                 AppTextField(
                                     value = newCategory,
                                     onValueChange = { newCategory = it },
-                                    label = "新增类目",
+                                    label = "新增分类",
                                     placeholder = "例如：五金",
                                     imeAction = ImeAction.Done,
                                     accent = Ink.Indigo,
@@ -383,7 +694,7 @@ fun SettingsScreen(
                 SectionTitle("关于")
                 Spacer(Modifier.height(10.dp))
                 GlassCard {
-                    KeyValueRow("应用", "装修采购 Android 1.1.0")
+                    KeyValueRow("应用", "采购清单 Android 1.1.0")
                     Spacer(Modifier.height(8.dp))
                     KeyValueRow("数据存放", "服务器的 SQLite 文件")
                     Spacer(Modifier.height(8.dp))
@@ -430,9 +741,48 @@ fun SettingsScreen(
     }
 
     /* ---------- 弹窗 ---------- */
+    if (creatingList) {
+        NewListDialog(
+            lists = listItems,
+            defaultSourceId = currentListId,
+            onConfirm = { name, copyFrom ->
+                creatingList = false
+                listsVm.create(name, copyFrom)
+            },
+            onDismiss = { creatingList = false },
+        )
+    }
+
+    renamingList?.let { list ->
+        TextPromptDialog(
+            title = "清单改名",
+            initialValue = list.name,
+            onConfirm = { newName ->
+                listsVm.rename(list.id, newName)
+                renamingList = null
+            },
+            onDismiss = { renamingList = null },
+        )
+    }
+
+    deletingList?.let { list ->
+        ConfirmDialog(
+            title = "删除清单",
+            message = "「${list.name}」里的 ${list.itemCount} 条物料、${list.roomCount} 个分组" +
+                "会一起删掉，无法撤销。",
+            confirmText = "删除",
+            danger = true,
+            onConfirm = {
+                deletingList = null
+                listsVm.delete(list.id)
+            },
+            onDismiss = { deletingList = null },
+        )
+    }
+
     renamingRoom?.let { (id, name) ->
         TextPromptDialog(
-            title = "房间改名",
+            title = "分组改名",
             initialValue = name,
             onConfirm = { newName ->
                 vm.renameRoom(id, newName)
@@ -444,7 +794,7 @@ fun SettingsScreen(
 
     renamingCategory?.let { (id, name) ->
         TextPromptDialog(
-            title = "类目改名",
+            title = "分类改名",
             initialValue = name,
             onConfirm = { newName ->
                 vm.renameCategory(id, newName)
@@ -456,8 +806,8 @@ fun SettingsScreen(
 
     deletingRoom?.let { (id, name) ->
         ConfirmDialog(
-            title = "删除房间",
-            message = "「$name」的布点会一并删除，物料本身不受影响。",
+            title = "删除分组",
+            message = "「$name」的分配会一并删除，物料本身不受影响。",
             confirmText = "删除",
             danger = true,
             onConfirm = {
@@ -470,7 +820,7 @@ fun SettingsScreen(
 
     deletingCategory?.let { (id, name) ->
         ConfirmDialog(
-            title = "删除类目",
+            title = "删除分类",
             message = "如果「$name」下还有物料，服务器会拒绝删除。",
             confirmText = "删除",
             danger = true,
@@ -490,13 +840,13 @@ fun SettingsScreen(
             Spacer(Modifier.height(6.dp))
             KeyValueRow("匹配物料", "${r.itemsMatched} 项")
             Spacer(Modifier.height(6.dp))
-            KeyValueRow("布点", "${r.allocations} 条")
+            KeyValueRow("分配", "${r.allocations} 条")
             Spacer(Modifier.height(6.dp))
             KeyValueRow("采购记录", "${r.records} 条")
             Spacer(Modifier.height(6.dp))
-            KeyValueRow("新增房间", "${r.roomsCreated} 个")
+            KeyValueRow("新增分组", "${r.roomsCreated} 个")
             Spacer(Modifier.height(6.dp))
-            KeyValueRow("新增类目", "${r.categoriesCreated} 个")
+            KeyValueRow("新增分类", "${r.categoriesCreated} 个")
             if (r.warnings.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
                 Text(

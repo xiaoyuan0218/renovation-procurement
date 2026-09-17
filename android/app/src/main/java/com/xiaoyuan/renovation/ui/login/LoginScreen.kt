@@ -63,7 +63,7 @@ fun LoginScreen(container: AppContainer) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = "装修采购",
+                        text = "采购清单",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Ink.BlueSoft,
@@ -86,7 +86,7 @@ fun LoginScreen(container: AppContainer) {
                 color = Ink.TextPrimary,
             )
             Text(
-                text = if (state.isSetup) "管理员账号" else "装修采购清单",
+                text = if (state.isSetup) "管理员账号" else "采购清单",
                 fontSize = 34.sp,
                 lineHeight = 42.sp,
                 fontWeight = FontWeight.Bold,

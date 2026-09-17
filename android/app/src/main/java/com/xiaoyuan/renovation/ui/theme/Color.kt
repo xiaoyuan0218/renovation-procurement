@@ -65,8 +65,8 @@ private val CategoryFallback = listOf(
 )
 
 /**
- * 类目配色：按关键词命中常见装修类目，没命中的按名称固定散列到备用色板 ——
- * 这样用户自己新增的类目也有稳定且不重复的颜色。
+ * 分类配色：按关键词命中常见装修分类，没命中的按名称固定散列到备用色板 ——
+ * 这样用户自己新增的分类也有稳定且不重复的颜色。
  */
 fun categoryColor(name: String?): Color {
     val n = name.orEmpty()

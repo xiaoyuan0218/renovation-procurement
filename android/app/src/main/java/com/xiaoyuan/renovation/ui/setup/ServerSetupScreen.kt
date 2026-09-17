@@ -89,7 +89,7 @@ fun ServerSetupScreen(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = if (onBack == null) "装修采购" else "服务器地址",
+                        text = if (onBack == null) "采购清单" else "服务器地址",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Ink.BlueSoft,

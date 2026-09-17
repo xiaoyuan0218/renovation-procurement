@@ -19,6 +19,29 @@ data class CategoryDto(
     val sort: Int = 0,
 )
 
+/* ---------------- 清单 ---------------- */
+
+/** 一份清单：有自己的物料、分组、分类，彼此隔离。 */
+@Serializable
+data class ItemListDto(
+    val id: Int,
+    val name: String,
+    val note: String = "",
+    val sort: Int = 0,
+    @SerialName("item_count") val itemCount: Int = 0,
+    @SerialName("room_count") val roomCount: Int = 0,
+    @SerialName("category_count") val categoryCount: Int = 0,
+)
+
+@Serializable
+data class ListInDto(
+    val name: String,
+    val note: String = "",
+    val sort: Int = 0,
+    /** 新建时可选：照抄这份清单的分组与分类（不带物料）；null 就是空白清单。 */
+    @SerialName("copy_from") val copyFrom: Int? = null,
+)
+
 /* ---------------- 物料 ---------------- */
 
 @Serializable
@@ -30,6 +53,10 @@ data class RecordDto(
     @SerialName("unit_price") val unitPrice: Double? = null,
     val date: String = "",
     val note: String = "",
+    val vendor: String = "",
+    @SerialName("order_no") val orderNo: String = "",
+    /** 这笔钱涉及的分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 */
+    @SerialName("room_ids") val roomIds: List<Int> = emptyList(),
 )
 
 @Serializable
@@ -85,6 +112,9 @@ data class RecordInDto(
     val amount: Double = 0.0,
     val date: String = "",
     val note: String = "",
+    val vendor: String = "",
+    @SerialName("order_no") val orderNo: String = "",
+    @SerialName("room_ids") val roomIds: List<Int> = emptyList(),
 )
 
 @Serializable
@@ -93,6 +123,10 @@ data class RecordPatchDto(
     val amount: Double? = null,
     val date: String? = null,
     val note: String? = null,
+    val vendor: String? = null,
+    @SerialName("order_no") val orderNo: String? = null,
+    // 服务端把 null 当作"这个字段不改"，所以只传要改的即可
+    @SerialName("room_ids") val roomIds: List<Int>? = null,
 )
 
 /**
@@ -143,7 +177,7 @@ data class BatchDeleteResultDto(val deleted: Int = 0)
 @Serializable
 data class CellSaveResultDto(val ok: Boolean = true, val deleted: Boolean = false)
 
-/* ---------------- 布点矩阵 ---------------- */
+/* ---------------- 分配矩阵 ---------------- */
 
 @Serializable
 data class MatrixCellDto(
@@ -170,7 +204,7 @@ data class MatrixItemDto(
     @SerialName("list_total") val listTotal: Double = 0.0,
     val cells: Map<String, MatrixCellDto> = emptyMap(),
 ) {
-    /** 该物料在指定房间的布点；cells 的 key 是 room_id 的字符串形式。 */
+    /** 该物料在指定分组的分配；cells 的 key 是 room_id 的字符串形式。 */
     fun cellOf(roomId: Int): MatrixCellDto? = cells[roomId.toString()]
 }
 
@@ -189,6 +223,12 @@ data class TotalsDto(
     @SerialName("paid_total") val paidTotal: Double = 0.0,
     @SerialName("item_count") val itemCount: Int = 0,
     @SerialName("unpaid_total") val unpaidTotal: Double = 0.0,
+    // 两个口径各自的三段拆分（详见后端 compute.py 的文件头说明）：
+    //   paid + actualDiscount + unpaid = listTotal
+    //   paid + dailyDiscount + dailyUnpaid = discountTotal
+    @SerialName("daily_unpaid_total") val dailyUnpaidTotal: Double = 0.0,
+    @SerialName("actual_discount_total") val actualDiscountTotal: Double = 0.0,
+    @SerialName("daily_discount_total") val dailyDiscountTotal: Double = 0.0,
     @SerialName("status_count") val statusCount: Map<String, Int> = emptyMap(),
     @SerialName("bought_count") val boughtCount: Int = 0,
     @SerialName("partial_count") val partialCount: Int = 0,
@@ -226,6 +266,13 @@ data class SummaryDto(
     @SerialName("by_category") val byCategory: List<CategoryStatDto> = emptyList(),
     @SerialName("by_room") val byRoom: List<RoomStatDto> = emptyList(),
     val unbought: List<ItemDto> = emptyList(),
+    /** 近几个月的已付（货款口径，不含额外费用） */
+    @SerialName("by_month") val byMonth: List<MonthPaidDto> = emptyList(),
+    @SerialName("by_month_undated") val byMonthUndated: Double = 0.0,
+    /** 额外费用（运费/安装费）：独立于上面两个口径，单独汇总 */
+    @SerialName("expenses_total") val expensesTotal: Double = 0.0,
+    @SerialName("expenses_by_kind") val expensesByKind: List<ExpenseKindDto> = emptyList(),
+    @SerialName("expenses_count") val expensesCount: Int = 0,
 )
 
 /* ---------------- 导入报告 ---------------- */
@@ -243,6 +290,52 @@ data class ImportReportDto(
 )
 
 /* ---------------- 登录 ---------------- */
+
+/* ---------------- 额外费用 / 回收站 / 按月 ---------------- */
+
+@Serializable
+data class MonthPaidDto(val month: String = "", val paid: Double = 0.0)
+
+@Serializable
+data class ExpenseKindDto(val kind: String = "", val amount: Double = 0.0)
+
+@Serializable
+data class ExpenseDto(
+    val id: Int,
+    val kind: String = "运费",
+    val amount: Double = 0.0,
+    val date: String = "",
+    val vendor: String = "",
+    @SerialName("order_no") val orderNo: String = "",
+    val note: String = "",
+    /** 关联到哪条物料的货（选填，对账用） */
+    @SerialName("item_id") val itemId: Int? = null,
+    @SerialName("item_name") val itemName: String = "",
+)
+
+@Serializable
+data class ExpenseInDto(
+    val kind: String = "运费",
+    val amount: Double = 0.0,
+    val date: String = "",
+    val vendor: String = "",
+    @SerialName("order_no") val orderNo: String = "",
+    val note: String = "",
+    @SerialName("item_id") val itemId: Int? = null,
+)
+
+/** 回收站里的一条：只要列表够用的几个字段。 */
+@Serializable
+data class TrashItemDto(
+    val id: Int,
+    val name: String,
+    @SerialName("deleted_at") val deletedAt: String = "",
+    @SerialName("list_total") val listTotal: Double = 0.0,
+    val paid: Double = 0.0,
+)
+
+@Serializable
+data class PurgeResultDto(val deleted: Int = 0, val ok: Boolean = true)
 
 @Serializable
 data class AuthStateDto(

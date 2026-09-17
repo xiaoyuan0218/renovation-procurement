@@ -343,6 +343,38 @@ fun <T> ChoiceChips(
     }
 }
 
+/** 横向滚动的多选胶囊组（采购记录里的「涉及分组」可以勾多个）。 */
+@Composable
+fun <T> MultiChoiceChips(
+    options: List<Pair<T, String>>,
+    selected: Collection<T>,
+    onToggle: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    accent: Color = Ink.Blue,
+) {
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { (value, label) ->
+            val isOn = value in selected
+            val shape = RoundedCornerShape(50)
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = if (isOn) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (isOn) Color.White else Ink.TextSecondary,
+                modifier = Modifier
+                    .clip(shape)
+                    .background(if (isOn) accent.copy(alpha = 0.85f) else Ink.GlassFill)
+                    .border(1.dp, if (isOn) accent else Ink.GlassBorder, shape)
+                    .clickable { onToggle(value) }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            )
+        }
+    }
+}
+
 /** 日期输入：文本框 + 日历选择 + 今天快捷键。值一律是 yyyy-MM-dd 字符串。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -485,7 +517,7 @@ fun ConfirmDialog(
     )
 }
 
-/** 单行输入弹窗（房间/类目改名）。 */
+/** 单行输入弹窗（分组/分类改名）。 */
 @Composable
 fun TextPromptDialog(
     title: String,

@@ -65,7 +65,7 @@ class MatrixViewModel(private val repo: RenovationRepository) : ViewModel() {
         _message.value = null
     }
 
-    /** 保存单元格布点：数量为 0 时后端会删掉这条布点。 */
+    /** 保存单元格分配：数量为 0 时后端会删掉这条分配。 */
     fun saveCell(
         itemId: Int,
         roomId: Int,
@@ -78,7 +78,7 @@ class MatrixViewModel(private val repo: RenovationRepository) : ViewModel() {
             _saving.value = true
             when (val result = repo.saveCell(itemId, roomId, qty, priceOverride, note)) {
                 is ApiResult.Ok -> {
-                    _message.value = if (result.data.deleted) "已清空该布点" else "已保存"
+                    _message.value = if (result.data.deleted) "已清空该分配" else "已保存"
                     load()
                     onSaved()
                 }

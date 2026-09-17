@@ -46,7 +46,7 @@ suspend fun <T> apiCall(block: suspend () -> T): ApiResult<T> = withContext(Disp
     } catch (e: kotlinx.serialization.SerializationException) {
         ApiResult.Err(
             message = "服务器返回的数据无法识别",
-            hint = "这个地址可能不是装修采购后端（比如返回的是网页）",
+            hint = "这个地址可能不是采购清单后端（比如返回的是网页）",
         )
     } catch (e: Exception) {
         ApiResult.Err(e.message ?: "未知错误")

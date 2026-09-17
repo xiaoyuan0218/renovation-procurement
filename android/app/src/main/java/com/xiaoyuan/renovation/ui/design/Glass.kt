@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.CacheDrawScope
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -340,6 +341,18 @@ fun SectionTitle(
     }
 }
 
+/**
+ * 统计卡副行：左侧口径名、右侧金额，用于把合计拆成几段。
+ *
+ * `footnotes` 里允许出现 `null`，表示**留白占位**：那一行不显示内容，但仍占一行高。
+ * 同排几张卡片副行数不一致时，用留白补齐，卡片才会一样高（见 DashboardScreen 的统计卡）。
+ */
+data class StatFootnote(
+    val label: String,
+    val value: String,
+    val valueColor: Color = Ink.TextPrimary,
+)
+
 /** 统计卡片：大号数字 + 说明 + 可选图形，对应参考图里的指标块。 */
 @Composable
 fun StatTile(
@@ -350,15 +363,23 @@ fun StatTile(
     accent: Color = Ink.Blue,
     valueColor: Color = Ink.TextPrimary,
     trailing: (@Composable () -> Unit)? = null,
+    footnotes: List<StatFootnote?> = emptyList(),
 ) {
     GlassCard(modifier = modifier, corner = 20.dp, padding = 14.dp, accent = accent) {
+        val density = LocalDensity.current
+        // 大数字与副行的行高都钉死：字号按位数降档、副行数不同的卡片，
+        // 只有行高确定，几张贴在一起时才会一样高（dp 由 sp 换算，跟着 fontScale 走）
+        val valueLineHeight = 26.sp
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
             color = Ink.TextSecondary,
         )
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
+        Row(
+            modifier = Modifier.height(with(density) { valueLineHeight.toDp() }),
+            verticalAlignment = Alignment.Bottom,
+        ) {
             Text(
                 text = value,
                 fontSize = when {
@@ -366,6 +387,7 @@ fun StatTile(
                     value.length >= 9 -> 19.sp
                     else -> 22.sp
                 },
+                lineHeight = valueLineHeight,
                 fontWeight = FontWeight.Bold,
                 color = valueColor,
                 maxLines = 1,
@@ -383,6 +405,40 @@ fun StatTile(
                 color = Ink.TextMuted,
                 maxLines = 2,
             )
+        }
+        val footnoteLineHeight = 18.sp
+        footnotes.forEach { f ->
+            Spacer(Modifier.height(3.dp))
+            if (f == null) {
+                // 占位行：用全角空格而不是半角空格/固定高度 —— 只有它和中文的字形高度一致，
+                // 真实副行与占位行才会一样高（半角空格只有 49px，中文是 61px）
+                Text(
+                    text = "\u3000",
+                    style = MaterialTheme.typography.bodySmall,
+                    lineHeight = footnoteLineHeight,
+                    maxLines = 1,
+                )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = f.label,
+                        style = MaterialTheme.typography.bodySmall,
+                        lineHeight = footnoteLineHeight,
+                        color = Ink.TextMuted,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = f.value,
+                        style = MaterialTheme.typography.bodySmall,
+                        lineHeight = footnoteLineHeight,
+                        color = f.valueColor,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
     }
 }

@@ -161,14 +161,14 @@ fun ItemsScreen(
                     Spacer(Modifier.height(10.dp))
 
                     AppSelect(
-                        label = "类目",
+                        label = "分类",
                         items = data.categories,
                         selected = selectedCategory,
                         itemLabel = { it.name },
                         onSelect = { vm.setCategory(it?.id) },
-                        placeholder = "全部类目",
+                        placeholder = "全部分类",
                         allowClear = true,
-                        clearLabel = "全部类目",
+                        clearLabel = "全部分类",
                     )
                     Spacer(Modifier.height(12.dp))
 
@@ -242,12 +242,15 @@ fun ItemsScreen(
     }
 
     purchaseTarget?.let { item ->
+        // 分组名要从已加载的数据里取（这个弹层在页面最外层，够不到上面那个 data）
+        val rooms = (vm.state.value as? LoadState.Ready)?.data?.rooms ?: emptyList()
         PurchaseSheet(
             item = vm.findItem(item.id) ?: item,
+            rooms = rooms,
             busy = busy,
             onDismiss = { purchaseTarget = null },
-            onAdd = { qty, amount, date, note ->
-                vm.addRecord(item.id, qty, amount, date, note) { purchaseTarget = null }
+            onAdd = { body ->
+                vm.addRecord(item.id, body) { purchaseTarget = null }
             },
             onClear = { vm.clearRecords(item.id) },
             onDeleteRecord = { recordId -> vm.deleteRecord(recordId) },
@@ -257,7 +260,7 @@ fun ItemsScreen(
     if (confirmBatchDelete) {
         ConfirmDialog(
             title = "删除所选物料",
-            message = "将删除 ${selected.size} 项物料，连同它们的采购记录与布点，且无法撤销。",
+            message = "将删除 ${selected.size} 项物料，连同它们的采购记录与分配，且无法撤销。",
             confirmText = "删除",
             danger = true,
             onConfirm = {
