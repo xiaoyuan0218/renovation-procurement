@@ -136,7 +136,7 @@ const total = computed(() =>
     </div>
 
     <el-table v-loading="loading" :data="rows" size="small" max-height="380">
-      <el-table-column label="类型" width="106">
+      <el-table-column label="类型" width="96">
         <template #default="{ row }">
           <el-select v-model="row.kind" size="small" filterable allow-create
                      default-first-option @change="save(row)">
@@ -144,20 +144,20 @@ const total = computed(() =>
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="金额" width="110" align="right">
+      <el-table-column label="金额" width="100" align="right">
         <template #default="{ row }">
           <el-input-number v-model="row.amount" :min="0" :precision="2" size="small"
                            :controls="false" style="width: 100%" @change="save(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="日期" width="146">
+      <el-table-column label="日期" width="132">
         <template #default="{ row }">
           <el-date-picker v-model="row.date" type="date" value-format="YYYY-MM-DD"
                           size="small" placeholder="选填" style="width: 100%"
                           @change="save(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="关联物料" width="186">
+      <el-table-column label="关联物料" width="172">
         <template #default="{ row }">
           <el-select v-model="row.item_id" size="small" filterable clearable
                      placeholder="选填" style="width: 100%" @change="save(row)">
@@ -165,24 +165,24 @@ const total = computed(() =>
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="商家" width="100">
+      <el-table-column label="商家" width="92">
         <template #default="{ row }">
           <el-input v-model="row.vendor" size="small" placeholder="选填"
                     @change="save(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="订单号" width="130">
+      <el-table-column label="订单号" width="112">
         <template #default="{ row }">
           <el-input v-model="row.order_no" size="small" placeholder="选填"
                     @change="save(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="备注" min-width="120">
+      <el-table-column label="备注" min-width="100">
         <template #default="{ row }">
           <el-input v-model="row.note" size="small" placeholder="选填" @change="save(row)" />
         </template>
       </el-table-column>
-      <el-table-column width="70">
+      <el-table-column width="64">
         <template #default="{ row }">
           <el-button link type="danger" size="small" @click="remove(row)">删除</el-button>
         </template>
