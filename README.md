@@ -97,6 +97,8 @@ Windows 下也可直接双击根目录的 `启动服务.bat`（前台）或 `启
 
 `android/` 下是同一套数据的原生安卓客户端（Kotlin + Jetpack Compose），功能对齐网页版：总览看板、物料清单（增删改 + 记一笔采购）、分配矩阵（列表 / 矩阵双模式）、**多清单切换与新建（可选空白或照抄某份清单的分组与分类）**、分组与分类管理、Excel 导入导出。登录用的是同一套账号，登录一次后 token 存在本地，之后不用反复输密码。
 
+`mobile/` 下是**单机版**：数据默认只存在这台手机（Room 数据库），完全离线也能用；想联网时可以把某份清单传到服务器，或把服务器上的清单拉到手机（两边都改过会自动合并，只有改到同一处才问你）。表格格式与网络版完全一致，两边可以互导。
+
 手机和网页可以同时用，两边看到的是同一份数据（同一个清单）：在手机上记一笔付款，网页刷新就能看到；反过来也一样。**升级时先升服务器再升 app** —— 新后端配老 app 完全可用（老 app 会落到默认清单，看到的就是升级前那份数据），反过来则拿不到清单列表。
 
 **服务器地址可自定义**：首次启动填写后端地址，之后可在「设置」里随时修改，改完立即生效、不用重启。地址规则很宽松 —— 省略 `http://` 和端口都行，默认按 `8000` 处理，输入时界面会实时回显最终连接的地址（如「将连接到 `http://192.168.1.9:8000`」）。连接失败时会明确显示连的是哪个地址，并提供「重试」与「修改地址」。
@@ -107,17 +109,27 @@ Windows 下也可直接双击根目录的 `启动服务.bat`（前台）或 `启
 cd android
 ./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew assembleRelease    # 经 R8 压缩，约 1.9MB
+
+cd mobile                    # 单机版，命令相同；testDebugUnitTest 是它的单测
+./gradlew testDebugUnitTest assembleDebug
 ```
 
-需要 JDK 17 与 Android SDK（platform 35 / build-tools 35）。SDK 路径写在 `android/local.properties`（该文件不入库）；依赖仓库配置了阿里云镜像，国内网络可直接构建。
+需要 JDK 17 与 Android SDK（platform 35 / build-tools 35）。SDK 路径写在各自的 `local.properties`（该文件不入库）；依赖仓库配置了阿里云镜像，国内网络可直接构建。
 
 ### 安装与使用
 
-把 APK 传到手机点击安装即可（debug 与 release 都使用 debug 签名，个人自用足够）。手机需与后端在同一个局域网。模拟器里调试宿主机上的后端，地址填 `10.0.2.2:8000`。
+手机浏览器打开下面的链接直接下载安装（不用登录，链接永远指向最新构建）：
+
+- 网络版（连服务器）：`https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-online.apk`
+- 单机版（数据在手机本地）：`https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-offline.apk`
+
+把上面链接里的文件名换成 `caizhidao-online-debug.apk` / `caizhidao-offline-debug.apk` 就是对应的调试包 —— 包名多一个 `.debug` 后缀，和正式版并存、互不覆盖，拿不准就用不带 debug 的。
+
+也可以把本地构建的 APK 传到手机点击安装（debug 与 release 都使用 debug 签名，个人自用足够）。手机需与后端在同一个局域网。模拟器里调试宿主机上的后端，地址填 `10.0.2.2:8000`。
 
 界面是深色玻璃拟态 + 霓虹蓝配色，视觉规范见 [`android/DESIGN.md`](android/DESIGN.md)。
 
-也可以由 GitHub Actions 自动构建：`.github/workflows/android.yml` 在 `android/` 有改动时产出 APK artifact。
+也可以由 GitHub Actions 自动构建：`.github/workflows/apk.yml` 在 `android/` 或 `mobile/` 有改动时构建两个 App（单机版会先跑单测），并把 APK 发布到上面那两个固定链接 —— 每次 push 自动更新，链接不变。
 
 ## Docker 部署
 
