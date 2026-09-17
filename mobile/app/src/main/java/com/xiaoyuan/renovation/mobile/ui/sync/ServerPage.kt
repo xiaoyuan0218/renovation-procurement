@@ -1,5 +1,7 @@
 package com.xiaoyuan.renovation.mobile.ui.sync
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,9 +9,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -78,6 +88,12 @@ fun ServerPage(
         )
     }
 
+    val listState = rememberLazyListState()
+    // 提示一出现就滚回顶部 —— 用户常停在表单或清单列表中间，提示条在屏幕外等于没提示
+    LaunchedEffect(state.notice) {
+        if (state.notice != null) listState.animateScrollToItem(0)
+    }
+
     SettingsPage(
         title = "服务器",
         caption = if (state.loggedIn) {
@@ -86,7 +102,10 @@ fun ServerPage(
             "可选：连上之后手机和电脑能互相同步；不连就一直当本地应用用"
         },
         onBack = onBack,
+        listState = listState,
     ) {
+        state.notice?.let { notice -> item(key = "notice") { NoticeBar(notice) } }
+
         if (!state.loggedIn) {
             item { LoginForm(busy = busy, initialUrl = state.url, onSubmit = vm::login) }
         } else {
@@ -114,7 +133,6 @@ fun ServerPage(
                     onClick = vm::logout,
                 )
             }
-            item { state.message?.let { HintText(it) } }
         }
 
         if (state.loggedIn && lists.isNotEmpty()) {
@@ -217,6 +235,34 @@ fun ServerPage(
                 vm.uploadOverwrite(local.id, remote.id, local.name)
             },
             onDismiss = { vm.clearUploadChoice() },
+        )
+    }
+}
+
+/** 一条提示：失败红底、成功薄荷绿 —— 得让人一眼看到，不能是和说明文字同色的灰字。 */
+@Composable
+private fun NoticeBar(notice: SyncNotice) {
+    val accent = if (notice.error) Ink.Danger else Ink.Mint
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.12f))
+            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            imageVector = if (notice.error) Icons.Filled.Warning else Icons.Filled.CheckCircle,
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = notice.text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (notice.error) Ink.DangerSoft else Ink.TextPrimary,
         )
     }
 }

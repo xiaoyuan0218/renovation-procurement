@@ -9,8 +9,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.MaterialTheme
@@ -33,9 +36,16 @@ fun SettingsPage(
     title: String,
     caption: String? = null,
     onBack: () -> Unit,
+    listState: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    // 全屏独立页面（不在 AppShell 的顶栏下面），要自己让开状态栏/刘海，
+    // 否则标题和返回按钮会被顶到刘海底下 —— 点不到也看不清
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -66,6 +76,7 @@ fun SettingsPage(
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),

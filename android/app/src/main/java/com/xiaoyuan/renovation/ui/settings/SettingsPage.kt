@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.material.icons.Icons
@@ -35,7 +36,13 @@ fun SettingsPage(
     onBack: () -> Unit,
     content: LazyListScope.() -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    // 全屏独立页面（不在 AppShell 的顶栏下面），要自己让开状态栏/刘海，
+    // 否则标题和返回按钮会被顶到刘海底下 —— 点不到也看不清
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding(),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

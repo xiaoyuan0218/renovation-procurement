@@ -8,6 +8,8 @@ import com.xiaoyuan.renovation.mobile.data.model.LoginResultDto
 import com.xiaoyuan.renovation.mobile.data.prefs.AppPrefs
 import com.xiaoyuan.renovation.mobile.data.repo.ApiResult
 import com.xiaoyuan.renovation.mobile.data.repo.CurrentListHolder
+import com.xiaoyuan.renovation.mobile.domain.AddressParse
+import com.xiaoyuan.renovation.mobile.domain.ServerAddress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,8 +87,14 @@ class SyncEngine(
 
     /** 用用户刚填的地址登录，成功后把地址、账号、token 一起存下来。 */
     suspend fun login(url: String, username: String, password: String): ApiResult<LoginResultDto> {
-        val cleaned = url.trim().trimEnd('/')
-        if (cleaned.isBlank()) return ApiResult.Err("先填服务器地址")
+        // 用户随手填的地址要先收拾成合法 baseUrl：`192.168.31.200:8000` 这种省略
+        // 协议、甚至省略端口的写法必须支持 —— 原样塞给 OkHttp 会抛
+        // "Expected URL scheme ..."，用户只看到一串英文，就成了"连不上"
+        val cleaned = when (val parsed = ServerAddress.parse(url)) {
+            is AddressParse.Ok -> parsed.normalized
+            AddressParse.Empty -> return ApiResult.Err("先填服务器地址")
+            is AddressParse.Invalid -> return ApiResult.Err(parsed.reason)
+        }
         val result = SyncApi({ cleaned }, { "" }).login(username.trim(), password)
         if (result is ApiResult.Ok) {
             session.save(cleaned, result.data.username, result.data.token)

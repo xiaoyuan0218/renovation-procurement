@@ -14,6 +14,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -147,11 +150,27 @@ private suspend fun <T> call(block: suspend () -> T): ApiResult<T> = withContext
         ApiResult.Err(
             message = e.message ?: "请求被拒绝",
             code = e.code,
-            hint = if (e.code == 401) "到「设置 → 服务器」里重新登录" else null,
+            hint = if (e.code == 401) "账号和密码就是网页版登录用的那一套" else null,
+        )
+    } catch (e: UnknownHostException) {
+        // 这三种都是连不上，但原因不同 —— 分开说，用户才知道该改哪一头
+        ApiResult.Err(
+            message = "找不到这个地址",
+            hint = "检查服务器地址有没有输错",
+        )
+    } catch (e: ConnectException) {
+        ApiResult.Err(
+            message = "连不上服务器",
+            hint = "地址和端口对不对？手机要和服务器在同一个网络（同一个 WiFi）",
+        )
+    } catch (e: SocketTimeoutException) {
+        ApiResult.Err(
+            message = "连接超时",
+            hint = "网络能通但服务器一直没响应，确认服务还在运行",
         )
     } catch (e: IOException) {
         ApiResult.Err(
-            message = "无法连接服务器",
+            message = "网络错误",
             hint = "确认手机与服务器在同一网络，以及地址、端口是否正确",
         )
     } catch (e: Exception) {

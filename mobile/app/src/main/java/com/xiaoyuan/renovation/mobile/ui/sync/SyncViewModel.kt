@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
+/** 页面上的一条提示：失败要显眼（红底警示条），成功用薄荷绿。 */
+data class SyncNotice(val text: String, val error: Boolean = false)
+
 /** 「设置 → 服务器」那一块的状态。 */
 data class SyncUiState(
     val url: String = "",
@@ -26,7 +29,7 @@ data class SyncUiState(
     /** 服务器上有哪些清单（上传/拉取时给用户挑） */
     val remoteLists: List<ItemListDto> = emptyList(),
     val busy: Boolean = false,
-    val message: String? = null,
+    val notice: SyncNotice? = null,
     /** 需要用户拍板的冲突 */
     val conflicts: List<MergeConflict> = emptyList(),
     /** 服务器上那份清单已经不存在了 */
@@ -77,14 +80,16 @@ class SyncViewModel(
             when (val result = engine.login(url, username, password)) {
                 is ApiResult.Ok -> {
                     _state.value = _state.value.copy(
-                        message = "已连接 ${url.trim().trimEnd('/')}",
+                        notice = SyncNotice("已连接 ${url.trim().trimEnd('/')}"),
                     )
                     loadRemoteLists()
                 }
 
                 is ApiResult.Err -> {
                     val hint = result.hint?.let { "（$it）" }.orEmpty()
-                    _state.value = _state.value.copy(message = result.message + hint)
+                    _state.value = _state.value.copy(
+                        notice = SyncNotice(result.message + hint, error = true),
+                    )
                 }
             }
             _state.value = _state.value.copy(busy = false)
@@ -94,7 +99,7 @@ class SyncViewModel(
     fun logout() {
         viewModelScope.launch {
             engine.logout()
-            _state.value = _state.value.copy(message = "已退出登录", remoteLists = emptyList())
+            _state.value = _state.value.copy(notice = SyncNotice("已退出登录"), remoteLists = emptyList())
         }
     }
 
@@ -106,7 +111,8 @@ class SyncViewModel(
             _state.value = _state.value.copy(
                 busy = false,
                 remoteLists = result.okData.orEmpty(),
-                message = (result as? ApiResult.Err)?.message ?: _state.value.message,
+                notice = (result as? ApiResult.Err)?.let { SyncNotice(it.message, error = true) }
+                    ?: _state.value.notice,
             )
         }
     }
@@ -180,17 +186,20 @@ class SyncViewModel(
                         busy = false,
                         conflicts = outcome.conflicts,
                         remoteMissing = outcome.remoteMissing,
-                        message = when {
+                        notice = when {
                             outcome.hasConflicts -> null
                             outcome.remoteMissing -> null
-                            else -> "已同步"
+                            else -> SyncNotice("已同步")
                         },
                     )
                     if (!outcome.hasConflicts && !outcome.remoteMissing) refreshBindings()
                 }
 
                 is ApiResult.Err -> {
-                    _state.value = _state.value.copy(busy = false, message = result.message)
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        notice = SyncNotice(result.message, error = true),
+                    )
                 }
             }
         }
@@ -213,7 +222,7 @@ class SyncViewModel(
             } else {
                 engine.unbind(listId)
                 refreshBindings()
-                _state.value = _state.value.copy(message = "已解除绑定，这份清单继续在本地用")
+                _state.value = _state.value.copy(notice = SyncNotice("已解除绑定，这份清单继续在本地用"))
             }
         }
     }
@@ -223,21 +232,21 @@ class SyncViewModel(
             engine.unbind(listId)
             refreshBindings()
             _state.value = _state.value.copy(
-                message = if (keepRemote) "已解除绑定，服务器上那份还留着" else "已解除绑定",
+                notice = SyncNotice(if (keepRemote) "已解除绑定，服务器上那份还留着" else "已解除绑定"),
             )
         }
     }
 
     fun consumeMessage() {
-        _state.value = _state.value.copy(message = null)
+        _state.value = _state.value.copy(notice = null)
     }
 
     private fun report(result: ApiResult<*>, success: String) {
         _state.value = _state.value.copy(
             busy = false,
-            message = when (result) {
-                is ApiResult.Ok -> success
-                is ApiResult.Err -> result.message
+            notice = when (result) {
+                is ApiResult.Ok -> SyncNotice(success)
+                is ApiResult.Err -> SyncNotice(result.message, error = true)
             },
         )
     }
