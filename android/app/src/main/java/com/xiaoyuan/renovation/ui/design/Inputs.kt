@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -237,8 +238,11 @@ fun <T> AppSelect(
     enabled: Boolean = true,
     isItemEnabled: (T) -> Boolean = { true },
     isItemSelected: (T) -> Boolean = { selected == it },
+    /** 列表长的时候打开搜索框（选物料、选清单都用得上） */
+    searchable: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var keyword by remember { mutableStateOf("") }
     val shape = RoundedCornerShape(14.dp)
 
     Box(modifier) {
@@ -273,9 +277,31 @@ fun <T> AppSelect(
         }
         DropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { expanded = false },
-                modifier = Modifier.background(Ink.BgMid),
+                onDismissRequest = {
+                    expanded = false
+                    keyword = ""
+                },
+                modifier = Modifier
+                    .background(Ink.BgMid)
+                    // 限高：几十条物料时不至于把整屏铺满
+                    .heightIn(max = 420.dp),
             ) {
+                if (searchable) {
+                    Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        AppTextField(
+                            value = keyword,
+                            onValueChange = { keyword = it },
+                            label = "搜索",
+                            imeAction = ImeAction.Done,
+                        )
+                    }
+                    GlassDivider()
+                }
+                val shown = if (!searchable || keyword.isBlank()) {
+                    items
+                } else {
+                    items.filter { itemLabel(it).contains(keyword, ignoreCase = true) }
+                }
                 if (allowClear) {
                     DropdownMenuItem(
                         text = { Text(clearLabel, color = Ink.TextSecondary) },
@@ -285,7 +311,7 @@ fun <T> AppSelect(
                         },
                     )
                 }
-                items.forEach { item ->
+                shown.forEach { item ->
                     val itemEnabled = isItemEnabled(item)
                     val isSelected = isItemSelected(item)
                     DropdownMenuItem(
@@ -304,7 +330,15 @@ fun <T> AppSelect(
                         onClick = {
                             onSelect(item)
                             expanded = false
+                            keyword = ""
                         },
+                    )
+                }
+                if (shown.isEmpty()) {
+                    DropdownMenuItem(
+                        text = { Text("没有匹配的", color = Ink.TextMuted) },
+                        enabled = false,
+                        onClick = {},
                     )
                 }
         }

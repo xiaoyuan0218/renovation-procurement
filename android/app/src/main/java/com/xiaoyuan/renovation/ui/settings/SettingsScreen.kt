@@ -498,6 +498,8 @@ fun SettingsScreen(
                                         onSelect = { expItemId = it?.id },
                                         allowClear = true,
                                         clearLabel = "不关联",
+                                        // 物料几十条，下拉里给个搜索框
+                                        searchable = true,
                                     )
                                 }
                                 Spacer(Modifier.height(12.dp))
