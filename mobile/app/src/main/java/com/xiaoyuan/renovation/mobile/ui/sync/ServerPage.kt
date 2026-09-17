@@ -93,6 +93,11 @@ fun ServerPage(
     LaunchedEffect(state.notice) {
         if (state.notice != null) listState.animateScrollToItem(0)
     }
+    // 上传/拉取/同步成功 → 通知外层刷新：清单列表、看板、下拉里的条目数都要跟着变，
+    // 不通知的话新拉下来的清单要重启 App 才看得见
+    LaunchedEffect(state.changed) {
+        if (state.changed > 0) onChanged()
+    }
 
     SettingsPage(
         title = "服务器",
@@ -137,7 +142,7 @@ fun ServerPage(
 
         if (state.loggedIn && lists.isNotEmpty()) {
             item {
-                SectionTitle("与服务器同步", caption = "每份清单各自决定要不同步")
+                SectionTitle("与服务器同步", caption = "「同步」是双向的：手机上的改动传上去，电脑上的改动拉下来")
             }
             items(lists, key = { "local-${it.id}" }) { list ->
                 val binding = state.bindings[list.id]
@@ -333,7 +338,8 @@ private fun SyncListRow(
                 )
             }
             TagPill(
-                text = if (bound) "同步中" else "本地",
+                // 「同步中」容易被当成"正在同步"，实际表示这份清单两头都会同步
+                text = if (bound) "双向同步" else "本地",
                 color = if (bound) Ink.Mint else Ink.TextSecondary,
             )
         }

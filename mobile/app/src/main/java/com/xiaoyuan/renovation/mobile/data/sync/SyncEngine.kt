@@ -39,7 +39,11 @@ class ServerSession(private val prefs: AppPrefs, scope: CoroutineScope) {
     init {
         scope.launch { prefs.serverUrl.collect { _url.value = it } }
         scope.launch { prefs.username.collect { _username.value = it } }
-        scope.launch { prefs.token.collect { _token.value = it } }
+        scope.launch {
+            // 读不出来就当未登录，但别让收集器静默死掉 —— 不然登录态永远恢复不了
+            runCatching { prefs.token.collect { _token.value = it } }
+                .onFailure { android.util.Log.w("ServerSession", "token 读取失败", it) }
+        }
     }
 
     suspend fun save(url: String, username: String, token: String) {

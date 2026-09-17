@@ -30,6 +30,11 @@ data class SyncUiState(
     val remoteLists: List<ItemListDto> = emptyList(),
     val busy: Boolean = false,
     val notice: SyncNotice? = null,
+    /**
+     * 每成功改动一次清单数据就 +1（上传、拉取、同步、解绑）。
+     * 界面监听它通知外层刷新 —— 拉取完不刷新的话，新清单要重启 App 才看得见。
+     */
+    val changed: Int = 0,
     /** 需要用户拍板的冲突 */
     val conflicts: List<MergeConflict> = emptyList(),
     /** 服务器上那份清单已经不存在了 */
@@ -68,7 +73,11 @@ class SyncViewModel(
 
     fun refreshBindings() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(bindings = engine.allBindings())
+            // 先把绑定点查出来再改 state：写成 `copy(bindings = engine.allBindings())`
+            // 的话，`_state.value` 会在挂起**之前**求值 —— 查询跑完（几十毫秒）拿旧快照
+            // 覆盖，把期间刚更新的登录态一起抹掉（设置页显示"未连接"就是这么来的）
+            val bindings = engine.allBindings()
+            _state.value = _state.value.copy(bindings = bindings)
         }
     }
 
@@ -149,6 +158,7 @@ class SyncViewModel(
             _state.value = _state.value.copy(busy = true)
             val result = engine.upload(listId, name, remoteListId = null)
             report(result, "已上传到服务器，以后可以和这份清单双向同步")
+            if (result is ApiResult.Ok) markChanged()
             refreshBindings()
         }
     }
@@ -159,6 +169,7 @@ class SyncViewModel(
             _state.value = _state.value.copy(busy = true)
             val result = engine.upload(listId, name, remoteListId = remoteListId, force = true)
             report(result, "已覆盖服务器上那一份")
+            if (result is ApiResult.Ok) markChanged()
             refreshBindings()
         }
     }
@@ -169,6 +180,7 @@ class SyncViewModel(
             _state.value = _state.value.copy(busy = true)
             val result = engine.pullAsNewList(remoteListId, name)
             report(result, "已拉到本地，之后可以和它双向同步")
+            if (result is ApiResult.Ok) markChanged()
             refreshBindings()
         }
     }
@@ -192,7 +204,10 @@ class SyncViewModel(
                             else -> SyncNotice("已同步")
                         },
                     )
-                    if (!outcome.hasConflicts && !outcome.remoteMissing) refreshBindings()
+                    if (!outcome.hasConflicts && !outcome.remoteMissing) {
+                        markChanged()
+                        refreshBindings()
+                    }
                 }
 
                 is ApiResult.Err -> {
@@ -221,6 +236,7 @@ class SyncViewModel(
                 uploadAsNew(listId, name)
             } else {
                 engine.unbind(listId)
+                markChanged()
                 refreshBindings()
                 _state.value = _state.value.copy(notice = SyncNotice("已解除绑定，这份清单继续在本地用"))
             }
@@ -230,6 +246,7 @@ class SyncViewModel(
     fun unbind(listId: Int, keepRemote: Boolean = true) {
         viewModelScope.launch {
             engine.unbind(listId)
+            markChanged()
             refreshBindings()
             _state.value = _state.value.copy(
                 notice = SyncNotice(if (keepRemote) "已解除绑定，服务器上那份还留着" else "已解除绑定"),
@@ -239,6 +256,11 @@ class SyncViewModel(
 
     fun consumeMessage() {
         _state.value = _state.value.copy(notice = null)
+    }
+
+    /** 数据变过了：通知界面刷新（清单列表、看板、下拉里的条目数都跟着变）。 */
+    private fun markChanged() {
+        _state.value = _state.value.copy(changed = _state.value.changed + 1)
     }
 
     private fun report(result: ApiResult<*>, success: String) {

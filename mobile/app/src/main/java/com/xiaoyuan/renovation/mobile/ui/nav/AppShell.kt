@@ -59,6 +59,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.xiaoyuan.renovation.mobile.di.AppContainer
 import com.xiaoyuan.renovation.mobile.ui.common.containerViewModel
+import com.xiaoyuan.renovation.mobile.ui.common.sharedViewModel
 import com.xiaoyuan.renovation.mobile.ui.dashboard.DashboardScreen
 import com.xiaoyuan.renovation.mobile.ui.dashboard.DashboardViewModel
 import com.xiaoyuan.renovation.mobile.ui.items.ItemEditScreen
@@ -110,24 +111,24 @@ fun AppShellHost(container: AppContainer) {
             val back = { navController.popBackStack(); Unit }
             when (page) {
                 "lists" -> ListsPage(
-                    listsVm = containerViewModel(container) {
+                    listsVm = sharedViewModel(container) {
                         ListsViewModel(it.repo, it.currentList, it::bumpDataVersion)
                     },
                     onBack = back,
                 )
 
                 "rooms" -> RoomsPage(
-                    vm = containerViewModel(container) { SettingsViewModel(it.repo) },
+                    vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
                     onBack = back,
                 )
 
                 "expenses" -> ExpensesPage(
-                    vm = containerViewModel(container) { SettingsViewModel(it.repo) },
+                    vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
                     onBack = back,
                 )
 
                 "trash" -> TrashPage(
-                    vm = containerViewModel(container) { SettingsViewModel(it.repo) },
+                    vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
                     onBack = back,
                 )
 
@@ -136,13 +137,17 @@ fun AppShellHost(container: AppContainer) {
                 "about" -> AboutPage(onBack = back)
 
                 "server" -> {
-                    val pageListsVm: ListsViewModel = containerViewModel(container) {
+                    val pageListsVm: ListsViewModel = sharedViewModel(container) {
                         ListsViewModel(it.repo, it.currentList, it::bumpDataVersion)
                     }
+                    // 拉取/上传/同步会 bumpDataVersion，这里跟着重读 —— 不跟的话
+                    // 新拉下来的清单要退出 App 重进才出现
+                    val refreshKey by container.dataVersion.collectAsStateWithLifecycle()
+                    LaunchedEffect(refreshKey) { pageListsVm.loadIfStale(refreshKey) }
                     val lists by pageListsVm.lists.collectAsStateWithLifecycle()
                     val currentId by pageListsVm.currentId.collectAsStateWithLifecycle()
                     ServerPage(
-                        vm = containerViewModel(container) { SyncViewModel(it.sync, it.repo, it.session) },
+                        vm = sharedViewModel(container) { SyncViewModel(it.sync, it.repo, it.session) },
                         lists = lists,
                         currentListId = currentId,
                         onChanged = container::bumpDataVersion,
@@ -178,11 +183,14 @@ private fun AppShell(
     val dashboardVm: DashboardViewModel = containerViewModel(container) { DashboardViewModel(it.repo) }
     val itemsVm: ItemsViewModel = containerViewModel(container) { ItemsViewModel(it.repo) }
     val matrixVm: MatrixViewModel = containerViewModel(container) { MatrixViewModel(it.repo) }
-    val listsVm: ListsViewModel = containerViewModel(container) {
+    // 这三份状态设置子页面也在用（服务器页要读登录态、分组页要读分组），
+    // 得挂 Activity 级共享实例 —— 两个导航条目各拿一份的话，会出现
+    // 「设置里显示未连接、点进去其实连着」这种状态对不上的问题
+    val listsVm: ListsViewModel = sharedViewModel(container) {
         ListsViewModel(it.repo, it.currentList, it::bumpDataVersion)
     }
-    val settingsVm: SettingsViewModel = containerViewModel(container) { SettingsViewModel(it.repo) }
-    val syncVm: SyncViewModel = containerViewModel(container) {
+    val settingsVm: SettingsViewModel = sharedViewModel(container) { SettingsViewModel(it.repo) }
+    val syncVm: SyncViewModel = sharedViewModel(container) {
         SyncViewModel(it.sync, it.repo, it.session)
     }
 
