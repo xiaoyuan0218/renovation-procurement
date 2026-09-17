@@ -89,14 +89,15 @@ jobs:
           name: mobile-apk
           path: apks/mobile
 
-      # 资产名固定，直链才不会随构建变；改这里的名字 = 改直链，两处要一起来
+      # 资产名固定，直链才不会随构建变；改这里的名字 = 改直链，两处要一起来。
+      # artifact 内部的目录结构由 upload-artifact 决定（会剥掉公共前缀），用 find 定位最稳。
       - name: 改成固定的资产名
         run: |
           mkdir -p out
-          cp apks/android/app-release.apk out/caizhidao-online.apk
-          cp apks/android/app-debug.apk   out/caizhidao-online-debug.apk
-          cp apks/mobile/app-release.apk  out/caizhidao-offline.apk
-          cp apks/mobile/app-debug.apk    out/caizhidao-offline-debug.apk
+          cp "$(find apks/android -name app-release.apk -print -quit)" out/caizhidao-online.apk
+          cp "$(find apks/android -name app-debug.apk   -print -quit)" out/caizhidao-online-debug.apk
+          cp "$(find apks/mobile  -name app-release.apk -print -quit)" out/caizhidao-offline.apk
+          cp "$(find apks/mobile  -name app-debug.apk   -print -quit)" out/caizhidao-offline-debug.apk
           ls -la out
 
       - uses: softprops/action-gh-release@v2
