@@ -80,6 +80,10 @@ jobs:
     needs: [android, mobile]
     runs-on: ubuntu-latest
     steps:
+      # gh release 要读 git 上下文（拿当前 commit 当 tag 的目标），没 checkout 会报
+      # "failed to run git: not a git repository"
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: android-apk
