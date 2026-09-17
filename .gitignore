@@ -26,3 +26,6 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+
+# 本地临时实例（测试用的数据目录与密钥）
+backend/_tmp_*/
