@@ -4,6 +4,8 @@
 /data/
 /seed/
 /screenshots/
+/screenshots-mobile/
+/.wt-tmp/
 # 依赖本地 seed 原始表格的测试，含真实物料/金额，仅本机保留
 backend/tests/test_import_original.py
 
