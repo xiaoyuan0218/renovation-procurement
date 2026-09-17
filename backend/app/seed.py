@@ -1,5 +1,7 @@
 """首次启动时建表、迁移老库、写入默认清单/分组/分类（都可在「设置」里增改）。"""
 
+from datetime import datetime
+
 from sqlalchemy import text
 
 from . import migrations
@@ -79,6 +81,22 @@ def _add_missing_columns():
         conn.execute(text("DELETE FROM allocations WHERE item_id NOT IN (SELECT id FROM items)"))
         conn.execute(text("DELETE FROM allocations WHERE room_id NOT IN (SELECT id FROM rooms)"))
         conn.execute(text("DELETE FROM purchase_records WHERE item_id NOT IN (SELECT id FROM items)"))
+
+        # 时间戳（创建/修改）：老表补列并用迁移时刻回填 —— 历史数据没有真实时间，
+        # 回填值只表示"从这一刻起开始记录"，界面与同步判冲突都以它为准。
+        for table in ("lists", "items", "rooms", "categories",
+                      "purchase_records", "extra_expenses"):
+            cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))]
+            if not cols:
+                continue
+            for col in ("created_at", "updated_at"):
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} DATETIME"))
+            conn.execute(
+                text(f"UPDATE {table} SET created_at = COALESCE(created_at, :now), "
+                     f"updated_at = COALESCE(updated_at, :now)"),
+                {"now": datetime.now()},
+            )
 
 
 def _backfill_list_codes(conn) -> None:

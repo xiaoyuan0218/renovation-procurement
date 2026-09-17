@@ -50,6 +50,7 @@ class ItemList(Base):
     # 可空是为升级路径服务（SQLite 加列不能 NOT NULL 且无默认值），老库由 seed
     # 的轻量迁移回填，应用层建清单时必定赋值。
     code = Column(String(12), index=True, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # 删清单就把它名下的东西一起带走；ORM 级联不依赖数据库的外键开关
     items = relationship("Item", back_populates="item_list",
@@ -85,6 +86,7 @@ class ExtraExpense(Base):
     # 钱记录不能因为整理物料就消失。
     item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     item_list = relationship("ItemList", back_populates="expenses")
     item = relationship("Item")
@@ -102,6 +104,8 @@ class Category(Base):
                      nullable=True, index=True, default=_first_list_id)
     name = Column(String(50), nullable=False)
     sort = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     item_list = relationship("ItemList", back_populates="categories")
     items = relationship("Item", back_populates="category")
@@ -115,6 +119,8 @@ class Room(Base):
                      nullable=True, index=True, default=_first_list_id)
     name = Column(String(50), nullable=False)
     sort = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     item_list = relationship("ItemList", back_populates="rooms")
     allocations = relationship("Allocation", back_populates="room",
@@ -148,6 +154,8 @@ class Item(Base):
     # 移进回收站的时间；空 = 正常。删除改成软删是为了"删错了还能捞回来"——
     # 连带清掉的采购记录是历史，删一条物料就永久丢掉那些记录太狠了。
     deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     @classmethod
     def alive(cls):
@@ -182,6 +190,8 @@ class PurchaseRecord(Base):
     # 这笔钱是给哪个分组花的（选填）。填了它，"这间买齐了没"就是算出来的而不是猜的；
     # 删分组时置空而不是级联删 —— 付款记录是钱，不能因为整理分组就消失。
     room_id = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     item = relationship("Item", back_populates="records")
     # 这笔钱涉及的分组（可多选）。一次采购常常同时买几间的东西，

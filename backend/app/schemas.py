@@ -1,8 +1,25 @@
+from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (BaseModel, ConfigDict, Field, field_serializer,
+                      field_validator)
 
 from .services import dates as date_utils
+
+
+class Timestamped(BaseModel):
+    """带创建/修改时间的输出模型（各实体 Out 都继承它）。
+
+    统一格式化成 `YYYY-MM-DD HH:MM:SS`：与客户端 `nowStamp()` 同格式，
+    等宽字符串的字典序就是时间序，同步判冲突可以直接比大小。
+    """
+
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_serializer("created_at", "updated_at")
+    def _fmt_timestamp(self, value):
+        return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
 
 
 class ItemListIn(BaseModel):
@@ -16,7 +33,7 @@ class ItemListIn(BaseModel):
     copy_from: Optional[int] = None
 
 
-class ItemListOut(BaseModel):
+class ItemListOut(Timestamped):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
@@ -40,7 +57,7 @@ class CategoryIn(BaseModel):
     sort: int = 0
 
 
-class CategoryOut(BaseModel):
+class CategoryOut(Timestamped):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
@@ -52,7 +69,7 @@ class RoomIn(BaseModel):
     sort: int = 0
 
 
-class RoomOut(BaseModel):
+class RoomOut(Timestamped):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
@@ -120,7 +137,7 @@ class RecordPatchIn(BaseModel):
             raise ValueError(str(e)) from e
 
 
-class RecordOut(BaseModel):
+class RecordOut(Timestamped):
     id: int
     item_id: int
     qty: float
@@ -153,7 +170,7 @@ class ExpenseIn(BaseModel):
             raise ValueError(str(e)) from e
 
 
-class ExpenseOut(BaseModel):
+class ExpenseOut(Timestamped):
     model_config = ConfigDict(from_attributes=True)
     id: int
     kind: str
@@ -213,7 +230,7 @@ class BatchDeleteIn(BaseModel):
     ids: list[int]  # 要删除的物料 ID 列表
 
 
-class ItemOut(BaseModel):
+class ItemOut(Timestamped):
     id: int
     name: str
     category_id: Optional[int] = None

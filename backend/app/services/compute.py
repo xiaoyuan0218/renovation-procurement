@@ -195,6 +195,8 @@ def item_dict(item) -> dict:
         "daily_discount": item_daily_discount(item),
         "status": item_status(item),
         "rev": item.rev or 1,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
         "records": [
             {
                 "id": r.id,
@@ -210,6 +212,8 @@ def item_dict(item) -> dict:
                 # room_ids 是现在的写法（可多选）；room_id 留给老客户端看
                 "room_ids": [rr.room_id for rr in r.rooms if rr.room_id],
                 "room_id": next((rr.room_id for rr in r.rooms if rr.room_id), None),
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
             }
             for r in item.records
         ],

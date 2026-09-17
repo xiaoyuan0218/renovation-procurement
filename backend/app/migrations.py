@@ -135,20 +135,24 @@ def _ensure_default_list(cur, name: str) -> int:
 
 
 def _rebuild_categories(cur, default_id: int) -> None:
-    """按 (list_id, name) 唯一重建 categories，保留原 id。"""
-    cur.execute("""
+    """按 (list_id, name) 唯一重建 categories，保留原 id 与创建/修改时间。"""
+    cols = _columns(cur, "categories")
+    has_ts = "created_at" in cols and "updated_at" in cols
+    ts_decl = "created_at DATETIME, updated_at DATETIME, " if has_ts else ""
+    ts_cols = ", created_at, updated_at" if has_ts else ""
+    cur.execute(f"""
         CREATE TABLE categories_new (
             id INTEGER NOT NULL,
             list_id INTEGER,
             name VARCHAR(50) NOT NULL,
             sort INTEGER,
-            PRIMARY KEY (id),
+            {ts_decl}PRIMARY KEY (id),
             CONSTRAINT uq_category_list_name UNIQUE (list_id, name),
             FOREIGN KEY(list_id) REFERENCES lists (id) ON DELETE CASCADE
         )
     """)
-    cur.execute("INSERT INTO categories_new (id, list_id, name, sort) "
-                "SELECT id, ?, name, sort FROM categories", (default_id,))
+    cur.execute(f"INSERT INTO categories_new (id, list_id, name, sort{ts_cols}) "
+                f"SELECT id, ?, name, sort{ts_cols} FROM categories", (default_id,))
     cur.execute("DROP TABLE categories")
     cur.execute("ALTER TABLE categories_new RENAME TO categories")
 
