@@ -29,6 +29,8 @@ data class DraftRecord(
     val orderNo: String = "",
     /** 这笔钱涉及的分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 */
     val roomIds: List<Int> = emptyList(),
+    /** 什么时候记的（新加的行还没有，保存后才由服务端盖章） */
+    val createdAt: String = "",
 )
 
 /** 编辑中的一条分配。 */
@@ -147,6 +149,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
                                     vendor = it.vendor,
                                     orderNo = it.orderNo,
                                     roomIds = it.roomIds,
+                                    createdAt = it.createdAt,
                                 )
                             },
                             allocations = item.allocations.map {

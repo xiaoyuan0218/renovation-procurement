@@ -37,7 +37,17 @@ object Merger {
             nameOf = { it.name },
             preferLocal = preferLocal,
             conflicts = conflicts,
-        ).map { (localId, row) -> SyncRoom(id = localId, name = row.name, sort = row.sort) }
+            localTs = mine.rooms.associate { (it.id ?: 0) to it.updatedAt },
+            remoteTs = theirs.rooms.associate { localOf("room", it.id) to it.updatedAt },
+        ).map { (localId, row) ->
+            val mineRow = mine.rooms.firstOrNull { (it.id ?: 0) == localId }
+            val remoteRow = theirs.rooms.firstOrNull { localOf("room", it.id) == localId }
+            SyncRoom(
+                id = localId, name = row.name, sort = row.sort,
+                createdAt = pickCreated(mineRow?.createdAt, remoteRow?.createdAt),
+                updatedAt = pickUpdated(mineRow?.updatedAt, remoteRow?.updatedAt),
+            )
+        }
 
         /* ---------- 分类 ---------- */
         val categories = mergeSimple(
@@ -48,8 +58,16 @@ object Merger {
             nameOf = { it.name },
             preferLocal = preferLocal,
             conflicts = conflicts,
+            localTs = mine.categories.associate { (it.id ?: 0) to it.updatedAt },
+            remoteTs = theirs.categories.associate { localOf("category", it.id) to it.updatedAt },
         ).map { (localId, row) ->
-            SyncCategory(id = localId, name = row.name, sort = row.sort)
+            val mineRow = mine.categories.firstOrNull { (it.id ?: 0) == localId }
+            val remoteRow = theirs.categories.firstOrNull { localOf("category", it.id) == localId }
+            SyncCategory(
+                id = localId, name = row.name, sort = row.sort,
+                createdAt = pickCreated(mineRow?.createdAt, remoteRow?.createdAt),
+                updatedAt = pickUpdated(mineRow?.updatedAt, remoteRow?.updatedAt),
+            )
         }
 
         /* ---------- 物料（连同它的分配与采购记录一起比：它们是一体的）---------- */
@@ -104,7 +122,11 @@ object Merger {
             nameOf = { it.name },
             preferLocal = preferLocal,
             conflicts = conflicts,
+            localTs = mine.items.associate { (it.id ?: 0) to it.updatedAt },
+            remoteTs = theirs.items.associate { localOf("item", it.id) to it.updatedAt },
         ).map { (localId, row) ->
+            val mineItem = mine.items.firstOrNull { (it.id ?: 0) == localId }
+            val remoteItem = theirs.items.firstOrNull { localOf("item", it.id) == localId }
             SyncItem(
                 id = localId,
                 name = row.name,
@@ -118,6 +140,8 @@ object Merger {
                 note = row.note,
                 sort = row.sort,
                 deletedAt = row.deletedAt,
+                createdAt = pickCreated(mineItem?.createdAt, remoteItem?.createdAt),
+                updatedAt = pickUpdated(mineItem?.updatedAt, remoteItem?.updatedAt),
                 allocations = row.allocations.map {
                     SyncAllocation(
                         roomId = it.roomId,
@@ -126,15 +150,20 @@ object Merger {
                         note = it.note,
                     )
                 },
-                records = row.records.map {
+                records = row.records.map { r ->
+                    // 按内容把这条记录在两边的原身找回来，取它的时间戳
+                    val mRec = mineItem?.records?.firstOrNull { sameRecord(it, r) }
+                    val tRec = remoteItem?.records?.firstOrNull { sameRecord(it, r) }
                     SyncRecord(
-                        qty = it.qty,
-                        amount = it.amount,
-                        date = it.date,
-                        note = it.note,
-                        vendor = it.vendor,
-                        orderNo = it.orderNo,
-                        roomIds = it.roomIds,
+                        qty = r.qty,
+                        amount = r.amount,
+                        date = r.date,
+                        note = r.note,
+                        vendor = r.vendor,
+                        orderNo = r.orderNo,
+                        roomIds = r.roomIds,
+                        createdAt = pickCreated(mRec?.createdAt, tRec?.createdAt),
+                        updatedAt = pickUpdated(mRec?.updatedAt, tRec?.updatedAt),
                     )
                 },
             )
@@ -153,7 +182,11 @@ object Merger {
             nameOf = { "${it.kind} ${it.amount}" },
             preferLocal = preferLocal,
             conflicts = conflicts,
+            localTs = mine.expenses.associate { (it.id ?: 0) to it.updatedAt },
+            remoteTs = theirs.expenses.associate { localOf("expense", it.id) to it.updatedAt },
         ).map { (localId, row) ->
+            val mineRow = mine.expenses.firstOrNull { (it.id ?: 0) == localId }
+            val remoteRow = theirs.expenses.firstOrNull { localOf("expense", it.id) == localId }
             SyncExpense(
                 id = localId,
                 kind = row.kind,
@@ -163,6 +196,8 @@ object Merger {
                 orderNo = row.orderNo,
                 note = row.note,
                 itemId = row.itemId,
+                createdAt = pickCreated(mineRow?.createdAt, remoteRow?.createdAt),
+                updatedAt = pickUpdated(mineRow?.updatedAt, remoteRow?.updatedAt),
             )
         }
 
@@ -180,6 +215,41 @@ object Merger {
 
     /* ---------------- 内部：按行合并（分组/分类/物料/费用 走同一套判定） ---------------- */
 
+    /**
+     * 是不是同一条采购记录（Payload 里的一条 vs 合并后的一行）。记录跟着物料
+     * 整条合并，合并后要按内容把原身找回来才拿得到时间戳 —— 按 roomIds 比会
+     * 失配：两端的分组 id 空间不同。
+     */
+    private fun sameRecord(original: SyncRecord, row: RecordRow): Boolean =
+        original.qty == row.qty && original.amount == row.amount &&
+            original.date == row.date && original.note == row.note &&
+            original.vendor == row.vendor && original.orderNo == row.orderNo
+
+    /**
+     * 合并结果的时间戳：创建取较早、修改取较新 —— 两边都可能动过这行。
+     *
+     * 结果 payload 要带上时间戳推给服务器；缺了的话服务端只能用"当下"兜底，
+     * 于是没改过的行也会显得刚改过（判冲突就成了本地永远赢）。
+     */
+    private fun pickCreated(vararg values: String?): String =
+        values.filterNotNull().filter { it.isNotBlank() }.minOrNull().orEmpty()
+
+    private fun pickUpdated(vararg values: String?): String =
+        values.filterNotNull().filter { it.isNotBlank() }.maxOrNull().orEmpty()
+
+    /**
+     * 比两个时间戳谁新。等宽 `YYYY-MM-DD HH:MM:SS` 的字典序就是时间序。
+     * 返回 1 本地新、-1 服务器新、0 判不出来（任一方没有时间戳、或两者相同）。
+     */
+    private fun newerSide(local: String?, remote: String?): Int {
+        if (local.isNullOrBlank() || remote.isNullOrBlank()) return 0
+        return when {
+            local > remote -> 1
+            local < remote -> -1
+            else -> 0
+        }
+    }
+
     private inline fun <T> mergeSimple(
         base: Map<Int, T>,
         mine: Map<Int, T>,
@@ -188,6 +258,9 @@ object Merger {
         nameOf: (T) -> String,
         preferLocal: Boolean,
         conflicts: MutableList<MergeConflict>,
+        /** 两边都改过时用它们判谁新；不给就表示这类行没有时间戳可比 */
+        localTs: Map<Int, String> = emptyMap(),
+        remoteTs: Map<Int, String> = emptyMap(),
     ): Map<Int, T> {
         val result = mutableMapOf<Int, T>()
         val keys = base.keys + mine.keys + theirs.keys
@@ -202,9 +275,16 @@ object Merger {
                     m == b -> result[key] = t                       // 我没动
                     t == b -> result[key] = m                       // 他没动
                     m == t -> result[key] = m                       // 都改成一样
-                    else -> {
-                        conflicts += MergeConflict(label, nameOf(m))
-                        result[key] = if (preferLocal) m else t
+                    else -> when (newerSide(localTs[key], remoteTs[key])) {
+                        // 两边都改过：谁的时间新听谁的。时间戳是写入方自己盖的，
+                        // 比"谁点了保存"更接近事实；判不出来（老数据没时间戳、
+                        // 或两端同秒）才弹窗让用户拍板
+                        1 -> result[key] = m
+                        -1 -> result[key] = t
+                        else -> {
+                            conflicts += MergeConflict(label, nameOf(m))
+                            result[key] = if (preferLocal) m else t
+                        }
                     }
                 }
 

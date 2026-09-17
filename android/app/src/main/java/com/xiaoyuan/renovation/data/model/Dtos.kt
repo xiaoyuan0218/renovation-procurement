@@ -59,6 +59,9 @@ data class RecordDto(
     @SerialName("order_no") val orderNo: String = "",
     /** 这笔钱涉及的分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 */
     @SerialName("room_ids") val roomIds: List<Int> = emptyList(),
+    /** 什么时候记的 / 最后改的（界面上显示，判冲突时也比它） */
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
 )
 
 @Serializable

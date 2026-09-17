@@ -10,8 +10,8 @@ import com.xiaoyuan.renovation.mobile.data.db.PurchaseRecordEntity
 import com.xiaoyuan.renovation.mobile.data.db.RecordRoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.RoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.CategoryEntity
+import com.xiaoyuan.renovation.mobile.data.db.adopted
 import com.xiaoyuan.renovation.mobile.data.db.nowStamp
-import com.xiaoyuan.renovation.mobile.data.db.stamped
 import com.xiaoyuan.renovation.mobile.util.ListCodes
 
 /**
@@ -131,7 +131,7 @@ object Snapshot {
                 RoomEntity(
                     listId = listId, name = room.name, sort = room.sort,
                     createdAt = room.createdAt, updatedAt = room.updatedAt,
-                ).stamped(),
+                ).adopted(),
             ).toInt()
             room.id?.let {
                 roomIds[it] = newId
@@ -145,7 +145,7 @@ object Snapshot {
                 CategoryEntity(
                     listId = listId, name = category.name, sort = category.sort,
                     createdAt = category.createdAt, updatedAt = category.updatedAt,
-                ).stamped(),
+                ).adopted(),
             ).toInt()
             category.id?.let {
                 categoryIds[it] = newId
@@ -171,7 +171,7 @@ object Snapshot {
                     deletedAt = item.deletedAt,
                     createdAt = item.createdAt,
                     updatedAt = item.updatedAt,
-                ).stamped(),
+                ).adopted(),
             ).toInt()
             item.id?.let {
                 itemIds[it] = newId
@@ -204,7 +204,7 @@ object Snapshot {
                         roomId = record.roomIds.firstOrNull()?.let { roomIds[it] },
                         createdAt = record.createdAt,
                         updatedAt = record.updatedAt,
-                    ).stamped(),
+                    ).adopted(),
                 ).toInt()
                 record.roomIds.forEach { remoteRoomId ->
                     roomIds[remoteRoomId]?.let { localRoomId ->
@@ -229,7 +229,7 @@ object Snapshot {
                     itemId = expense.itemId?.let { itemIds[it] },
                     createdAt = expense.createdAt,
                     updatedAt = expense.updatedAt,
-                ).stamped(),
+                ).adopted(),
             )
         }
 
@@ -243,7 +243,9 @@ object Snapshot {
                 name = name,
                 note = payload.list.note,
                 sort = db.lists().nextSort(),
-                createdAt = nowStamp(),
+                // 从服务器拉下来的清单：时间戳跟着来源走（没有才用当下）
+                createdAt = payload.list.createdAt.ifEmpty { nowStamp() },
+                updatedAt = payload.list.updatedAt.ifEmpty { nowStamp() },
                 // 服务器那份有编号就用它的：两边一致，一眼认得出是同一份
                 code = ListCodes.normalize(payload.list.code).ifEmpty { ListCodes.new() },
             ),

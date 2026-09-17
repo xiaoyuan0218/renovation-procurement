@@ -35,6 +35,8 @@ watch(visible, (v) => {
         qty: r.qty || 0, amount: r.amount || 0, date: r.date || '', note: r.note || '',
         vendor: r.vendor || '', order_no: r.order_no || '',
         room_ids: [...(r.room_ids || [])],
+        // 服务端盖的时间戳：只读展示，保存时不回传（回传由服务端自己维护）
+        created_at: r.created_at || '', updated_at: r.updated_at || '',
       })),
     }
   } else {
@@ -58,6 +60,15 @@ const allocationsLocked = computed(() => form.value.allocations.length > 0)
 
 const maxBoughtQty = computed(() =>
   form.value.allocations.length ? allocQtyTotal.value : Number(form.value.qty_total || 0))
+
+// 服务端盖的时间戳形如 'YYYY-MM-DD HH:MM:SS'；表格里空间紧，掐掉年份
+const shortStamp = (s) => (s && s.length >= 16 ? s.slice(5, 16) : '')
+const stampTitle = (row) => {
+  if (!row.created_at) return '升级前的老数据，没有时间戳'
+  const updated = row.updated_at && row.updated_at !== row.created_at
+    ? `\n最后修改 ${row.updated_at}` : ''
+  return `记录于 ${row.created_at}${updated}`
+}
 
 const recordsQtySum = computed(() =>
   form.value.records.reduce((s, r) => s + (Number(r.qty) || 0), 0))
@@ -327,6 +338,12 @@ async function save() {
                               placeholder="选择日期" size="small" style="width:100%" />
             </template>
           </el-table-column>
+          <!-- 什么时候记的（服务端盖的时间戳，只读）；悬停能看到完整时间 -->
+          <el-table-column label="记录于" width="96">
+            <template #default="{ row }">
+              <span class="rec-stamp" :title="stampTitle(row)">{{ shortStamp(row.created_at) }}</span>
+            </template>
+          </el-table-column>
           <!-- 涉及分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 -->
           <el-table-column label="涉及分组" width="186">
             <template #default="{ row }">
@@ -443,6 +460,7 @@ async function save() {
 .alloc-footer { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
 .alloc-hint { color: var(--ios-label-2); font-size: 12px; }
 .field-hint { font-size: 11px; color: var(--ios-label-2); line-height: 1.6; margin-top: 2px; }
+.rec-stamp { font-size: 11px; color: var(--ios-label-3); font-variant-numeric: tabular-nums; }
 .auto-price { color: var(--ios-label-2); font-variant-numeric: tabular-nums; }
 :global(.item-dialog) { max-width: 94vw; }
 </style>

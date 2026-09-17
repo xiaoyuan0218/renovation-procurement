@@ -22,6 +22,7 @@ class MergerTest {
         model: String = "",
         allocations: List<SyncAllocation> = emptyList(),
         records: List<SyncRecord> = emptyList(),
+        updatedAt: String = "",
     ) = SyncItem(
         id = id,
         name = name,
@@ -30,6 +31,7 @@ class MergerTest {
         qtyTotal = 1.0,
         allocations = allocations,
         records = records,
+        updatedAt = updatedAt,
     )
 
     private fun payload(
@@ -85,6 +87,38 @@ class MergerTest {
         val result = Merger.merge(base, mine, theirs)
         assertFalse(result.hasConflicts)
         assertEquals(18.0, result.itemNamed("筒灯")?.price)
+    }
+
+    @Test
+    fun `两边都改过时按时间戳定胜负，新的赢、不弹冲突`() {
+        val base = baseline(listOf(item(101, "筒灯", price = 10.0)))
+        val mine = payload(listOf(item(1, "筒灯", price = 12.0, updatedAt = "2026-09-18 10:00:00")))
+        val theirs = payload(listOf(item(101, "筒灯", price = 20.0, updatedAt = "2026-09-18 11:00:00")))
+
+        // 服务器那份 11:00 改的，比手机的 10:00 新 —— 直接听服务器的，不问用户
+        val result = Merger.merge(base, mine, theirs)
+        assertFalse(result.hasConflicts)
+        assertEquals(20.0, result.itemNamed("筒灯")?.price)
+
+        // 反过来也一样：手机的更新就听手机的
+        val newer = Merger.merge(
+            base,
+            payload(listOf(item(1, "筒灯", price = 12.0, updatedAt = "2026-09-18 12:00:00"))),
+            theirs,
+        )
+        assertFalse(newer.hasConflicts)
+        assertEquals(12.0, newer.itemNamed("筒灯")?.price)
+    }
+
+    @Test
+    fun `两边都改过但没时间戳可比时仍然报冲突`() {
+        val base = baseline(listOf(item(101, "筒灯", price = 10.0)))
+        val mine = payload(listOf(item(1, "筒灯", price = 12.0)))      // 老数据：没有时间戳
+        val theirs = payload(listOf(item(101, "筒灯", price = 20.0)))
+
+        val result = Merger.merge(base, mine, theirs)
+        assertTrue(result.hasConflicts)
+        assertEquals(20.0, result.itemNamed("筒灯")?.price)
     }
 
     @Test

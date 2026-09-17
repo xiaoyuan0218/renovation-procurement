@@ -280,10 +280,10 @@ data class SyncBindingEntity(
 /* ---------------- 写入时间的统一维护 ---------------- */
 
 /**
- * 写入前盖章：首次写入补 `createdAt`，之后每次改刷新 `updatedAt`。
+ * 本地改动盖章：首次写入补 `createdAt`，每次改刷新 `updatedAt` 为当下。
  *
- * 所有直接写库的地方（LocalRepository、同步的 adopt/apply）都要过一遍，
- * 否则新数据的 `updatedAt` 是空串 —— 界面上显示不出来，同步判冲突也没得比。
+ * 给 LocalRepository 里"用户真的动了这行"的写入用。缺失会让 `updatedAt`
+ * 是空串 —— 界面上显示不出来，同步判冲突也没得比。
  */
 fun ItemListEntity.stamped(now: String = nowStamp()): ItemListEntity =
     copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
@@ -302,3 +302,28 @@ fun PurchaseRecordEntity.stamped(now: String = nowStamp()): PurchaseRecordEntity
 
 fun ExtraExpenseEntity.stamped(now: String = nowStamp()): ExtraExpenseEntity =
     copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
+
+/**
+ * 同步落地盖章：时间戳**照 payload 原样保留**，缺了才用当下兜底。
+ *
+ * 与 [stamped] 的关键差别在 `updatedAt` 不刷新 —— 搬运不该改"最后修改时间"。
+ * 否则从服务器拉下来的、本地没动过的行也会被盖上"现在"，显得比对面新，
+ * 下一轮判冲突就成了本地永远赢，反而把对面真实的修改覆盖掉。
+ */
+fun ItemListEntity.adopted(now: String = nowStamp()): ItemListEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = updatedAt.ifEmpty { now })
+
+fun CategoryEntity.adopted(now: String = nowStamp()): CategoryEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = updatedAt.ifEmpty { now })
+
+fun RoomEntity.adopted(now: String = nowStamp()): RoomEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = updatedAt.ifEmpty { now })
+
+fun ItemEntity.adopted(now: String = nowStamp()): ItemEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = updatedAt.ifEmpty { now })
+
+fun PurchaseRecordEntity.adopted(now: String = nowStamp()): PurchaseRecordEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = updatedAt.ifEmpty { now })
+
+fun ExtraExpenseEntity.adopted(now: String = nowStamp()): ExtraExpenseEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = updatedAt.ifEmpty { now })
