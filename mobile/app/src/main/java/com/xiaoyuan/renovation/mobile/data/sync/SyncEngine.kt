@@ -230,12 +230,35 @@ class SyncEngine(
         }
     }
 
+    /**
+     * 本地一有改动就调它（后台自动同步的入口）。
+     *
+     * 已登录、当前清单已绑定、且开着自动对齐时才安静对齐一次；离线、失败、
+     * 有冲突、服务器那份被删 —— 一律返回 false 不动声色：自动同步不该打扰
+     * 用户，需要拍板的事留给界面。
+     *
+     * 返回值表示**本地内容是否真的变了**：变了调用方要刷新界面（把服务器
+     * 那边的新数据显示出来）；没变就别刷 —— 刷界面会再触发一轮同步，白跑。
+     */
+    suspend fun autoSyncCurrent(): Boolean {
+        if (session.token.value.isBlank()) return false
+        val listId = currentList.flow.value ?: return false
+        val binding = db.sync().byList(listId) ?: return false
+        if (!binding.autoSync) return false
+
+        val before = json.encodeToString(SyncPayload.serializer(), Snapshot.capture(db, listId))
+        val result = sync(listId)
+        if (result !is ApiResult.Ok) return false
+        if (result.data.hasConflicts || result.data.remoteMissing) return false
+        val after = json.encodeToString(SyncPayload.serializer(), Snapshot.capture(db, listId))
+        return before != after
+    }
+
     private suspend fun syncWith(
         binding: SyncBindingEntity,
         snapshot: SyncSnapshot,
         preferLocal: Boolean,
-    ): ApiResult<SyncOutcome> {
-        val listId = binding.listId
+    ): ApiResult<SyncOutcome> {        val listId = binding.listId
         val mine = Snapshot.capture(db, listId)
         val base = readBaseline(binding)
 

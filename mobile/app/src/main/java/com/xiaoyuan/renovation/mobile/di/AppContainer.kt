@@ -11,16 +11,20 @@ import com.xiaoyuan.renovation.mobile.data.sync.ServerSession
 import com.xiaoyuan.renovation.mobile.data.sync.SyncEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
  * 本地依赖容器。单机版没有网络层要注入，这里把本地库、配置、当前清单
  * 和仓储收在一处，界面按需取用。
  */
+@OptIn(FlowPreview::class) // debounce 还是预览 API，但这里用得很典型
 class AppContainer(private val app: Application) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -58,5 +62,22 @@ class AppContainer(private val app: Application) {
             seedIfEmpty(db)
             ensureListCodes(db)
         }
+
+        // 本地一有改动，就把「当前清单」静默对齐到服务器（已绑定且开着自动同步的
+        // 才动）。防抖 1.5 秒：连着写几条只发一次请求。同步真把数据改动了才
+        // bump —— 下一轮比对发现没变化就自然停下，不会自己触发自己。
+        scope.launch {
+            dataVersion
+                .drop(1)
+                .debounce(AUTO_SYNC_DEBOUNCE_MS)
+                .collect {
+                    val changed = runCatching { sync.autoSyncCurrent() }.getOrDefault(false)
+                    if (changed) bumpDataVersion()
+                }
+        }
+    }
+
+    private companion object {
+        const val AUTO_SYNC_DEBOUNCE_MS = 1500L
     }
 }

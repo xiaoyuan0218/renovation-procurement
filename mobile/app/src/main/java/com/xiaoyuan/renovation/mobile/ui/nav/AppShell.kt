@@ -147,7 +147,9 @@ fun AppShellHost(container: AppContainer) {
                     val lists by pageListsVm.lists.collectAsStateWithLifecycle()
                     val currentId by pageListsVm.currentId.collectAsStateWithLifecycle()
                     ServerPage(
-                        vm = sharedViewModel(container) { SyncViewModel(it.sync, it.repo, it.session) },
+                        vm = sharedViewModel(container) {
+                            SyncViewModel(it.sync, it.repo, it.session, it.dataVersion)
+                        },
                         lists = lists,
                         currentListId = currentId,
                         onChanged = container::bumpDataVersion,
@@ -191,7 +193,7 @@ private fun AppShell(
     }
     val settingsVm: SettingsViewModel = sharedViewModel(container) { SettingsViewModel(it.repo) }
     val syncVm: SyncViewModel = sharedViewModel(container) {
-        SyncViewModel(it.sync, it.repo, it.session)
+        SyncViewModel(it.sync, it.repo, it.session, it.dataVersion)
     }
 
     Box(Modifier.fillMaxSize()) {

@@ -10,10 +10,12 @@ import com.xiaoyuan.renovation.mobile.data.repo.okData
 import com.xiaoyuan.renovation.mobile.data.sync.MergeConflict
 import com.xiaoyuan.renovation.mobile.data.sync.ServerSession
 import com.xiaoyuan.renovation.mobile.data.sync.SyncEngine
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /** 页面上的一条提示：失败要显眼（红底警示条），成功用薄荷绿。 */
@@ -52,6 +54,7 @@ class SyncViewModel(
     private val engine: SyncEngine,
     private val repo: LocalRepository,
     private val session: ServerSession,
+    dataVersion: Flow<Int>,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SyncUiState())
@@ -69,6 +72,10 @@ class SyncViewModel(
             }
         }
         refreshBindings()
+        // 后台自动同步改完数据或绑定点后，「上次同步时间」跟着更新
+        viewModelScope.launch {
+            dataVersion.drop(1).collect { refreshBindings() }
+        }
     }
 
     fun refreshBindings() {
