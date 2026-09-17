@@ -158,7 +158,10 @@ class SyncViewModel(
             _state.value = _state.value.copy(busy = true)
             val result = engine.upload(listId, name, remoteListId = null)
             report(result, "已上传到服务器，以后可以和这份清单双向同步")
-            if (result is ApiResult.Ok) markChanged()
+            if (result is ApiResult.Ok) {
+                markChanged()
+                loadRemoteLists() // 服务器上多了一份，「服务器上的清单」要跟着更新
+            }
             refreshBindings()
         }
     }
