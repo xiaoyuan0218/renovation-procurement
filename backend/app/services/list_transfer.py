@@ -5,8 +5,11 @@
 "少了某个字段，两边悄悄不一致"这种事。
 
 **只搬语义字段**：派生值和遗留列（`rev`、`bought`、`paid_qty`、`paid_amount`、
-`bought_qty`、`allocations.paid_qty`、`created_at`）既不导出、也不参与指纹。
-它们要么能算出来、要么是历史包袱，带上只会让"内容没变"被误判成"变过"。
+`bought_qty`、`allocations.paid_qty`）既不导出、也不参与指纹。它们要么能算
+出来、要么是历史包袱，带上只会让"内容没变"被误判成"变过"。
+
+创建/修改时间（`created_at` / `updated_at`）**会**随 payload 搬运 —— 界面要
+显示、客户端拿它判冲突；但**不参与指纹**（见 `_strip_ts`），理由同上。
 """
 
 import datetime
@@ -24,6 +27,28 @@ FORMAT_VERSION = 1
 
 # ---------------------------------------------------------------- 导出
 
+def _ts(value) -> str:
+    """时间戳统一成 `YYYY-MM-DD HH:MM:SS`（与客户端 nowStamp 同格式）。"""
+    return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
+
+
+def _parse_ts(text) -> datetime.datetime | None:
+    """把 payload 里的时间戳解析回来；看不懂（老客户端没带）就返回 None。"""
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.datetime.strptime(str(text), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _ts_or_now(text) -> datetime.datetime:
+    """payload 没带时间戳（老客户端）就用当下 —— 总比留空强，后面对得上。"""
+    return _parse_ts(text) or datetime.datetime.now()
+
+
 def export_list(db: Session, lst: ItemList) -> dict:
     """把一份清单连它的分组、分类、物料、分配、采购记录、费用整份取出来。"""
     rooms = (db.query(Room).filter(Room.list_id == lst.id)
@@ -38,9 +63,13 @@ def export_list(db: Session, lst: ItemList) -> dict:
     return {
         "version": FORMAT_VERSION,
         "list": {"name": lst.name, "note": lst.note or "", "sort": lst.sort or 0,
-                 "code": lst.code or ""},
-        "rooms": [{"id": r.id, "name": r.name, "sort": r.sort or 0} for r in rooms],
-        "categories": [{"id": c.id, "name": c.name, "sort": c.sort or 0}
+                 "code": lst.code or "",
+                 "created_at": _ts(lst.created_at), "updated_at": _ts(lst.updated_at)},
+        "rooms": [{"id": r.id, "name": r.name, "sort": r.sort or 0,
+                   "created_at": _ts(r.created_at), "updated_at": _ts(r.updated_at)}
+                  for r in rooms],
+        "categories": [{"id": c.id, "name": c.name, "sort": c.sort or 0,
+                        "created_at": _ts(c.created_at), "updated_at": _ts(c.updated_at)}
                        for c in categories],
         "items": [_item_payload(item) for item in items],
         "expenses": [_expense_payload(e) for e in expenses],
@@ -62,6 +91,8 @@ def _item_payload(item: Item) -> dict:
         "sort": item.sort or 0,
         # 回收站里的也一起走：两端回收站保持一致，捞回来的东西才不会一边有一边没有
         "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
+        "created_at": _ts(item.created_at),
+        "updated_at": _ts(item.updated_at),
         "allocations": [
             {
                 "id": a.id,
@@ -83,6 +114,8 @@ def _item_payload(item: Item) -> dict:
                 "order_no": r.order_no or "",
                 # 多选的分组；老记录只写了单值 room_id 的也一并带上
                 "room_ids": _record_room_ids(r),
+                "created_at": _ts(r.created_at),
+                "updated_at": _ts(r.updated_at),
             }
             for r in item.records
         ],
@@ -106,6 +139,8 @@ def _expense_payload(expense: ExtraExpense) -> dict:
         "order_no": expense.order_no or "",
         "note": expense.note or "",
         "item_id": expense.item_id,
+        "created_at": _ts(expense.created_at),
+        "updated_at": _ts(expense.updated_at),
     }
 
 
@@ -120,6 +155,18 @@ def fingerprint(payload: dict) -> str:
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
+_TS_KEYS = ("created_at", "updated_at")
+
+
+def _strip_ts(row: dict) -> dict:
+    """算指纹时把时间戳剔除。
+
+    同步本身会刷新 `updated_at`（哪怕内容一字未改），带进指纹就会每次同步后
+    抖动、"服务器又变过"被误判出来 —— 指纹只该反映**内容**。
+    """
+    return {k: v for k, v in row.items() if k not in _TS_KEYS}
+
+
 def _canonical(payload: dict) -> str:
     def key(row) -> str:
         return json.dumps(row, ensure_ascii=False, sort_keys=True,
@@ -128,22 +175,25 @@ def _canonical(payload: dict) -> str:
     items = []
     for item in payload.get("items", []):
         records = [
-            {**r, "room_ids": sorted(r.get("room_ids") or [])}
+            {**_strip_ts(r), "room_ids": sorted(r.get("room_ids") or [])}
             for r in item.get("records", [])
         ]
         items.append({
-            **item,
-            "allocations": sorted(item.get("allocations", []), key=key),
+            **_strip_ts(item),
+            "allocations": sorted(
+                (_strip_ts(a) for a in item.get("allocations", [])), key=key),
             "records": sorted(records, key=key),
         })
 
     normalized = {
         "version": payload.get("version", FORMAT_VERSION),
-        "list": payload.get("list", {}),
-        "rooms": sorted(payload.get("rooms", []), key=key),
-        "categories": sorted(payload.get("categories", []), key=key),
+        "list": _strip_ts(payload.get("list", {})),
+        "rooms": sorted((_strip_ts(r) for r in payload.get("rooms", [])), key=key),
+        "categories": sorted(
+            (_strip_ts(c) for c in payload.get("categories", [])), key=key),
         "items": sorted(items, key=key),
-        "expenses": sorted(payload.get("expenses", []), key=key),
+        "expenses": sorted(
+            (_strip_ts(e) for e in payload.get("expenses", [])), key=key),
     }
     return json.dumps(normalized, ensure_ascii=False, sort_keys=True,
                       separators=(",", ":"))
@@ -168,6 +218,8 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
             note=payload["list"].get("note", ""),
             sort=payload["list"].get("sort", 0),
             code=_free_code(db, incoming_code),
+            created_at=_ts_or_now(payload["list"].get("created_at")),
+            updated_at=_ts_or_now(payload["list"].get("updated_at")),
         )
         db.add(target)
         db.flush()
@@ -175,6 +227,8 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
         _clear(db, target)
         target.note = payload["list"].get("note", "")
         target.sort = payload["list"].get("sort", 0)
+        # 覆盖的是内容：清单的"创建时间"还是原来那个，修改时间刷新
+        target.updated_at = datetime.datetime.now()
         # 名字不动：覆盖的是内容，清单还是原来那一份。
         # 编号跟推送方走 —— 手机覆盖之后两边编号要一致，对不上就看不出是同一份了；
         # 该编号已被别的清单占用时保持原样，免得撞号。
@@ -188,7 +242,9 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
 
     room_map: dict = {}
     for row in payload.get("rooms", []):
-        room = Room(list_id=target.id, name=row["name"], sort=row.get("sort", 0))
+        room = Room(list_id=target.id, name=row["name"], sort=row.get("sort", 0),
+                    created_at=_ts_or_now(row.get("created_at")),
+                    updated_at=_ts_or_now(row.get("updated_at")))
         db.add(room)
         db.flush()
         room_map[row.get("id")] = room.id
@@ -196,7 +252,9 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
     category_map: dict = {}
     for row in payload.get("categories", []):
         category = Category(list_id=target.id, name=row["name"],
-                            sort=row.get("sort", 0))
+                            sort=row.get("sort", 0),
+                            created_at=_ts_or_now(row.get("created_at")),
+                            updated_at=_ts_or_now(row.get("updated_at")))
         db.add(category)
         db.flush()
         category_map[row.get("id")] = category.id
@@ -216,6 +274,8 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
             note=row.get("note") or "",
             sort=row.get("sort") or 0,
             deleted_at=_parse_dt(row.get("deleted_at")),
+            created_at=_ts_or_now(row.get("created_at")),
+            updated_at=_ts_or_now(row.get("updated_at")),
         )
         db.add(item)
         db.flush()
@@ -240,6 +300,8 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
                 note=rec.get("note") or "",
                 vendor=rec.get("vendor") or "",
                 order_no=rec.get("order_no") or "",
+                created_at=_ts_or_now(rec.get("created_at")),
+                updated_at=_ts_or_now(rec.get("updated_at")),
             )
             db.add(record)
             db.flush()
@@ -259,6 +321,8 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
             order_no=row.get("order_no") or "",
             note=row.get("note") or "",
             item_id=item_map.get(row.get("item_id")),
+            created_at=_ts_or_now(row.get("created_at")),
+            updated_at=_ts_or_now(row.get("updated_at")),
         ))
     db.flush()
     return target

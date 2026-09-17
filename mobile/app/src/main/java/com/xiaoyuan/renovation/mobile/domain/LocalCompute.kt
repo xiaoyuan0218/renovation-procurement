@@ -256,6 +256,8 @@ object LocalCompute {
         vendor = r.vendor,
         orderNo = r.orderNo,
         roomIds = roomIds.filter { it != 0 },
+        createdAt = r.createdAt,
+        updatedAt = r.updatedAt,
     )
 
     fun toDto(a: AllocationEntity): AllocationDto = AllocationDto(

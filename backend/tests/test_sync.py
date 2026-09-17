@@ -117,8 +117,24 @@ def test_export_carries_content_but_not_derived_fields(client):
     assert [e["kind"] for e in payload["expenses"]] == ["运费"]
 
     # 派生值与历史字段不参与搬运：带上只会让"内容没变"被误判成"变过"
-    for junk in ("rev", "bought", "paid_qty", "paid_amount", "bought_qty", "created_at"):
+    for junk in ("rev", "bought", "paid_qty", "paid_amount", "bought_qty"):
         assert junk not in light
+
+    # 创建/修改时间要搬（界面显示、客户端判冲突用），但不参与指纹（见下一条测试）
+    assert light["created_at"] and light["updated_at"]
+    assert record["created_at"] and record["updated_at"]
+    assert payload["list"]["updated_at"]
+
+
+def test_fingerprint_ignores_timestamps(client):
+    """只刷新时间戳不该改指纹：同步本身就会把两侧的 updated_at 刷成当下。"""
+    lst = _mk_list(client)
+    _seed(client, lst)
+    first = _export(client, lst)["fingerprint"]
+
+    # 原样再推一次（服务端会重写内容、刷新时间）
+    _push(client, lst, _export(client, lst))
+    assert _export(client, lst)["fingerprint"] == first
 
 
 def test_fingerprint_is_stable_then_changes_on_any_edit(client):

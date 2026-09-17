@@ -324,6 +324,12 @@ fun ItemEditScreen(
                                     onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(date = v) } },
                                     showQuickChips = false,
                                 )
+                                // 什么时候记的：老数据与刚加的行还没有时间戳，就不显示
+                                if (row.createdAt.isNotBlank()) {
+                                    Spacer(Modifier.height(6.dp))
+                                    // 'YYYY-MM-DD HH:MM:SS' 掐掉年份，列表里空间紧
+                                    HintText("记录于 " + row.createdAt.drop(5).take(11))
+                                }
                                 // 这条记录涉及哪几间：只列这条物料分到的分组
                                 val rowRooms = rooms.filter { r ->
                                     form.allocations.any { it.roomId == r.id }

@@ -85,17 +85,20 @@ class LocalRepository(
                         name = trimmed,
                         note = note,
                         sort = db.lists().nextSort(),
-                        createdAt = nowStamp(),
                         // 本地新建时就发编号：之后传到服务器上，两边编号一致
                         code = ListCodes.new(),
-                    ),
+                    ).stamped(),
                 ).toInt()
                 if (copyFrom != null) {
                     db.rooms().byList(copyFrom).forEach { r ->
-                        db.rooms().insert(RoomEntity(listId = newId, name = r.name, sort = r.sort))
+                        db.rooms().insert(
+                            RoomEntity(listId = newId, name = r.name, sort = r.sort).stamped(),
+                        )
                     }
                     db.categories().byList(copyFrom).forEach { c ->
-                        db.categories().insert(CategoryEntity(listId = newId, name = c.name, sort = c.sort))
+                        db.categories().insert(
+                            CategoryEntity(listId = newId, name = c.name, sort = c.sort).stamped(),
+                        )
                     }
                 }
                 newId
@@ -111,7 +114,7 @@ class LocalRepository(
             val dup = db.lists().byName(trimmed)
             require(dup == null || dup.id == id) { "已经有一份叫「$trimmed」的清单了" }
             val existing = db.lists().byId(id) ?: error("清单不存在")
-            db.lists().update(existing.copy(name = trimmed, note = note, sort = sort))
+            db.lists().update(existing.copy(name = trimmed, note = note, sort = sort).stamped())
             listDto(id)
         }
 
@@ -258,7 +261,7 @@ class LocalRepository(
                     note = body.note ?: record.note,
                     vendor = body.vendor ?: record.vendor,
                     orderNo = body.orderNo ?: record.orderNo,
-                ),
+                ).stamped(),
             )
             if (body.roomIds != null) {
                 db.recordRooms().deleteOfRecord(recordId)
@@ -293,7 +296,7 @@ class LocalRepository(
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "分组名不能为空" }
         val id = db.rooms().insert(
-            RoomEntity(listId = listId, name = trimmed, sort = db.rooms().nextSort(listId)),
+            RoomEntity(listId = listId, name = trimmed, sort = db.rooms().nextSort(listId)).stamped(),
         ).toInt()
         RoomDto(id, trimmed, 0)
     }
@@ -302,7 +305,7 @@ class LocalRepository(
         val trimmed = name.trim()
         require(trimmed.isNotEmpty()) { "分组名不能为空" }
         val existing = db.rooms().byId(id) ?: error("分组不存在")
-        db.rooms().update(existing.copy(name = trimmed))
+        db.rooms().update(existing.copy(name = trimmed).stamped())
         RoomDto(id, trimmed, existing.sort)
     }
 
@@ -325,7 +328,7 @@ class LocalRepository(
         require(trimmed.isNotEmpty()) { "分类名不能为空" }
         require(db.categories().byName(listId, trimmed) == null) { "已经有「$trimmed」这个分类了" }
         val id = db.categories().insert(
-            CategoryEntity(listId = listId, name = trimmed, sort = db.categories().nextSort(listId)),
+            CategoryEntity(listId = listId, name = trimmed, sort = db.categories().nextSort(listId)).stamped(),
         ).toInt()
         CategoryDto(id, trimmed, 0)
     }
@@ -337,7 +340,7 @@ class LocalRepository(
         val dup = db.categories().byName(listId, trimmed)
         require(dup == null || dup.id == id) { "已经有「$trimmed」这个分类了" }
         val existing = db.categories().byId(id) ?: error("分类不存在")
-        db.categories().update(existing.copy(name = trimmed))
+        db.categories().update(existing.copy(name = trimmed).stamped())
         CategoryDto(id, trimmed, existing.sort)
     }
 
@@ -517,7 +520,7 @@ class LocalRepository(
 
     private suspend fun touch(itemId: Int) {
         val existing = db.items().byId(itemId) ?: return
-        db.items().update(existing.copy(rev = existing.rev + 1))
+        db.items().update(existing.copy(rev = existing.rev + 1).stamped())
     }
 
     private suspend fun replaceAllocations(itemId: Int, allocations: List<com.xiaoyuan.renovation.mobile.data.model.AllocInDto>?) {
@@ -554,7 +557,7 @@ class LocalRepository(
                 vendor = body.vendor,
                 orderNo = body.orderNo,
                 roomId = body.roomIds.firstOrNull(),
-            ),
+            ).stamped(),
         ).toInt()
         body.roomIds.filter { it != 0 }.forEach {
             db.recordRooms().insert(RecordRoomEntity(recordId = id, roomId = it))

@@ -26,6 +26,8 @@ data class SyncListMeta(
     val sort: Int = 0,
     /** 清单编号：搬运时跟着走，两边保持一致 */
     val code: String = "",
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
 )
 
 @Serializable
@@ -33,6 +35,8 @@ data class SyncRoom(
     val id: Int? = null,
     val name: String,
     val sort: Int = 0,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
 )
 
 @Serializable
@@ -40,6 +44,8 @@ data class SyncCategory(
     val id: Int? = null,
     val name: String,
     val sort: Int = 0,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
 )
 
 @Serializable
@@ -62,6 +68,8 @@ data class SyncRecord(
     @SerialName("order_no") val orderNo: String = "",
     /** 这笔钱涉及的分组（可多选） */
     @SerialName("room_ids") val roomIds: List<Int> = emptyList(),
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
 )
 
 @Serializable
@@ -79,6 +87,8 @@ data class SyncItem(
     val sort: Int = 0,
     /** 非空表示这条在回收站里 —— 回收站也要跟着搬，两端才一致 */
     @SerialName("deleted_at") val deletedAt: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
     val allocations: List<SyncAllocation> = emptyList(),
     val records: List<SyncRecord> = emptyList(),
 )
@@ -93,6 +103,8 @@ data class SyncExpense(
     @SerialName("order_no") val orderNo: String = "",
     val note: String = "",
     @SerialName("item_id") val itemId: Int? = null,
+    @SerialName("created_at") val createdAt: String = "",
+    @SerialName("updated_at") val updatedAt: String = "",
 )
 
 /** 服务器对导出/推送的应答：当前指纹 + 当下的完整数据。 */

@@ -11,6 +11,7 @@ import com.xiaoyuan.renovation.mobile.data.db.RecordRoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.RoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.CategoryEntity
 import com.xiaoyuan.renovation.mobile.data.db.nowStamp
+import com.xiaoyuan.renovation.mobile.data.db.stamped
 import com.xiaoyuan.renovation.mobile.util.ListCodes
 
 /**
@@ -36,11 +37,13 @@ object Snapshot {
                 note = list.note,
                 sort = list.sort,
                 code = list.code,
+                createdAt = list.createdAt,
+                updatedAt = list.updatedAt,
             ),
             rooms = db.rooms().byList(listId)
-                .map { SyncRoom(id = it.id, name = it.name, sort = it.sort) },
+                .map { SyncRoom(id = it.id, name = it.name, sort = it.sort, createdAt = it.createdAt, updatedAt = it.updatedAt) },
             categories = db.categories().byList(listId)
-                .map { SyncCategory(id = it.id, name = it.name, sort = it.sort) },
+                .map { SyncCategory(id = it.id, name = it.name, sort = it.sort, createdAt = it.createdAt, updatedAt = it.updatedAt) },
             items = items.map { item ->
                 SyncItem(
                     id = item.id,
@@ -55,6 +58,8 @@ object Snapshot {
                     note = item.note,
                     sort = item.sort,
                     deletedAt = item.deletedAt,
+                    createdAt = item.createdAt,
+                    updatedAt = item.updatedAt,
                     allocations = allocations[item.id].orEmpty().map {
                         SyncAllocation(
                             id = it.id,
@@ -74,6 +79,8 @@ object Snapshot {
                             vendor = record.vendor,
                             orderNo = record.orderNo,
                             roomIds = recordRooms[record.id].orEmpty().mapNotNull { it.roomId },
+                            createdAt = record.createdAt,
+                            updatedAt = record.updatedAt,
                         )
                     },
                 )
@@ -88,6 +95,8 @@ object Snapshot {
                     orderNo = it.orderNo,
                     note = it.note,
                     itemId = it.itemId,
+                    createdAt = it.createdAt,
+                    updatedAt = it.updatedAt,
                 )
             },
         )
@@ -119,7 +128,10 @@ object Snapshot {
         val roomIds = mutableMapOf<Int, Int>()
         payload.rooms.forEach { room ->
             val newId = db.rooms().insert(
-                RoomEntity(listId = listId, name = room.name, sort = room.sort),
+                RoomEntity(
+                    listId = listId, name = room.name, sort = room.sort,
+                    createdAt = room.createdAt, updatedAt = room.updatedAt,
+                ).stamped(),
             ).toInt()
             room.id?.let {
                 roomIds[it] = newId
@@ -130,7 +142,10 @@ object Snapshot {
         val categoryIds = mutableMapOf<Int, Int>()
         payload.categories.forEach { category ->
             val newId = db.categories().insert(
-                CategoryEntity(listId = listId, name = category.name, sort = category.sort),
+                CategoryEntity(
+                    listId = listId, name = category.name, sort = category.sort,
+                    createdAt = category.createdAt, updatedAt = category.updatedAt,
+                ).stamped(),
             ).toInt()
             category.id?.let {
                 categoryIds[it] = newId
@@ -154,7 +169,9 @@ object Snapshot {
                     note = item.note,
                     sort = item.sort,
                     deletedAt = item.deletedAt,
-                ),
+                    createdAt = item.createdAt,
+                    updatedAt = item.updatedAt,
+                ).stamped(),
             ).toInt()
             item.id?.let {
                 itemIds[it] = newId
@@ -185,7 +202,9 @@ object Snapshot {
                         vendor = record.vendor,
                         orderNo = record.orderNo,
                         roomId = record.roomIds.firstOrNull()?.let { roomIds[it] },
-                    ),
+                        createdAt = record.createdAt,
+                        updatedAt = record.updatedAt,
+                    ).stamped(),
                 ).toInt()
                 record.roomIds.forEach { remoteRoomId ->
                     roomIds[remoteRoomId]?.let { localRoomId ->
@@ -208,8 +227,9 @@ object Snapshot {
                     orderNo = expense.orderNo,
                     note = expense.note,
                     itemId = expense.itemId?.let { itemIds[it] },
-                    createdAt = nowStamp(),
-                ),
+                    createdAt = expense.createdAt,
+                    updatedAt = expense.updatedAt,
+                ).stamped(),
             )
         }
 
