@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         // 本地专有：与服务器的绑定关系与上次同步的基线，不进服务端 schema
         SyncBindingEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -47,6 +47,31 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `lists` ADD COLUMN `code` TEXT NOT NULL DEFAULT ''")
                 // 具体编号由 ListCodes 在启动时补齐（SQL 里生成随机码不好写）
+            }
+        }
+
+        /**
+         * v4 给各实体补创建/修改时间（同步判冲突与界面显示都用它）。
+         *
+         * 老行用**迁移时刻**回填：历史数据没有真实时间，回填值只表示
+         * "从这一刻起开始记录"，之后每次写入都会覆盖成真实值。
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val now = nowStamp()
+                // lists / extra_expenses 原本就有 created_at，只补 updated_at
+                val needCreated = listOf("categories", "rooms", "items", "purchase_records")
+                val all = needCreated + listOf("lists", "extra_expenses")
+                for (table in needCreated) {
+                    db.execSQL("ALTER TABLE `$table` ADD COLUMN `created_at` TEXT NOT NULL DEFAULT ''")
+                }
+                for (table in all) {
+                    db.execSQL("ALTER TABLE `$table` ADD COLUMN `updated_at` TEXT NOT NULL DEFAULT ''")
+                }
+                for (table in all) {
+                    db.execSQL("UPDATE `$table` SET `created_at` = '$now' WHERE `created_at` = ''")
+                    db.execSQL("UPDATE `$table` SET `updated_at` = '$now' WHERE `updated_at` = ''")
+                }
             }
         }
 
@@ -78,7 +103,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .addCallback(object : Callback() {
                     override fun onOpen(db: SupportSQLiteDatabase) {
                         // 外键靠 DDL 里的 ON DELETE 动作兜底，但删除一律走显式事务，

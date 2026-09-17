@@ -34,6 +34,7 @@ import com.xiaoyuan.renovation.mobile.domain.LocalCompute.toMatrixItem
 import com.xiaoyuan.renovation.mobile.data.db.AllocationEntity
 import com.xiaoyuan.renovation.mobile.data.db.deleteCategoryChecked
 import com.xiaoyuan.renovation.mobile.data.db.deleteRoomCascade
+import com.xiaoyuan.renovation.mobile.data.db.stamped
 import androidx.room.withTransaction
 
 /**
@@ -166,7 +167,7 @@ class LocalRepository(
                     discountPrice = body.discountPrice,
                     note = body.note,
                     sort = db.items().nextSort(listId),
-                ),
+                ).stamped(),
             ).toInt()
             replaceAllocations(newId, body.allocations)
             replaceRecords(newId, body.records)
@@ -192,7 +193,7 @@ class LocalRepository(
                     discountPrice = body.discountPrice,
                     note = body.note,
                     rev = existing.rev + 1,
-                ),
+                ).stamped(),
             )
             // 传 null 表示这两个集合保持不动（与后端 ItemIn 语义一致）
             if (body.allocations != null) replaceAllocations(id, body.allocations)
@@ -438,8 +439,7 @@ class LocalRepository(
                 orderNo = body.orderNo,
                 note = body.note,
                 itemId = body.itemId,
-                createdAt = nowStamp(),
-            ),
+            ).stamped(),
         ).toInt()
         val saved = db.expenses().byId(id) ?: error("保存失败")
         LocalCompute.toDto(saved, itemName(saved.itemId))
@@ -456,7 +456,7 @@ class LocalRepository(
             orderNo = body.orderNo,
             note = body.note,
             itemId = body.itemId,
-        )
+        ).stamped()
         db.expenses().update(next)
         LocalCompute.toDto(next, itemName(next.itemId))
     }

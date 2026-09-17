@@ -28,6 +28,7 @@ data class ItemListEntity(
     val note: String = "",
     val sort: Int = 0,
     @ColumnInfo(name = "created_at") val createdAt: String = "",
+    @ColumnInfo(name = "updated_at") val updatedAt: String = "",
     /** 清单编号（见 ListCodes）：改名字、重名加后缀都不影响它，两端靠它对认 */
     val code: String = "",
 )
@@ -53,6 +54,8 @@ data class CategoryEntity(
     @ColumnInfo(name = "list_id") val listId: Int? = null,
     val name: String,
     val sort: Int = 0,
+    @ColumnInfo(name = "created_at") val createdAt: String = "",
+    @ColumnInfo(name = "updated_at") val updatedAt: String = "",
 )
 
 @Entity(
@@ -72,6 +75,8 @@ data class RoomEntity(
     @ColumnInfo(name = "list_id") val listId: Int? = null,
     val name: String,
     val sort: Int = 0,
+    @ColumnInfo(name = "created_at") val createdAt: String = "",
+    @ColumnInfo(name = "updated_at") val updatedAt: String = "",
 )
 
 @Entity(
@@ -116,6 +121,8 @@ data class ItemEntity(
     val sort: Int = 0,
     val rev: Int = 1,
     @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
+    @ColumnInfo(name = "created_at") val createdAt: String = "",
+    @ColumnInfo(name = "updated_at") val updatedAt: String = "",
 )
 
 @Entity(
@@ -150,6 +157,8 @@ data class PurchaseRecordEntity(
     val vendor: String = "",
     @ColumnInfo(name = "order_no") val orderNo: String = "",
     @ColumnInfo(name = "room_id") val roomId: Int? = null,
+    @ColumnInfo(name = "created_at") val createdAt: String = "",
+    @ColumnInfo(name = "updated_at") val updatedAt: String = "",
 )
 
 @Entity(
@@ -243,6 +252,7 @@ data class ExtraExpenseEntity(
     val note: String = "",
     @ColumnInfo(name = "item_id") val itemId: Int? = null,
     @ColumnInfo(name = "created_at") val createdAt: String = "",
+    @ColumnInfo(name = "updated_at") val updatedAt: String = "",
 )
 
 /**
@@ -266,3 +276,29 @@ data class SyncBindingEntity(
     /** 进入已绑定的清单时是否自动对齐（关掉就只手动同步） */
     @ColumnInfo(name = "auto_sync") val autoSync: Boolean = true,
 )
+
+/* ---------------- 写入时间的统一维护 ---------------- */
+
+/**
+ * 写入前盖章：首次写入补 `createdAt`，之后每次改刷新 `updatedAt`。
+ *
+ * 所有直接写库的地方（LocalRepository、同步的 adopt/apply）都要过一遍，
+ * 否则新数据的 `updatedAt` 是空串 —— 界面上显示不出来，同步判冲突也没得比。
+ */
+fun ItemListEntity.stamped(now: String = nowStamp()): ItemListEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
+
+fun CategoryEntity.stamped(now: String = nowStamp()): CategoryEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
+
+fun RoomEntity.stamped(now: String = nowStamp()): RoomEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
+
+fun ItemEntity.stamped(now: String = nowStamp()): ItemEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
+
+fun PurchaseRecordEntity.stamped(now: String = nowStamp()): PurchaseRecordEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
+
+fun ExtraExpenseEntity.stamped(now: String = nowStamp()): ExtraExpenseEntity =
+    copy(createdAt = createdAt.ifEmpty { now }, updatedAt = now)
