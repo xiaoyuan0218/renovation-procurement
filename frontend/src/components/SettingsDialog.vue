@@ -233,7 +233,7 @@ async function submitUpload({ file }) {
 
 function beforeUpload(file) {
   const ok = /\.(xlsx)$/i.test(file.name)
-  if (!ok) ElMessage.error('请上传 .xlsx 文件')
+  if (!ok) ElMessage.error('请选择表格文件（.xlsx）')
   return ok
 }
 
@@ -311,8 +311,8 @@ async function submitPassword() {
     <el-tabs class="settings-tabs">
       <el-tab-pane label="清单">
         <div class="add-row">
-          <el-button type="primary" plain @click="newListVisible = true">新建清单…</el-button>
-          <span class="add-hint">可以建一张空白清单，也可以照抄某份现有清单的分组与分类</span>
+          <el-button type="primary" plain @click="newListVisible = true">新建清单</el-button>
+          <span class="add-hint">空白起步，或照抄现有清单的分组与分类</span>
         </div>
         <el-table :data="lists.all" size="small" max-height="300">
           <el-table-column label="清单" min-width="150">
@@ -320,6 +320,8 @@ async function submitPassword() {
               <span class="list-name">{{ row.name }}</span>
               <el-tag v-if="row.id === lists.currentId" size="small" type="primary"
                       effect="plain" class="cur-tag">当前</el-tag>
+              <!-- 编号：改名字、上传时重名加后缀都不变，靠它认出是哪一份 -->
+              <div v-if="row.code" class="list-code">{{ row.code }}</div>
             </template>
           </el-table-column>
           <el-table-column prop="item_count" label="物料" width="66" />
@@ -340,7 +342,7 @@ async function submitPassword() {
 
       <el-tab-pane label="分组">
         <div class="add-row">
-          <el-input v-model="newRoom" placeholder="新分组名，如：客厅 / 零食" class="add-input"
+          <el-input v-model="newRoom" placeholder="新分组名，如：日常 / 零食" class="add-input"
                     @keyup.enter="addRoom" />
           <el-button type="primary" plain @click="addRoom">添加</el-button>
         </div>
@@ -357,7 +359,7 @@ async function submitPassword() {
 
       <el-tab-pane label="分类">
         <div class="add-row">
-          <el-input v-model="newCategory" placeholder="新分类名，如：照明 / 家具" class="add-input"
+          <el-input v-model="newCategory" placeholder="新分类名，如：耗材 / 配件" class="add-input"
                     @keyup.enter="addCategory" />
           <el-button type="primary" plain @click="addCategory">添加</el-button>
         </div>
@@ -378,7 +380,7 @@ async function submitPassword() {
             <span class="dc-icon dc-blue">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg>
             </span>
-            <span class="dc-text"><b>导出当前清单</b><i>xlsx，含记录与分组分配</i></span>
+            <span class="dc-text"><b>导出当前清单</b><i>表格文件，含记录与分组分配</i></span>
           </a>
           <a class="data-card" href="/api/import/template">
             <span class="dc-icon dc-teal">
@@ -390,7 +392,7 @@ async function submitPassword() {
             <span class="dc-icon dc-green">
               <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7" ry="2.8"/><path d="M5 5.5v13c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8v-13"/><path d="M5 12c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8"/></svg>
             </span>
-            <span class="dc-text"><b>下载整库备份</b><i>.db，所有清单与账号</i></span>
+            <span class="dc-text"><b>下载整库备份</b><i>整库文件，所有清单与账号</i></span>
           </a>
         </div>
         <el-alert type="info" :closable="false" class="mt12"
@@ -406,7 +408,7 @@ async function submitPassword() {
             <el-upload :auto-upload="true" :show-file-list="false" accept=".xlsx"
                        :http-request="submitUpload" :before-upload="beforeUpload"
                        v-loading="importing">
-              <el-button type="primary" :loading="importing">选择 xlsx 并导入</el-button>
+              <el-button type="primary" :loading="importing">选择表格文件并导入</el-button>
             </el-upload>
           </el-form-item>
         </el-form>
@@ -512,10 +514,17 @@ async function submitPassword() {
   display: none;
 }
 
-.add-row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .add-input { width: 220px; }
 .add-hint { font-size: 12px; color: var(--ios-label-3); }
 .list-name { font-weight: 600; }
+.list-code {
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--ios-label-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .cur-tag { margin-left: 8px; }
 .data-cards { display: flex; gap: 10px; flex-wrap: wrap; }
 .data-card {

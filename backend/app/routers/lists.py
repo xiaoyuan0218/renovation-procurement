@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..services import codes
 from ..models import Category, Item, ItemList, Room
 from ..schemas import ItemListIn, ItemListOut
 
@@ -51,7 +52,12 @@ def create_list(data: ItemListIn, db: Session = Depends(get_db)):
         source = db.get(ItemList, data.copy_from)
         if source is None:
             raise HTTPException(400, "要复制的清单不存在")
-    lst = ItemList(name=data.name, note=data.note or "", sort=data.sort)
+    # 手机上传时带着自己的编号：沿用它，两边编号才对得上；撞了或没带就现发一个
+    wanted = codes.normalize(data.code)
+    if wanted and db.query(ItemList).filter(ItemList.code == wanted).first():
+        wanted = ""
+    lst = ItemList(name=data.name, note=data.note or "", sort=data.sort,
+                   code=wanted or codes.new_code())
     db.add(lst)
     db.flush()  # 拿到新 id 才能给复制过来的分组/分类挂 list_id
     if source is not None:

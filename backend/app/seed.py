@@ -3,14 +3,17 @@
 from sqlalchemy import text
 
 from . import migrations
+from .services import codes
 from .db import Base, SessionLocal, engine
 from .models import Category, Item, ItemList, PurchaseRecord, Room
 from .services.compute import item_status
 
 DEFAULT_LIST_NAME = migrations.DEFAULT_LIST_NAME
-DEFAULT_ROOMS = ["玄关/阳台", "过道", "客厅", "休闲区", "电竞房", "次卧",
-                 "主卧", "主卫", "次卫湿区", "次卫干区", "厨房", "餐厅"]
-DEFAULT_CATEGORIES = ["照明", "开关插座", "网络", "家装"]
+# 默认只给一个示例，不预填一整套行业词汇 —— 这工具是通用的（装修、年货、
+# 项目物料都能用），一上来就摆十二个房间名会让人以为它只能干装修这一件事。
+# 示例照着用户自己的习惯改掉就行，也可以在「设置」里随时增删。
+DEFAULT_ROOMS = ["示例分组"]
+DEFAULT_CATEGORIES = ["示例分类"]
 
 
 def init_db():
@@ -54,6 +57,10 @@ def _add_missing_columns():
         if "room_id" not in rcols:
             conn.execute(text("ALTER TABLE purchase_records ADD COLUMN room_id INTEGER "
                               "REFERENCES rooms(id) ON DELETE SET NULL"))
+        lcols = [row[1] for row in conn.execute(text("PRAGMA table_info(lists)"))]
+        if "code" not in lcols:
+            conn.execute(text("ALTER TABLE lists ADD COLUMN code VARCHAR(12)"))
+        _backfill_list_codes(conn)
         ecols = [row[1] for row in conn.execute(text("PRAGMA table_info(extra_expenses)"))]
         if ecols and "item_id" not in ecols:
             conn.execute(text("ALTER TABLE extra_expenses ADD COLUMN item_id INTEGER "
@@ -74,11 +81,25 @@ def _add_missing_columns():
         conn.execute(text("DELETE FROM purchase_records WHERE item_id NOT IN (SELECT id FROM items)"))
 
 
+def _backfill_list_codes(conn) -> None:
+    """给还没有编号的清单各发一个（老库升级、或中途失败留下的空值）。"""
+    taken = {row[0] for row in conn.execute(text("SELECT code FROM lists WHERE code IS NOT NULL"))}
+    rows = [row[0] for row in conn.execute(
+        text("SELECT id FROM lists WHERE code IS NULL OR code = ''"))]
+    for list_id in rows:
+        code = codes.new_code()
+        while code in taken:
+            code = codes.new_code()
+        taken.add(code)
+        conn.execute(text("UPDATE lists SET code = :code WHERE id = :id"),
+                     {"code": code, "id": list_id})
+
+
 def _seed_defaults(db):
     if db.query(ItemList).count() == 0:
         # 全新库：建一份默认清单，默认分组/分类挂在它名下。
         # （老库走的是迁移，lists 里已经有默认清单了，不会进这个分支）
-        lst = ItemList(name=DEFAULT_LIST_NAME, sort=0)
+        lst = ItemList(name=DEFAULT_LIST_NAME, sort=0, code=codes.new_code())
         db.add(lst)
         db.flush()
         for i, name in enumerate(DEFAULT_ROOMS):

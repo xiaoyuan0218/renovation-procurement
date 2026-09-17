@@ -61,7 +61,6 @@ import com.xiaoyuan.renovation.di.AppContainer
 import com.xiaoyuan.renovation.ui.common.containerViewModel
 import com.xiaoyuan.renovation.ui.dashboard.DashboardScreen
 import com.xiaoyuan.renovation.ui.dashboard.DashboardViewModel
-import com.xiaoyuan.renovation.ui.lists.NewListDialog
 import com.xiaoyuan.renovation.ui.items.ItemEditScreen
 import com.xiaoyuan.renovation.ui.items.ItemsScreen
 import com.xiaoyuan.renovation.ui.items.ItemsViewModel
@@ -69,7 +68,14 @@ import com.xiaoyuan.renovation.ui.items.NEW_ITEM_ID
 import com.xiaoyuan.renovation.ui.lists.ListsViewModel
 import com.xiaoyuan.renovation.ui.matrix.MatrixScreen
 import com.xiaoyuan.renovation.ui.matrix.MatrixViewModel
+import com.xiaoyuan.renovation.ui.settings.AccountPage
+import com.xiaoyuan.renovation.ui.settings.BackupPage
+import com.xiaoyuan.renovation.ui.settings.ExpensesPage
+import com.xiaoyuan.renovation.ui.settings.ListsPage
+import com.xiaoyuan.renovation.ui.settings.RoomsPage
 import com.xiaoyuan.renovation.ui.settings.SettingsScreen
+import com.xiaoyuan.renovation.ui.settings.SettingsViewModel
+import com.xiaoyuan.renovation.ui.settings.TrashPage
 import com.xiaoyuan.renovation.ui.setup.ServerSetupScreen
 import com.xiaoyuan.renovation.ui.theme.Ink
 
@@ -96,7 +102,57 @@ fun AppShellHost(container: AppContainer, baseUrl: String) {
                 baseUrl = baseUrl,
                 onEditItem = { id -> navController.navigate("item/$id") },
                 onEditServerAddress = { navController.navigate("server") },
+                onOpenSettingsPage = { page -> navController.navigate("settings/$page") },
             )
+        }
+        // 设置里的各个子页面：设置页只做菜单，点开才进整页
+        composable("settings/{page}") { entry ->
+            val page = entry.arguments?.getString("page").orEmpty()
+            val back = { navController.popBackStack(); Unit }
+            when (page) {
+                "lists" -> ListsPage(
+                    listsVm = containerViewModel(container) {
+                        ListsViewModel(it.repo, it.settings, it::bumpDataVersion)
+                    },
+                    onBack = back,
+                )
+
+                "rooms" -> RoomsPage(
+                    vm = containerViewModel(container) {
+                        SettingsViewModel(it.repo, it.settings, it.appContextRef)
+                    },
+                    onBack = back,
+                )
+
+                "expenses" -> ExpensesPage(
+                    vm = containerViewModel(container) {
+                        SettingsViewModel(it.repo, it.settings, it.appContextRef)
+                    },
+                    onBack = back,
+                )
+
+                "trash" -> TrashPage(
+                    vm = containerViewModel(container) {
+                        SettingsViewModel(it.repo, it.settings, it.appContextRef)
+                    },
+                    onBack = back,
+                )
+
+                "backup" -> BackupPage(
+                    vm = containerViewModel(container) {
+                        SettingsViewModel(it.repo, it.settings, it.appContextRef)
+                    },
+                    onBack = back,
+                )
+
+                "account" -> AccountPage(
+                    vm = containerViewModel(container) {
+                        SettingsViewModel(it.repo, it.settings, it.appContextRef)
+                    },
+                    onEditServerAddress = { navController.navigate("server") },
+                    onBack = back,
+                )
+            }
         }
         composable("server") {
             ServerSetupScreen(
@@ -125,6 +181,7 @@ private fun AppShell(
     baseUrl: String,
     onEditItem: (Int) -> Unit,
     onEditServerAddress: () -> Unit,
+    onOpenSettingsPage: (String) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(ShellTab.Dashboard) }
     val dataVersion by container.dataVersion.collectAsStateWithLifecycle()
@@ -180,7 +237,7 @@ private fun AppShell(
                         container = container,
                         listsVm = listsVm,
                         refreshKey = dataVersion,
-                        onEditServerAddress = onEditServerAddress,
+                        onOpenPage = onOpenSettingsPage,
                     )
                 }
             }
@@ -216,7 +273,6 @@ private fun ListSwitcherBar(
     val current = lists.firstOrNull { it.id == currentId } ?: lists.firstOrNull()
 
     var menuOpen by remember { mutableStateOf(false) }
-    var creating by remember { mutableStateOf(false) }
 
     LaunchedEffect(refreshKey) { vm.load() }
 
@@ -272,7 +328,9 @@ private fun ListSwitcherBar(
                                 Text(list.name, color = Ink.TextPrimary, fontSize = 14.sp)
                                 Spacer(Modifier.width(10.dp))
                                 Text(
-                                    text = "${list.itemCount} 项",
+                                    text = list.code.ifBlank { "" }
+                                        .let { if (it.isEmpty()) "" else "$it · " } +
+                                        "${list.itemCount} 项",
                                     color = Ink.TextMuted,
                                     fontSize = 12.sp,
                                 )
@@ -289,37 +347,8 @@ private fun ListSwitcherBar(
                         },
                     )
                 }
-                HorizontalDivider(color = Ink.Divider)
-                DropdownMenuItem(
-                    text = { Text("新建清单…", color = Ink.Blue, fontSize = 14.sp) },
-                    leadingIcon = { Icon(Icons.Filled.Add, null, tint = Ink.Blue, modifier = Modifier.size(18.dp)) },
-                    onClick = {
-                        menuOpen = false
-                        creating = true
-                    },
-                )
             }
         }
-
-        IconButton(onClick = { creating = true }) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "新建清单",
-                tint = Ink.BlueSoft,
-            )
-        }
-    }
-
-    if (creating) {
-        NewListDialog(
-            lists = lists,
-            defaultSourceId = currentId,
-            onConfirm = { name, copyFrom ->
-                creating = false
-                vm.create(name, copyFrom)
-            },
-            onDismiss = { creating = false },
-        )
     }
 }
 

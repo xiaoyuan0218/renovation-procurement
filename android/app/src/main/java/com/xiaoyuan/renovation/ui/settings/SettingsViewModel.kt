@@ -252,11 +252,11 @@ class SettingsViewModel(
 
     /** 导出 xlsx 并唤起系统分享（可存文件、发微信、发邮件）。 */
     fun exportToShare() {
-        downloadAndShare(fallbackName = "采购清单.xlsx", isTemplate = false)
+        downloadAndShare(fallbackName = "采知道.xlsx", isTemplate = false)
     }
 
     fun downloadTemplateToShare() {
-        downloadAndShare(fallbackName = "导入模板.xlsx", isTemplate = true)
+        downloadAndShare(fallbackName = "采知道 导入模板.xlsx", isTemplate = true)
     }
 
     private fun downloadAndShare(fallbackName: String, isTemplate: Boolean) {
@@ -274,7 +274,7 @@ class SettingsViewModel(
                             context = appContext,
                             uri = written.second,
                             mime = RenovationRepository.XLSX_MIME,
-                            title = if (isTemplate) "分享导入模板" else "分享采购清单",
+                            title = if (isTemplate) "分享导入模板" else "分享采知道",
                         )
                         _message.value = if (shared) {
                             "已生成 ${written.first.name}（${file.bytes.size / 1024} KB）"

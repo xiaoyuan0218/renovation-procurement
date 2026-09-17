@@ -89,7 +89,7 @@ fun ServerSetupScreen(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = if (onBack == null) "采购清单" else "服务器地址",
+                        text = if (onBack == null) "采知道" else "服务器地址",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Ink.BlueSoft,
@@ -115,7 +115,7 @@ fun ServerSetupScreen(
 
             if (onBack == null) {
                 Text(
-                    text = "把整张采购清单",
+                    text = "把整张清单",
                     fontSize = 34.sp,
                     lineHeight = 42.sp,
                     fontWeight = FontWeight.Bold,
@@ -133,7 +133,7 @@ fun ServerSetupScreen(
                 Spacer(Modifier.height(14.dp))
                 Text(
                     text = "填一次服务器地址，之后随手改数量、记付款、看进度 —— " +
-                        "数据还在你自己机器的 SQLite 里，手机只是换了个入口。",
+                        "数据始终在你自己那台机器上，手机只是多了个入口。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Ink.TextSecondary,
                 )
@@ -144,7 +144,7 @@ fun ServerSetupScreen(
                 AppTextField(
                     value = state.input,
                     onValueChange = vm::onInputChange,
-                    label = "后端地址",
+                    label = "服务器地址",
                     placeholder = "192.168.1.9:8000",
                     leadingIcon = Icons.Filled.Dns,
                     keyboardType = KeyboardType.Uri,
@@ -152,7 +152,7 @@ fun ServerSetupScreen(
                     isError = state.parse is AddressParse.Invalid,
                     supportingText = when (val p = state.parse) {
                         AddressParse.Empty ->
-                            "省略 http:// 和端口都行，默认按 8000 处理"
+                            "填机器地址就行，不带 http:// 也可以"
                         is AddressParse.Invalid -> p.reason
                         is AddressParse.Ok -> "将连接到 ${p.normalized}"
                     },

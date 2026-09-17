@@ -203,17 +203,17 @@ async function save() {
       <el-row :gutter="12">
         <el-col :xs="24" :sm="12">
           <el-form-item label="名称" prop="name">
-            <el-input v-model="form.name" placeholder="如：客厅吸顶灯" />
+            <el-input v-model="form.name" placeholder="如：抽纸" />
           </el-form-item>
         </el-col>
         <el-col :xs="12" :sm="6">
           <el-form-item label="品牌">
-            <el-input v-model="form.brand" placeholder="如：小米/易来" />
+            <el-input v-model="form.brand" placeholder="如：小米" />
           </el-form-item>
         </el-col>
         <el-col :xs="12" :sm="6">
           <el-form-item label="型号">
-            <el-input v-model="form.model" placeholder="如：筒灯2Pro" />
+            <el-input v-model="form.model" placeholder="如：A200" />
           </el-form-item>
         </el-col>
       </el-row>

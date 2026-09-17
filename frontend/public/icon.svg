@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-label="采知道">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A1B36"/>
+      <stop offset=".55" stop-color="#050A18"/>
+      <stop offset="1" stop-color="#0B2244"/>
+    </linearGradient>
+  </defs>
+  <rect width="108" height="108" rx="24" fill="url(#bg)"/>
+  <rect x="26" y="26" width="56" height="56" rx="10" fill="#FFFFFF" fill-opacity=".10"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="7">
+    <path d="M33 38 l5 5 l8 -10" stroke="#5AC8FA"/>
+    <path d="M51 38 h25" stroke="#FFFFFF" stroke-opacity=".88"/>
+    <path d="M33 54 l5 5 l8 -10" stroke="#5AC8FA"/>
+    <path d="M51 54 h25" stroke="#FFFFFF" stroke-opacity=".88"/>
+    <path d="M51 70 h16" stroke="#FFFFFF" stroke-opacity=".35"/>
+  </g>
+</svg>

@@ -734,7 +734,7 @@ private fun CellEditSheet(
             value = note,
             onValueChange = { note = it },
             label = "备注",
-            placeholder = "例如：走明装线槽",
+            placeholder = "例如：这间先买一半",
             accent = Ink.Indigo,
         )
         Spacer(Modifier.height(8.dp))

@@ -162,7 +162,7 @@ fun ItemEditScreen(
                                 value = form.name,
                                 onValueChange = { v -> vm.edit { it.copy(name = v) } },
                                 label = "名称",
-                                placeholder = "例如：筒灯",
+                                placeholder = "例如：抽纸",
                                 isError = form.name.isBlank() && !form.isNew,
                             )
                             Spacer(Modifier.height(12.dp))

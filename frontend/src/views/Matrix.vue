@@ -183,7 +183,7 @@ function summaryMethod({ columns }) {
                            placeholder="留空用物料单价" :value-on-clear="null" style="width: 100%" />
         </el-form-item>
         <el-form-item label="备注">
-          <el-input v-model="cellForm.note" placeholder="如：双口面板" />
+          <el-input v-model="cellForm.note" placeholder="如：这间先买一半" />
         </el-form-item>
       </el-form>
       <template #footer>

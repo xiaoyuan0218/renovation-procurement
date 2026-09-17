@@ -7,11 +7,12 @@ from fastapi.staticfiles import StaticFiles
 
 from .auth import require_user
 from .routers import (auth, base_data, backup, expenses, items, lists, matrix,
+                      sync,
                       summary, transfer, trash)
 from .routers.items import records_router
 from .seed import init_db
 
-app = FastAPI(title="装修采购清单", docs_url=None, redoc_url=None)
+app = FastAPI(title="采知道 服务端", docs_url=None, redoc_url=None)
 
 # 不需要 allow_credentials：网页靠 Cookie 认证，而生产是同源（后端自己发前端），
 # 开发走 vite 代理也是同源，CORS 根本不参与。keep 住不带 credentials 的
@@ -48,6 +49,7 @@ app.include_router(lists.router, dependencies=_guard)
 app.include_router(expenses.router, dependencies=_guard)
 app.include_router(trash.router, dependencies=_guard)
 app.include_router(backup.router, dependencies=_guard)
+app.include_router(sync.router, dependencies=_guard)
 
 # 前端构建产物目录可用环境变量覆盖（本地开发走 vite:5173，不经过这里）
 DIST_DIR = os.environ.get(

@@ -107,7 +107,7 @@ private fun DashboardContent(
     ) {
         Spacer(Modifier.height(12.dp))
         BrandHeader(
-            title = "采购清单",
+            title = "总览",
             subtitle = "共 ${totals.itemCount} 项物料 · 未买齐 ${totals.pendingCount} 项",
             trailing = {
                 GlassIconButton(
@@ -123,7 +123,7 @@ private fun DashboardContent(
         if (totals.itemCount == 0) {
             EmptyState(
                 title = "还没有物料",
-                hint = "到「清单」页新增第一条，或在「设置」里导入现成的 xlsx",
+                hint = "到「清单」页新增第一条，或在「设置」里导入现成的表格",
             )
             return@Column
         }

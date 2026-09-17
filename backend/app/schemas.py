@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -9,6 +9,8 @@ class ItemListIn(BaseModel):
     name: str = Field(min_length=1, max_length=50)
     note: str = Field(default="", max_length=200)
     sort: int = 0
+    # 手机带着自己的编号上传时用它，让两边编号对得上；不传就现发一个
+    code: Optional[str] = None
     # 新建时可选：以某份现有清单为模板，只复制它的分组与分类（不带物料）。
     # 不传就是一张完全空白的清单。
     copy_from: Optional[int] = None
@@ -20,10 +22,17 @@ class ItemListOut(BaseModel):
     name: str
     note: str = ""
     sort: int = 0
+    code: str = ""
     # 清单列表要显示"里面有多少东西"，一次查询带出来，前端不必再逐份去数
     item_count: int = 0
     room_count: int = 0
     category_count: int = 0
+
+    @field_validator("code", mode="before")
+    @classmethod
+    def _blank_code(cls, value):
+        # 老库升级途中的清单可能还没回填编号，接口上不能吐 null
+        return value or ""
 
 
 class CategoryIn(BaseModel):
@@ -298,3 +307,104 @@ class LoginOut(BaseModel):
 
 class OkOut(BaseModel):
     ok: bool = True
+
+# ---------------------------------------------------------------- 清单级同步
+# 手机单机版把整份清单搬来搬去时用的请求体，格式与 services/list_transfer.py 一致。
+
+class SyncRoomIn(BaseModel):
+    id: Optional[int] = None
+    name: str = Field(min_length=1, max_length=50)
+    sort: int = 0
+
+
+class SyncCategoryIn(BaseModel):
+    id: Optional[int] = None
+    name: str = Field(min_length=1, max_length=50)
+    sort: int = 0
+
+
+class SyncAllocIn(BaseModel):
+    id: Optional[int] = None
+    room_id: Optional[int] = None
+    qty: float = 0
+    price_override: Optional[float] = None
+    note: str = Field(default="", max_length=200)
+
+
+class SyncRecordIn(BaseModel):
+    id: Optional[int] = None
+    qty: float = 0
+    amount: float = 0
+    date: str = ""
+    note: str = Field(default="", max_length=200)
+    vendor: str = Field(default="", max_length=50)
+    order_no: str = Field(default="", max_length=50)
+    room_ids: list[int] = []
+
+    @field_validator("date")
+    @classmethod
+    def _normalize_date(cls, value: str) -> str:
+        # 别的设备上可能存着 "2026-09-14 00:00:00" 这类脏值：读时归一化就好，
+        # 一条日期格式不对不该让整份清单同步失败
+        return date_utils.for_read(value)
+
+
+class SyncItemIn(BaseModel):
+    id: Optional[int] = None
+    name: str = Field(min_length=1, max_length=100)
+    category_id: Optional[int] = None
+    unit: str = Field(default="个", max_length=20)
+    brand: str = Field(default="", max_length=50)
+    model: str = Field(default="", max_length=100)
+    qty_total: float = 0
+    price: float = 0
+    discount_price: Optional[float] = None
+    note: str = Field(default="", max_length=500)
+    sort: int = 0
+    deleted_at: Optional[str] = None
+    allocations: list[SyncAllocIn] = []
+    records: list[SyncRecordIn] = []
+
+
+class SyncExpenseIn(BaseModel):
+    id: Optional[int] = None
+    kind: str = Field(default="运费", max_length=20)
+    amount: float = 0
+    date: str = ""
+    vendor: str = Field(default="", max_length=50)
+    order_no: str = Field(default="", max_length=50)
+    note: str = Field(default="", max_length=200)
+    item_id: Optional[int] = None
+
+    @field_validator("date")
+    @classmethod
+    def _normalize_date(cls, value: str) -> str:
+        return date_utils.for_read(value)
+
+
+class SyncListMeta(BaseModel):
+    name: str = Field(default="未命名清单", max_length=50)
+    note: str = Field(default="", max_length=200)
+    sort: int = 0
+    # 清单编号：搬运时跟着走，两边保持一致
+    code: str = ""
+
+
+class SyncPayload(BaseModel):
+    """一份清单的全量内容。
+
+    注意这里用 `List[...]` 而不是 `list[...]`：字段名 `list` 会在类体内遮蔽
+    内建类型，写成 `list[SyncRoomIn]` 会直接报 TypeError。
+    """
+    version: int = 1
+    list: SyncListMeta = SyncListMeta()
+    rooms: List[SyncRoomIn] = []
+    categories: List[SyncCategoryIn] = []
+    items: List[SyncItemIn] = []
+    expenses: List[SyncExpenseIn] = []
+
+
+class SyncPushIn(SyncPayload):
+    """覆盖已有清单时多带两样：上次同步的指纹，以及"以我为准"的强制开关。"""
+    base_fingerprint: Optional[str] = None
+    force: bool = False

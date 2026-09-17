@@ -28,6 +28,8 @@ data class ItemListDto(
     val name: String,
     val note: String = "",
     val sort: Int = 0,
+    /** 清单编号：改名字、上传时重名加后缀都不变，两端靠它对认 */
+    val code: String = "",
     @SerialName("item_count") val itemCount: Int = 0,
     @SerialName("room_count") val roomCount: Int = 0,
     @SerialName("category_count") val categoryCount: Int = 0,

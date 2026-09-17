@@ -95,7 +95,7 @@ async function onLogout() {
               <path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5" />
             </svg>
           </span>
-          <span class="brand-text">采购清单</span>
+          <span class="brand-text">采知道</span>
         </div>
 
         <div class="list-pick">
@@ -103,18 +103,14 @@ async function onLogout() {
                      popper-class="list-popper" placeholder="选择清单"
                      @change="onSwitchList">
             <el-option v-for="l in lists.all" :key="l.id" :label="l.name" :value="l.id">
-              <span>{{ l.name }}</span>
+              <span class="opt-name">
+                {{ l.name }}
+                <!-- 清单编号：改名字、重名加后缀都不变，手机上传上来的那份靠它对认 -->
+                <em v-if="l.code" class="opt-code">{{ l.code }}</em>
+              </span>
               <span class="opt-count">{{ l.item_count }} 项</span>
             </el-option>
           </el-select>
-          <el-tooltip content="新建清单" placement="bottom" :show-after="300">
-            <button class="add-list" type="button" aria-label="新建清单" @click="onCreateList">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
-                   stroke-width="2.6" stroke-linecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-          </el-tooltip>
         </div>
 
         <nav class="seg" role="tablist">
@@ -211,6 +207,18 @@ async function onLogout() {
   align-items: center;
   gap: 6px;
 }
+.opt-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.opt-code {
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--ios-label-3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 .list-select {
   width: 150px;
 }
@@ -223,22 +231,6 @@ async function onLogout() {
 }
 .list-select :deep(.el-select__wrapper.is-focused) {
   border-color: var(--ios-blue);
-}
-.add-list {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--ios-blue);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  padding: 0;
-}
-.add-list:hover {
-  background: #fff;
 }
 .seg {
   display: flex;

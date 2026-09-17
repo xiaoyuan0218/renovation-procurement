@@ -74,7 +74,7 @@ object ServerAddress {
 
     /** 供界面展示的友好说明。 */
     fun describe(raw: String): String = when (val r = parse(raw)) {
-        AddressParse.Empty -> "请输入后端地址，例如 192.168.1.9:8000"
+        AddressParse.Empty -> "请输入服务器地址，例如 192.168.1.9:8000"
         is AddressParse.Invalid -> r.reason
         is AddressParse.Ok -> "将连接到 ${r.normalized}"
     }

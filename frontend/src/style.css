@@ -361,6 +361,20 @@ body {
   box-shadow: 0 4px 14px rgba(0, 122, 255, 0.28);
 }
 
+/* plain 变体（"新建清单…""添加"这类）原来是淡描边样式，和页面其他地方的主按钮
+   不在一个语汇里 —— 统一成同一套有底有影的实心蓝 */
+.el-button--primary.is-plain {
+  --el-button-bg-color: var(--ios-blue);
+  --el-button-border-color: transparent;
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: var(--ios-blue);
+  --el-button-hover-border-color: transparent;
+  --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: var(--ios-blue);
+  --el-button-active-border-color: transparent;
+  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.28);
+}
+
 /* 表头排版 */
 .el-table th.el-table__cell {
   font-weight: 600;

@@ -13,7 +13,7 @@ const usernameInput = ref(null)
 // 后端还没有账号时，同一个页面变成「创建管理员」
 const isSetup = computed(() => auth.status === 'setup')
 
-const title = computed(() => (isSetup.value ? '创建管理员账号' : '采购清单'))
+const title = computed(() => (isSetup.value ? '创建管理员账号' : '采知道'))
 const subtitle = computed(() => (isSetup.value
   ? '第一次使用，先设置一个账号。之后打开这个页面都需要登录。'
   : '登录后才能查看和修改采购数据。'))

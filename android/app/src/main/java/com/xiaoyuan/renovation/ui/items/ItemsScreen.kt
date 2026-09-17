@@ -193,7 +193,7 @@ fun ItemsScreen(
                     Box(Modifier.weight(1f)) {
                         EmptyState(
                             title = if (data.items.isEmpty()) "清单还是空的" else "没有符合条件的物料",
-                            hint = if (data.items.isEmpty()) "点右下角新增，或在「设置」里导入 xlsx" else "换个关键词或筛选条件试试",
+                            hint = if (data.items.isEmpty()) "点下面的「新增物料」加第一条，或在「设置」里导入表格" else "换个关键词或筛选条件试试",
                         )
                     }
                 } else {

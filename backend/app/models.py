@@ -46,6 +46,10 @@ class ItemList(Base):
     note = Column(String(200), default="")
     sort = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.now)
+    # 清单的唯一编号（见 services/codes.py）：改名字、重名加后缀都不影响它。
+    # 可空是为升级路径服务（SQLite 加列不能 NOT NULL 且无默认值），老库由 seed
+    # 的轻量迁移回填，应用层建清单时必定赋值。
+    code = Column(String(12), index=True, nullable=True)
 
     # 删清单就把它名下的东西一起带走；ORM 级联不依赖数据库的外键开关
     items = relationship("Item", back_populates="item_list",
