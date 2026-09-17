@@ -105,9 +105,16 @@ def run():
         check("清单-main 无整体滚动",
               m["mainScrollH"] <= m["mainH"] + 1,
               f"mainScrollH={m['mainScrollH']} mainH={m['mainH']}")
+        # 表格下面挂着一条分页栏，它本身占的高度不算"底部空白" ——
+        # 要留白的只有分页栏之外的部分
+        pager_h = page.evaluate(
+            "() => { const p = document.querySelector('.pager');"
+            " return p ? Math.round(p.getBoundingClientRect().height) : 0; }")
         check("清单-表格撑满视口（无底部空白）",
-              m["gapBelowTable"] is not None and abs(m["gapBelowTable"]) <= 3,
-              f"gap={m['gapBelowTable']} tableH={m['table']['h']} boxH={m['boxH']}")
+              m["gapBelowTable"] is not None
+              and abs(m["gapBelowTable"] - pager_h) <= 3,
+              f"gap={m['gapBelowTable']} 分页栏={pager_h} "
+              f"tableH={m['table']['h']} boxH={m['boxH']}")
         check("清单-表头在表格内顶部（不随内容滚）",
               m["hdr"] and m["hdr"]["h"] > 20 and m["tableOffsetTop"] is not None,
               f"hdr={m['hdr']} tableTop={m['tableOffsetTop']}")
@@ -122,11 +129,11 @@ def run():
         check("清单-滚动内容后表头不动", before == after, f"{before} -> {after}")
         page.screenshot(path=os.path.join(OUT, "120-items-fill.png"))
 
-        # ---------- 布点矩阵 ----------
-        page.click("text=布点矩阵")
+        # ---------- 分配矩阵 ----------
+        page.click("text=分配矩阵")
         page.wait_for_selector(".glass.panel .el-table__row", timeout=8000)
         page.wait_for_timeout(700)
-        m = probe(page, "布点矩阵")
+        m = probe(page, "分配矩阵")
         check("矩阵-页面无整体滚动",
               m["pageScrollH"] <= m["pageClientH"] + 1,
               f"scrollH={m['pageScrollH']} clientH={m['pageClientH']}")

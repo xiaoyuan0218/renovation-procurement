@@ -79,7 +79,7 @@ def test_no_allocations_uses_qty_total(db):
 
 
 def test_multiple_records_partial_with_rooms(db):
-    """多笔采购记录：数量金额分别累加，实付按布点顺序覆盖房间。"""
+    """多笔采购记录：数量金额分别累加；多分组只买一半时不猜哪个分组买齐了。"""
     room_a = _mk_room(db, "客厅")
     room_b = _mk_room(db, "餐厅")
     item = Item(name="筒灯", price=10)
@@ -98,9 +98,41 @@ def test_multiple_records_partial_with_rooms(db):
     assert compute.item_status(item) == "partial"
     assert compute.item_unpaid_qty(item) == 2
     assert compute.item_unpaid(item) == 20  # 未付数量2 × 原价10
-    cover = compute.allocation_paid_cover(item)
-    # 覆盖顺序：客厅3 全覆盖，餐厅2/4
-    assert list(cover.values()) == [3, 2]
+    # 分给了两个房间、只买了一半：先买哪一间系统并不知道，按顺序抵扣是猜测，
+    # 所以一个都不标（界面据此不标绿），进度由物料行上的「实付 5/7」表达
+    assert compute.allocation_paid_cover(item) == {}
+
+
+def test_paid_cover_exact_for_single_group(db):
+    """只分给一个分组：不存在谁先谁后，部分买齐也给准确的覆盖值。"""
+    room = _mk_room(db, "客厅")
+    item = Item(name="客厅吊灯", price=10)
+    db.add(item)
+    db.flush()
+    db.add(Allocation(item_id=item.id, room_id=room.id, qty=4))
+    item.records.append(PurchaseRecord(qty=1, amount=10))
+    db.commit()
+    db.refresh(item)
+
+    assert compute.item_status(item) == "partial"
+    assert list(compute.allocation_paid_cover(item).values()) == [1]
+
+
+def test_paid_cover_full_when_item_is_done(db):
+    """整条物料已全部买齐：每一行都满，这是事实，照实标绿。"""
+    room_a = _mk_room(db, "客厅")
+    room_b = _mk_room(db, "餐厅")
+    item = Item(name="筒灯", price=10)
+    db.add(item)
+    db.flush()
+    db.add(Allocation(item_id=item.id, room_id=room_a.id, qty=3))
+    db.add(Allocation(item_id=item.id, room_id=room_b.id, qty=4))
+    item.records.append(PurchaseRecord(qty=7, amount=70))
+    db.commit()
+    db.refresh(item)
+
+    assert compute.item_status(item) == "done"
+    assert list(compute.allocation_paid_cover(item).values()) == [3, 4]
 
 
 def test_unbought_status(db):
@@ -111,3 +143,78 @@ def test_unbought_status(db):
     assert compute.item_status(item) == "unbought"
     assert compute.item_unpaid(item) == 100
     assert compute.item_dict(item)["bought"] is False
+
+
+# ---------------------------------------------------------------- 两个口径的三段拆分
+
+def _assert_split(d):
+    """两个口径各自的三段拆分必须严格等于合计（到分，不允许浮点漂移）。"""
+    assert round(d["paid"] + d["actual_discount"] + d["unpaid"], 2) == d["list_total"]
+    assert round(d["paid"] + d["daily_discount"] + d["daily_unpaid"], 2) == d["discount_total"]
+
+
+def test_split_without_discount_price(db):
+    """没填日常单价时，日常价口径退化成原价口径，两个优惠相等。"""
+    item = Item(name="门锁", qty_total=2, price=50)
+    db.add(item)
+    db.flush()
+    item.records.append(PurchaseRecord(qty=1, amount=40))
+    db.commit()
+    db.refresh(item)
+
+    d = compute.item_dict(item)
+    assert d["unpaid"] == 50 and d["daily_unpaid"] == 50
+    assert d["actual_discount"] == 10 and d["daily_discount"] == 10
+    _assert_split(d)
+
+
+def test_split_holds_with_price_override(db):
+    """房间覆盖价让「原价小计 − 未付」不等于「已买数量 × 原价」，等式仍须成立。"""
+    room = _mk_room(db, "客厅")
+    item = Item(name="吊灯", price=100, discount_price=80)
+    db.add(item)
+    db.flush()
+    db.add(Allocation(item_id=item.id, room_id=room.id, qty=2, price_override=150))
+    item.records.append(PurchaseRecord(qty=1, amount=120))
+    db.commit()
+    db.refresh(item)
+
+    d = compute.item_dict(item)
+    assert d["list_total"] == 300      # 2 × 覆盖价 150
+    assert d["discount_total"] == 160  # 2 × 日常单价 80，不看覆盖价
+    assert d["unpaid"] == 100          # 未付 1 × 原价
+    assert d["daily_unpaid"] == 80     # 未付 1 × 日常单价
+    assert d["actual_discount"] == 80  # 300 − 120 − 100
+    assert d["daily_discount"] == -40  # 160 − 120 − 80
+    _assert_split(d)
+
+
+def test_daily_discount_negative_when_paid_above_daily_price(db):
+    """实付价高于日常价：日常价优惠为负，不夹到 0。"""
+    item = Item(name="溢价件", qty_total=1, price=100, discount_price=90)
+    db.add(item)
+    db.flush()
+    item.records.append(PurchaseRecord(qty=1, amount=100))
+    db.commit()
+    db.refresh(item)
+
+    d = compute.item_dict(item)
+    assert d["actual_discount"] == 0    # 正好按原价付
+    assert d["daily_discount"] == -10   # 比日常价多花 10
+    _assert_split(d)
+
+
+def test_split_holds_when_overbought(db):
+    """买超：实付数量大于总量，未付夹到 0，两个优惠都转负。"""
+    item = Item(name="买多了", qty_total=1, price=100, discount_price=80)
+    db.add(item)
+    db.flush()
+    item.records.append(PurchaseRecord(qty=3, amount=300))
+    db.commit()
+    db.refresh(item)
+
+    d = compute.item_dict(item)
+    assert d["unpaid"] == 0 and d["daily_unpaid"] == 0
+    assert d["actual_discount"] == -200  # 100 − 300
+    assert d["daily_discount"] == -220   # 80 − 300
+    _assert_split(d)

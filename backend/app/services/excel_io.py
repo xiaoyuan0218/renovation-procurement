@@ -16,7 +16,7 @@ from collections import Counter
 
 from openpyxl import Workbook, load_workbook
 
-from . import compute
+from . import compute, dates
 
 PRODUCT_HEADER = {"灯具", "面板", "物料", "产品"}
 
@@ -296,6 +296,7 @@ def _parse_flat(path_or_bytes):
                 return cell.column
         return None
 
+    c_id = col_of(ws_items, "物料ID")
     c_cat = col_of(ws_items, "类目")
     c_name = col_of(ws_items, "物料名称")
     c_brand = col_of(ws_items, "品牌")
@@ -316,6 +317,7 @@ def _parse_flat(path_or_bytes):
             continue
         bought_cell = _txt(_v(ws_items, r, c_bought)) if c_bought else ""
         items.append({
+            "item_id": int(_num(_vo(ws_items, r, c_id))) if c_id and _num(_vo(ws_items, r, c_id)) else None,
             "name": name,
             "brand": _txt(_vo(ws_items, r, c_brand)),
             "model": _txt(_vo(ws_items, r, c_model)),
@@ -330,17 +332,19 @@ def _parse_flat(path_or_bytes):
             "note": _txt(_v(ws_items, r, c_note)),
         })
 
-    allocs = []  # {item_name, room, qty, price_override, paid_qty, note}
+    allocs = []  # {item_id, item_name, room, qty, price_override, paid_qty, note}
     if ws_alloc is not None:
         cols = {t: col_of(ws_alloc, t) for t in
-                ("物料名称", "房间", "数量", "单价", "实付数量", "备注")}
+                ("物料ID", "物料名称", "房间", "数量", "单价", "实付数量", "备注")}
         for r in range(2, ws_alloc.max_row + 1):
             name = _txt(_v(ws_alloc, r, cols["物料名称"]))
             room = _txt(_v(ws_alloc, r, cols["房间"]))
             qty = _num(_v(ws_alloc, r, cols["数量"])) or 0
             if not name or not room or not qty:
                 continue
+            aid = _num(_vo(ws_alloc, r, cols.get("物料ID")))
             allocs.append({
+                "item_id": int(aid) if aid else None,
                 "item_name": name, "room": room, "qty": qty,
                 "price_override": _num(_v(ws_alloc, r, cols["单价"])),
                 "paid_qty": min(_num(_vo(ws_alloc, r, cols.get("实付数量"))) or 0, qty),
@@ -352,8 +356,10 @@ def _parse_flat(path_or_bytes):
         if sheet.title == "采购记录":
             ws_rec = sheet
     if ws_rec is not None:
+        # 商家 / 订单号是后加的列：老文件里没有，_vo 会安全地返回 None
         rcols = {t: col_of(ws_rec, t) for t in
-                 ("物料名称", "实付数量", "实付金额", "付款日期", "备注")}
+                 ("物料ID", "物料名称", "实付数量", "实付金额", "付款日期",
+                  "分组", "商家", "订单号", "备注")}
         for r in range(2, ws_rec.max_row + 1):
             name = _txt(_v(ws_rec, r, rcols["物料名称"]))
             if not name:
@@ -362,14 +368,47 @@ def _parse_flat(path_or_bytes):
             amount = _num(_vo(ws_rec, r, rcols.get("实付金额"))) or 0
             if not qty and not amount:
                 continue  # 空记录忽略
+            rid = _num(_vo(ws_rec, r, rcols.get("物料ID")))
             records.append({
+                "item_id": int(rid) if rid else None,
                 "item_name": name,
                 "qty": qty,
                 "amount": amount,
-                "date": _txt(_vo(ws_rec, r, rcols.get("付款日期"))),
+                # Excel 的日期单元格读出来是 datetime，直接 str 会变成
+                # "2026-09-14 00:00:00" 这种脏值，这里统一成 YYYY-MM-DD
+                "date": dates.for_read(_vo(ws_rec, r, rcols.get("付款日期"))),
                 "note": _txt(_vo(ws_rec, r, rcols.get("备注"))),
+                "vendor": _txt(_vo(ws_rec, r, rcols.get("商家"))),
+                "order_no": _txt(_vo(ws_rec, r, rcols.get("订单号"))),
+                # 分组先按名字带着，落库时再在当前清单里找/建（解析阶段还没有 db）
+                "room_names": [s.strip() for s in re.split(
+                    r"[、,，/]", _txt(_vo(ws_rec, r, rcols.get("分组")))) if s.strip()],
             })
-    return {"items": items, "allocs": allocs, "records": records, "warnings": warnings}
+
+    # 额外费用页：老文件没有这一页时返回 None（而不是空列表），
+    # 导入时据此判断"该不该动现有的费用"
+    expenses = None
+    for sheet in wb.worksheets:
+        if sheet.title == "额外费用":
+            ws_exp = sheet
+            ecols = {t: col_of(ws_exp, t) for t in
+                     ("类型", "金额", "日期", "商家", "订单号", "备注")}
+            expenses = []
+            for r in range(2, ws_exp.max_row + 1):
+                amount = _num(_vo(ws_exp, r, ecols.get("金额")))
+                if amount is None:
+                    continue  # 没金额的行不算一笔费用
+                expenses.append({
+                    "kind": _txt(_vo(ws_exp, r, ecols.get("类型"))) or "运费",
+                    "amount": amount,
+                    "date": dates.for_read(_vo(ws_exp, r, ecols.get("日期"))),
+                    "vendor": _txt(_vo(ws_exp, r, ecols.get("商家"))),
+                    "order_no": _txt(_vo(ws_exp, r, ecols.get("订单号"))),
+                    "note": _txt(_vo(ws_exp, r, ecols.get("备注"))),
+                })
+            break
+    return {"items": items, "allocs": allocs, "records": records,
+            "expenses": expenses, "warnings": warnings}
 
 
 # ---------------------------------------------------------------- 入库
@@ -391,13 +430,14 @@ def _match_item(name, pool):
     return None
 
 
-def _get_or_create_room(db, name, rooms_cache, report):
+def _get_or_create_room(db, name, rooms_cache, report, list_id):
     if name in rooms_cache:
         return rooms_cache[name]
     from ..models import Room
-    room = db.query(Room).filter(Room.name == name).first()
+    room = db.query(Room).filter(Room.name == name,
+                                 Room.list_id == list_id).first()
     if not room:
-        room = Room(name=name, sort=len(rooms_cache))
+        room = Room(name=name, sort=len(rooms_cache), list_id=list_id)
         db.add(room)
         db.flush()
         report["rooms_created"] += 1
@@ -405,20 +445,36 @@ def _get_or_create_room(db, name, rooms_cache, report):
     return room
 
 
-def _get_or_create_category(db, name, cats_cache, report):
+def _get_or_create_category(db, name, cats_cache, report, list_id):
     if not name:
         return None
     if name in cats_cache:
         return cats_cache[name]
     from ..models import Category
-    cat = db.query(Category).filter(Category.name == name).first()
+    cat = db.query(Category).filter(Category.name == name,
+                                    Category.list_id == list_id).first()
     if not cat:
-        cat = Category(name=name, sort=len(cats_cache))
+        cat = Category(name=name, sort=len(cats_cache), list_id=list_id)
         db.add(cat)
         db.flush()
         report["categories_created"] += 1
     cats_cache[name] = cat
     return cat
+
+
+def _clear_list_items(db, list_id):
+    """清掉这份清单下的全部条目（连同布点与采购记录），别的清单不动。"""
+    from ..models import Allocation, Item, PurchaseRecord
+    ids = [row[0] for row in db.query(Item.id)
+           .filter(Item.list_id == list_id, Item.alive()).all()]
+    if not ids:
+        return
+    db.query(PurchaseRecord).filter(PurchaseRecord.item_id.in_(ids)) \
+        .delete(synchronize_session=False)
+    db.query(Allocation).filter(Allocation.item_id.in_(ids)) \
+        .delete(synchronize_session=False)
+    db.query(Item).filter(Item.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
 
 
 KEYWORD_CATS = [("照明", ["灯"]), ("开关插座", ["开关", "插座"]),
@@ -443,37 +499,36 @@ def _fallback_category(name):
     return None
 
 
-def _apply_original(db, parsed, mode, report):
-    from ..models import Allocation, Category, Item, PurchaseRecord, Room
+def _apply_original(db, parsed, mode, report, list_id):
+    from ..models import (Allocation, Category, Item, PurchaseRecord, RecordRoom,
+                          Room)
 
     db.expire_all()  # 同 session 二次导入时避免关系集合缓存过期不失效
 
     if mode == "replace":
-        db.query(PurchaseRecord).delete()
-        db.query(Allocation).delete()
-        db.query(Item).delete()
-        db.commit()
+        _clear_list_items(db, list_id)
 
     rooms_cache, cats_cache = {}, {}
-    for room in db.query(Room).order_by(Room.sort).all():
+    for room in db.query(Room).filter(Room.list_id == list_id).order_by(Room.sort).all():
         rooms_cache[room.name] = room
-    for cat in db.query(Category).order_by(Category.sort).all():
+    for cat in db.query(Category).filter(Category.list_id == list_id) \
+            .order_by(Category.sort).all():
         cats_cache[cat.name] = cat
 
     # 全量创建房间（没有布点的房间也是真实房间，矩阵页需要完整列）
     for name in parsed["rooms"]:
-        _get_or_create_room(db, name, rooms_cache, report)
+        _get_or_create_room(db, name, rooms_cache, report, list_id)
     db.commit()
 
     # 1) 矩阵产品
     existing = {} if mode == "replace" else {
         _norm(i.name): {"_obj": i, "_consumed": False, "_norm": _norm(i.name)}
-        for i in db.query(Item).all()}
+        for i in db.query(Item).filter(Item.list_id == list_id, Item.alive()).all()}
     for p in parsed["matrix_products"]:
         report.setdefault("allocations", 0)
         record_amount = None
         if mode == "replace":
-            item = Item(name=p["name"])
+            item = Item(name=p["name"], list_id=list_id)
         else:
             m = _match_item(p["name"], list(existing.values()))
             if m:
@@ -481,7 +536,7 @@ def _apply_original(db, parsed, mode, report):
                 item = m["_obj"]
                 report["items_matched"] += 1
             else:
-                item = Item(name=p["name"])
+                item = Item(name=p["name"], list_id=list_id)
                 report["items_created"] += 1
         if p["price"] is not None:
             item.price = p["price"]
@@ -492,13 +547,13 @@ def _apply_original(db, parsed, mode, report):
             record_amount = p["paid_amount"]
         if p["category"]:
             item.category_id = _get_or_create_category(
-                db, p["category"], cats_cache, report).id
+                db, p["category"], cats_cache, report, list_id).id
         db.add(item)
         db.flush()
         if p["allocations"]:
             item.qty_total = 0
             for a in p["allocations"]:
-                room = _get_or_create_room(db, a["room"], rooms_cache, report)
+                room = _get_or_create_room(db, a["room"], rooms_cache, report, list_id)
                 # 通过关系集合添加：autoflush=False 下 pending 对象才能被后续计算看到
                 item.allocations.append(Allocation(
                     room_id=room.id, qty=a["qty"], price_override=a["price_override"],
@@ -513,7 +568,7 @@ def _apply_original(db, parsed, mode, report):
 
     # 2) 物料汇总行
     pool = [{"_obj": i, "_consumed": False, "_norm": _norm(i.name)}
-            for i in db.query(Item).all()]
+            for i in db.query(Item).filter(Item.list_id == list_id, Item.alive()).all()]
     for row in parsed["summary_rows"]:
         m = _match_item(row["name"], pool)
         if m:
@@ -531,7 +586,8 @@ def _apply_original(db, parsed, mode, report):
                 item.bought = True
             if item.category_id is None:
                 cat = _get_or_create_category(
-                    db, row["category"], cats_cache, report) if row["category"] else None
+                    db, row["category"], cats_cache, report, list_id) \
+                    if row["category"] else None
                 if cat:
                     item.category_id = cat.id
         else:
@@ -539,7 +595,7 @@ def _apply_original(db, parsed, mode, report):
             item = Item(name=row["name"], qty_total=row["qty"],
                         price=row["price"] or 0,
                         discount_price=row["discount_unit"],
-                        unit=_guess_unit(row["name"]))
+                        unit=_guess_unit(row["name"]), list_id=list_id)
             if row["paid"] is not None:
                 item.records.append(PurchaseRecord(
                     qty=row["qty"] or 0, amount=row["paid"]))
@@ -547,7 +603,7 @@ def _apply_original(db, parsed, mode, report):
                 item.bought = True
             if cat_name:
                 item.category_id = _get_or_create_category(
-                    db, cat_name, cats_cache, report).id
+                    db, cat_name, cats_cache, report, list_id).id
             else:
                 report["warnings"].append(f"「{row['name']}」未能归类，请手动选择类目")
             db.add(item)
@@ -555,42 +611,78 @@ def _apply_original(db, parsed, mode, report):
     db.commit()
 
 
-def item_bought_sync(db):
+def item_bought_sync(db, list_id):
     from ..models import Item
     from . import compute
-    for item in db.query(Item).all():
+    for item in db.query(Item).filter(Item.list_id == list_id, Item.alive()).all():
         item.bought = compute.item_status(item) == "done"
+        # 导入可能改动任意一条，把 rev 顶上去：正在编辑的客户端保存时会拿到 409
+        # 并重新加载，而不是拿旧数据把刚导入的内容盖掉（宁可多弹一次提示）
+        item.touch()
 
 
-def _apply_flat(db, parsed, mode, report):
-    from ..models import Allocation, Category, Item, PurchaseRecord, Room
+def _apply_flat(db, parsed, mode, report, list_id):
+    from ..models import (Allocation, Category, Item, PurchaseRecord, RecordRoom,
+                          Room)
 
     db.expire_all()  # 同 session 二次导入时避免关系集合缓存过期不失效
     if mode == "replace":
-        db.query(PurchaseRecord).delete()
-        db.query(Allocation).delete()
-        db.query(Item).delete()
-        db.commit()
+        _clear_list_items(db, list_id)
     rooms_cache, cats_cache = {}, {}
-    for room in db.query(Room).order_by(Room.sort).all():
+    for room in db.query(Room).filter(Room.list_id == list_id).order_by(Room.sort).all():
         rooms_cache[room.name] = room
-    for cat in db.query(Category).order_by(Category.sort).all():
+    for cat in db.query(Category).filter(Category.list_id == list_id) \
+            .order_by(Category.sort).all():
         cats_cache[cat.name] = cat
 
     rec_names = {_norm(r["item_name"]) for r in parsed.get("records", [])}
-    items_by_name = {}
+    # 导出文件里的「物料ID」→ 这次导入之后的物料对象。
+    # 不能拿那个 ID 直接当主键查库：它是导出时那份清单里的行号，导入到另一份
+    # 清单时跟这边的自增 id 毫无关系，撞上了就会张冠李戴（两条不同的物料并成一条）。
+    # 也不能靠"自增 id 恰好对齐"来猜，那样只有在两边 id 一致时才碰巧成立。
+    by_source_id = {}
+    by_name = {}                # 归一化名称 → 物料（没带 ID 的老文件的兜底）
+    # merge 只认「导入前就存在的物料」，而且一条只匹配一次：本次导入刚建出来的
+    # 不能再被后面的行匹配走，否则第二行同名物料会并到第一行上（跨清单导入时
+    # 目标清单本来就是空的，这个错法会让 32 行同名物料变成 28 条）
+    matchable = {i.id: i for i in
+                 db.query(Item).filter(Item.list_id == list_id, Item.alive()).all()}
+
+    def _match_existing(data):
+        """merge 时找已有物料。
+
+        优先用导出带回来的「物料ID」——同名物料（比如两条「易来灯带控制器」）
+        只有靠它才能各归各的。但那条 id 必须确实属于当前清单、且名称对得上；
+        对不上（多半是从别的清单导过来的）就退回按名称找一条还没被认领的。
+        """
+        rid = data.get("item_id")
+        if rid is not None and rid in matchable:
+            hit = matchable[rid]
+            if _norm(hit.name) == _norm(data["name"]):
+                del matchable[rid]
+                return hit
+        for key, hit in list(matchable.items()):
+            if _norm(hit.name) == _norm(data["name"]):
+                del matchable[key]
+                return hit
+        return None
+
+    def _item_for(row):
+        """布点/采购记录行 → 物料：先查本次导入建立的映射，再按名称兜底。"""
+        rid = row.get("item_id")
+        if rid is not None and rid in by_source_id:
+            return by_source_id[rid]
+        return by_name.get(_norm(row["item_name"]))
+
     for data in parsed["items"]:
-        if mode == "merge":
-            item = db.query(Item).filter(Item.name == data["name"]).first()
-        else:
-            item = None
+        item = _match_existing(data) if mode == "merge" else None
         if not item:
-            item = Item(name=data["name"])
+            item = Item(name=data["name"], list_id=list_id)
             report["items_created"] += 1
         else:
             report["items_matched"] += 1
         item.category_id = (_get_or_create_category(
-            db, data["category"], cats_cache, report).id
+            db, data["category"], cats_cache, report, list_id).id
             if data["category"] else item.category_id)
         item.unit = data["unit"]
         item.qty_total = data["qty_total"]
@@ -604,99 +696,169 @@ def _apply_flat(db, parsed, mode, report):
                 qty=data["paid_qty"] or 0, amount=data["paid_amount"] or 0))
         db.add(item)
         db.flush()
-        items_by_name[_norm(data["name"])] = item
-    # 本次导入的布点明细涉及的物料：先清掉旧布点再写入，避免 merge 时重复叠加
-    alloc_names = {_norm(a["item_name"]) for a in parsed["allocs"]}
-    for item in items_by_name.values():
-        if _norm(item.name) in alloc_names:
-            db.expire(item, ["allocations"])  # 确保拿到库里最新布点
-            item.allocations.clear()
-            db.flush()  # 立即删除孤儿行
+        if data.get("item_id") is not None:
+            by_source_id[data["item_id"]] = item
+        by_name.setdefault(_norm(data["name"]), item)
+    # 本次导入的布点明细涉及的物料：先清掉旧布点再写入，避免 merge 时重复叠加。
+    # 按解析出来的物料逐条清（不是按名称），同名物料才会各清各的。
+    for item in {_item_for(a) for a in parsed["allocs"]} - {None}:
+        db.expire(item, ["allocations"])  # 确保拿到库里最新布点
+        item.allocations.clear()
+        db.flush()  # 立即删除孤儿行
     db.flush()
     for a in parsed["allocs"]:
-        item = items_by_name.get(_norm(a["item_name"]))
+        item = _item_for(a)
         if not item:
             report["warnings"].append(f"布点明细中的物料「{a['item_name']}」不存在，已跳过")
             continue
-        room = _get_or_create_room(db, a["room"], rooms_cache, report)
-        db.add(Allocation(item_id=item.id, room_id=room.id, qty=a["qty"],
-                          price_override=a["price_override"],
-                          note=a["note"] or ""))
+        room = _get_or_create_room(db, a["room"], rooms_cache, report, list_id)
+        # 走关系集合而不是 session.add：上面 clear() 已经把集合加载成空的，
+        # 直插的话集合不会更新，同一 session 里紧接着算 total_qty/bought 会算漏
+        item.allocations.append(Allocation(
+            room_id=room.id, qty=a["qty"],
+            price_override=a["price_override"], note=a["note"] or ""))
         report["allocations"] += 1
     # 采购记录 sheet 涉及的物料：先清旧记录再写入（sheet 是该物料的完整付款历史）
-    for item in items_by_name.values():
-        if _norm(item.name) in rec_names:
-            item.records.clear()
+    for item in {_item_for(r) for r in parsed.get("records", [])} - {None}:
+        item.records.clear()
     for r in parsed.get("records", []):
-        item = items_by_name.get(_norm(r["item_name"]))
+        item = _item_for(r)
         if not item:
             report["warnings"].append(f"采购记录中的物料「{r['item_name']}」不存在，已跳过")
             continue
+        record_rooms = [
+            RecordRoom(room_id=_get_or_create_room(
+                db, room_name, rooms_cache, report, list_id).id)
+            for room_name in (r.get("room_names") or [])
+        ]
         item.records.append(PurchaseRecord(
             qty=r["qty"] or 0, amount=r["amount"] or 0,
-            date=r["date"] or "", note=r["note"] or ""))
+            date=r["date"] or "", note=r["note"] or "",
+            vendor=r.get("vendor") or "", order_no=r.get("order_no") or "",
+            rooms=record_rooms))
         report["records"] = report.get("records", 0) + 1
-    item_bought_sync(db)
+    item_bought_sync(db, list_id)
+    report["expenses"] = _apply_expenses(db, parsed, list_id)
     db.commit()
 
 
-def import_original(db, file_bytes: bytes, mode: str = "replace") -> dict:
+def _apply_expenses(db, parsed, list_id) -> int:
+    """额外费用：文件里带了这一页就整体替换。
+
+    它是流水账，没有天然的匹配键（不像物料有名称和物料ID），所以不做"按名称合并"。
+    老文件没有这一页时 parsed["expenses"] 是 None —— 这时什么都不动，
+    否则拿一份旧备份导一次，现有费用就被清空了。
+    """
+    rows = parsed.get("expenses")
+    if rows is None:
+        return 0
+    from ..models import ExtraExpense
+    db.query(ExtraExpense).filter(ExtraExpense.list_id == list_id).delete()
+    for r in rows:
+        db.add(ExtraExpense(list_id=list_id, kind=r["kind"], amount=r["amount"],
+                            date=r["date"], vendor=r["vendor"],
+                            order_no=r["order_no"], note=r["note"]))
+    return len(rows)
+
+
+def _resolve_list_id(db, list_id):
+    """导入导出都要落在某一份清单上。没指定就用第一份（老脚本的调用方式）。"""
+    if list_id is not None:
+        return list_id
+    from ..models import ItemList
+    row = db.query(ItemList.id).order_by(ItemList.sort, ItemList.id).first()
+    if row is None:
+        raise ValueError("库里还没有清单")
+    return row[0]
+
+
+def import_original(db, file_bytes: bytes, mode: str = "replace", list_id=None) -> dict:
     """解析三分区格式的历史表格并入库（供 seed_from_excel.py 使用）。"""
+    list_id = _resolve_list_id(db, list_id)
     parsed = _parse_original(file_bytes)
     report = {"mode": mode, "items_created": 0, "items_matched": 0,
               "allocations": 0, "records": 0, "rooms_created": 0, "categories_created": 0,
               "warnings": list(parsed["warnings"]), "format": "original"}
-    _apply_original(db, parsed, mode, report)
+    _apply_original(db, parsed, mode, report, list_id)
     return report
 
 
-def import_template(db, file_bytes: bytes, mode: str = "replace") -> dict:
+def import_template(db, file_bytes: bytes, mode: str = "replace", list_id=None) -> dict:
     """按系统模板（物料汇总+布点明细平表）导入；格式不符时抛 ValueError。"""
+    list_id = _resolve_list_id(db, list_id)
     report = {"mode": mode, "items_created": 0, "items_matched": 0,
               "allocations": 0, "records": 0, "rooms_created": 0, "categories_created": 0,
-              "warnings": [], "format": "flat"}
+              "expenses": 0, "warnings": [], "format": "flat"}
     parsed = _parse_flat(file_bytes)
-    _apply_flat(db, parsed, mode, report)
+    _apply_flat(db, parsed, mode, report, list_id)
     return report
 
 
 # ---------------------------------------------------------------- 导出
 
-def export_xlsx(db) -> bytes:
+def export_xlsx(db, list_id=None) -> bytes:
     from ..models import Category, Item, Room
     from . import compute
 
     db.expire_all()  # 同一 session 先导入后导出时，避免读到过期关系缓存
+    list_id = _resolve_list_id(db, list_id)
     wb = Workbook()
     ws = wb.active
     ws.title = "物料汇总"
     ws.append(["类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
                "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
-               "已购", "备注"])
-    rooms = {r.id: r.name for r in db.query(Room).all()}
-    cats = {c.id: c.name for c in db.query(Category).all()}
-    for i in db.query(Item).order_by(Item.sort, Item.id).all():
+               "日常价未付", "实际优惠", "日常价优惠",
+               "已购", "备注", "物料ID"])
+    rooms = {r.id: r.name for r in db.query(Room)
+             .filter(Room.list_id == list_id).all()}
+    cats = {c.id: c.name for c in db.query(Category)
+            .filter(Category.list_id == list_id).all()}
+    for i in db.query(Item).filter(Item.list_id == list_id, Item.alive()) \
+            .order_by(Item.sort, Item.id).all():
         d = compute.item_dict(i)
         ws.append([
             cats.get(i.category_id, ""), i.name, i.brand or "", i.model or "",
             i.unit, d["total_qty"],
             i.price, i.discount_price, d["discount_total"],
             d["paid_qty"], d["paid"], d["unpaid_qty"], d["unpaid"],
-            "是" if d["bought"] else "否", i.note,
+            d["daily_unpaid"], d["actual_discount"], d["daily_discount"],
+            "是" if d["bought"] else "否", i.note, i.id,
         ])
 
     ws2 = wb.create_sheet("布点明细")
-    ws2.append(["物料名称", "房间", "数量", "单价", "备注"])
-    for i in db.query(Item).order_by(Item.sort, Item.id).all():
+    ws2.append(["物料名称", "房间", "数量", "单价", "备注", "物料ID"])
+    for i in db.query(Item).filter(Item.list_id == list_id, Item.alive()) \
+            .order_by(Item.sort, Item.id).all():
         for a in i.allocations:
-            unit = a.price_override if a.price_override is not None else (i.price or 0)
-            ws2.append([i.name, rooms.get(a.room_id, ""), a.qty, unit, a.note])
+            # 数量为 0 的分配在别处一律视为「没有这条」（矩阵写 0 会直接删格子、
+            # items 接口也会跳过），导出时同样不写，否则回灌时它会被丢掉、破坏往返一致性
+            if not a.qty:
+                continue
+            # 写原始的覆盖价而不是折算后的单价：留空表示「跟随物料单价」，
+            # 写成具体数字会把它变成固定价，以后改物料单价这行就不跟着动了
+            ws2.append([i.name, rooms.get(a.room_id, ""), a.qty, a.price_override, a.note, i.id])
 
     ws3 = wb.create_sheet("采购记录")
-    ws3.append(["物料名称", "实付数量", "实付金额", "付款日期", "备注"])
-    for i in db.query(Item).order_by(Item.sort, Item.id).all():
+    ws3.append(["物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家",
+                "订单号", "备注", "物料ID"])
+    for i in db.query(Item).filter(Item.list_id == list_id, Item.alive()) \
+            .order_by(Item.sort, Item.id).all():
         for r in i.records:
-            ws3.append([i.name, r.qty or 0, r.amount or 0, r.date or "", r.note or ""])
+            # 涉及多个分组时用顿号连起来，导入时按分隔符拆回
+            room_names = "、".join(rooms[rr.room_id] for rr in r.rooms
+                                   if rr.room_id in rooms)
+            ws3.append([i.name, r.qty or 0, r.amount or 0, r.date or "",
+                        room_names, r.vendor or "", r.order_no or "",
+                        r.note or "", i.id])
+
+    # 额外费用单独一页：它是独立于物料的支出，不掺进上面三页的金额口径
+    from ..models import ExtraExpense
+    ws4 = wb.create_sheet("额外费用")
+    ws4.append(["类型", "金额", "日期", "商家", "订单号", "备注"])
+    for e in (db.query(ExtraExpense).filter(ExtraExpense.list_id == list_id)
+              .order_by(ExtraExpense.id).all()):
+        ws4.append([e.kind or "", e.amount or 0, e.date or "",
+                    e.vendor or "", e.order_no or "", e.note or ""])
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -710,20 +872,29 @@ def build_template() -> bytes:
     ws.title = "物料汇总"
     ws.append(["类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
                "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
-               "已购", "备注"])
-    ws.append(["照明", "示例筒灯（导入前请删除本行）", "个", 4, 99, 79.4,
-               None, 0, None, None, None, None, "否", "日常单价留空则按原价计"])
-    ws.append(["网络", "示例网线（导入前请删除本行）", "米", 150, 4, None,
-               None, 150, 4.41, None, None, None, "是", "实付单价自动=实付金额÷实付数量"])
+               "日常价未付", "实际优惠", "日常价优惠",
+               "已购", "备注", "物料ID"])
+    ws.append(["照明", "示例筒灯（导入前请删除本行）", None, None, "个", 4, 99, 79.4,
+               None, None, None, None, None, None, None, None, "否", "日常单价留空则按原价计", None])
+    ws.append(["网络", "示例网线（导入前请删除本行）", None, None, "米", 150, 4.41, None,
+               None, None, None, None, None, None, None, None, None, "实付见「采购记录」页", None])
 
     ws2 = wb.create_sheet("布点明细")
-    ws2.append(["物料名称", "房间", "数量", "单价", "实付数量", "备注"])
+    ws2.append(["物料名称", "房间", "数量", "单价", "实付数量", "备注", "物料ID"])
     ws2.append(["示例筒灯（导入前请删除本行）", "客厅", 2, 1199, 0,
-                "单价留空=用物料单价；填了布点的物料，总量以布点合计为准"])
+                "单价留空=用物料单价；填了布点的物料，总量以布点合计为准", None])
 
     ws3 = wb.create_sheet("采购记录")
-    ws3.append(["物料名称", "实付数量", "实付金额", "付款日期", "备注"])
-    ws3.append(["示例网线（导入前请删除本行）", 150, 661.2, "2026-09-14", "一笔可覆盖多个物料，分批买就分多行"])
+    ws3.append(["物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家",
+                "订单号", "备注", "物料ID"])
+    ws3.append(["示例网线（导入前请删除本行）", 150, 661.2, "2026-09-14",
+                "客厅", "京东", "JD20260914001",
+                "一笔可覆盖多个物料，分批买就分多行", None])
+
+    ws5 = wb.create_sheet("额外费用")
+    ws5.append(["类型", "金额", "日期", "商家", "订单号", "备注"])
+    ws5.append(["运费", 120, "2026-09-14", "京东", "JD20260914001",
+                "示例行，导入前请删除"])
 
     ws4 = wb.create_sheet("填写说明")
     for line in [
@@ -733,7 +904,12 @@ def build_template() -> bytes:
         "4. 「采购记录」推荐：每笔付款一行（数量+金额+日期），同一物料可多笔；实付单价自动=金额÷数量。",
         "5. 也可以不填采购记录，直接在物料汇总里填实付数量/实付金额，会生成一笔记录。",
         "6. 未付自动=剩余数量×单价；「已购」列由实付数量决定，可留空。",
-        "7. 导入前请删除示例行。导入方式支持两种：覆盖现有数据 / 与现有数据按名称合并。",
+        "7. 「日常价未付」「实际优惠」「日常价优惠」三列由系统自动计算，导入时忽略，不必填写。",
+        "8. 「物料ID」由系统填写，用来区分同名物料；请勿手动修改，留空则按物料名称匹配。",
+        "9. 导入前请删除示例行。导入方式支持两种：覆盖现有数据 / 与现有数据按名称合并。",
+        "10. 「商家」「订单号」是选填的：填了方便对账和售后，留空不影响任何金额计算。",
+        "11. 「额外费用」页记运费、安装费这类钱：它们不掺进物料的金额合计，"
+        "在总览里单独汇总。有了这页，运费不用再摊进单价。",
     ]:
         ws4.append([line])
 

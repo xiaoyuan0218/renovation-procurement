@@ -6,7 +6,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .auth import require_user
-from .routers import auth, base_data, items, matrix, summary, transfer
+from .routers import (auth, base_data, backup, expenses, items, lists, matrix,
+                      summary, transfer, trash)
 from .routers.items import records_router
 from .seed import init_db
 
@@ -43,6 +44,10 @@ app.include_router(base_data.router, dependencies=_guard)
 app.include_router(matrix.router, dependencies=_guard)
 app.include_router(summary.router, dependencies=_guard)
 app.include_router(transfer.router, dependencies=_guard)
+app.include_router(lists.router, dependencies=_guard)
+app.include_router(expenses.router, dependencies=_guard)
+app.include_router(trash.router, dependencies=_guard)
+app.include_router(backup.router, dependencies=_guard)
 
 # 前端构建产物目录可用环境变量覆盖（本地开发走 vite:5173，不经过这里）
 DIST_DIR = os.environ.get(

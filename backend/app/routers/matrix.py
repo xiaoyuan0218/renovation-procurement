@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import Allocation, Item, Room
+from ..deps import current_list, item_in_list, room_in_list
+from ..models import Allocation, Item, ItemList, Room
 from ..schemas import MatrixCellIn
 from ..services import compute
 
@@ -10,9 +11,12 @@ router = APIRouter(prefix="/api/matrix", tags=["matrix"])
 
 
 @router.get("")
-def get_matrix(db: Session = Depends(get_db)):
-    rooms = db.query(Room).order_by(Room.sort, Room.id).all()
-    items = db.query(Item).order_by(Item.sort, Item.id).all()
+def get_matrix(lst: ItemList = Depends(current_list),
+               db: Session = Depends(get_db)):
+    rooms = (db.query(Room).filter(Room.list_id == lst.id)
+             .order_by(Room.sort, Room.id).all())
+    items = (db.query(Item).filter(Item.list_id == lst.id, Item.alive())
+             .order_by(Item.sort, Item.id).all())
     item_views = []
     for i in items:
         cover = compute.allocation_paid_cover(i)
@@ -48,12 +52,10 @@ def get_matrix(db: Session = Depends(get_db)):
 
 
 @router.put("/cell")
-def put_cell(data: MatrixCellIn, db: Session = Depends(get_db)):
-    item = db.get(Item, data.item_id)
-    if not item:
-        raise HTTPException(404, "物料不存在")
-    if not db.get(Room, data.room_id):
-        raise HTTPException(404, "房间不存在")
+def put_cell(data: MatrixCellIn, lst: ItemList = Depends(current_list),
+             db: Session = Depends(get_db)):
+    item = item_in_list(db, data.item_id, lst)
+    room_in_list(db, data.room_id, lst)
     alloc = (db.query(Allocation)
              .filter(Allocation.item_id == data.item_id,
                      Allocation.room_id == data.room_id)
@@ -61,6 +63,7 @@ def put_cell(data: MatrixCellIn, db: Session = Depends(get_db)):
     if not data.qty:  # 0 或空 → 清除该格
         if alloc:
             db.delete(alloc)
+            item.touch()
             db.commit()
         return {"ok": True, "deleted": bool(alloc)}
     if not alloc:
@@ -69,5 +72,6 @@ def put_cell(data: MatrixCellIn, db: Session = Depends(get_db)):
     alloc.qty = data.qty
     alloc.price_override = data.price_override
     alloc.note = data.note or ""
+    item.touch()
     db.commit()
     return {"ok": True, "deleted": False}
