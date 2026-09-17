@@ -1,7 +1,8 @@
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { api, money } from '../api'
+import ExpensesDialog from '../components/ExpensesDialog.vue'
 
 const emit = defineEmits(['go-items'])
 const summary = ref(null)
@@ -13,11 +14,51 @@ const donutStatusEl = ref(null)
 const barCatEl = ref(null)
 const barRoomEl = ref(null)
 const barUnbEl = ref(null)
+const barMonthEl = ref(null)
 
 let charts = []
 let ro = null
 
 const fmtMoney = (v) => `￥${money(v)}`
+
+/** 'YYYY-MM' 往前/往后挪几个月。 */
+function shiftMonth(key, delta) {
+  const [y, m] = key.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/**
+ * 按月已付：以当前月（或最后一条有数据的月份）为终点往前取 6 个月，
+ * 中间没付款的月份补 0 —— 柱子的疏密本身就是"哪几个月在花钱"的信息。
+ */
+const byMonthSeries = computed(() => {
+  const raw = summary.value?.by_month || []
+  const paid = new Map(raw.map((r) => [r.month, r.paid]))
+  const now = new Date()
+  const nowKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const lastKey = raw.length ? raw[raw.length - 1].month : nowKey
+  const endKey = lastKey > nowKey ? lastKey : nowKey
+  return Array.from({ length: 6 }, (_, i) => {
+    const key = shiftMonth(endKey, i - 5)
+    return { key, label: `${Number(key.slice(5))}月`, paid: paid.get(key) || 0 }
+  })
+})
+
+const hasMonthlyPaid = computed(() => (summary.value?.by_month?.length || 0) > 0)
+
+const expensesVisible = ref(false)
+
+/**
+ * 额外费用改完只刷数字，不重画图表 —— 那些图都是货款口径，费用不参与，
+ * 重画反而要拆掉再建一批 echarts 实例。
+ */
+async function refreshSummary() {
+  summary.value = await api.get('/api/summary')
+}
+
+// 优惠按「省下的钱」理解，负数是实付价高于原价/日常价，改用警示色而不是隐藏
+const discountClass = (v) => ((v ?? 0) < 0 ? 'saving warn' : 'saving')
 
 function grad(top, bottom) {
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
@@ -135,7 +176,7 @@ function renderCharts() {
     }],
   })
 
-  // 4. 类目对比柱状：原价/日常价/实付
+  // 4. 分类对比柱状：原价/日常价/实付
   makeChart(barCatEl.value, {
     tooltip: { trigger: 'axis', valueFormatter: fmtMoney },
     legend: { top: 0, itemWidth: 14, itemHeight: 10, textStyle: { fontSize: 12, color: '#3c3c43' } },
@@ -158,7 +199,7 @@ function renderCharts() {
     ],
   })
 
-  // 5. 房间金额分布横向条形
+  // 5. 分组金额分布横向条形
   makeChart(barRoomEl.value, {
     tooltip: {
       trigger: 'axis',
@@ -183,7 +224,24 @@ function renderCharts() {
     }],
   })
 
-  // 6. 未采购金额 Top6 横向条形
+  // 6. 按月已付：付款记录里的日期，终于能回答"这个月花了多少"
+  const months = byMonthSeries.value
+  makeChart(barMonthEl.value, {
+    tooltip: { trigger: 'axis', valueFormatter: fmtMoney },
+    grid: { left: 8, right: 12, top: 16, bottom: 0, containLabel: true },
+    xAxis: {
+      type: 'category', data: months.map((m) => m.label),
+      axisTick: { show: false }, axisLine: { lineStyle: { color: hairline } },
+      axisLabel: { color: '#3c3c43', fontSize: 12 },
+    },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: hairline } }, axisLabel },
+    series: [{
+      type: 'bar', data: months.map((m) => m.paid), barMaxWidth: 26,
+      itemStyle: { borderRadius: [4, 4, 0, 0], color: grad('#5856d6', '#af52de') },
+    }],
+  })
+
+  // 7. 未采购金额 Top6 横向条形
   makeChart(barUnbEl.value, {
     tooltip: {
       trigger: 'axis',
@@ -209,18 +267,6 @@ function renderCharts() {
   })
 }
 
-const paidPct = () => {
-  const t = summary.value?.totals
-  if (!t || !t.list_total) return 0
-  return Math.min(100, Math.round((t.paid_total / t.list_total) * 100))
-}
-
-const paidPctOf = (base) => {
-  const t = summary.value?.totals
-  if (!t) return 0
-  const denom = base === 'list' ? t.list_total : t.discount_total
-  return denom ? Math.round((t.paid_total / denom) * 100) : 0
-}
 </script>
 
 <template>
@@ -262,7 +308,20 @@ const paidPctOf = (base) => {
             <span class="stat-label">已付</span>
           </div>
           <div class="stat-value paid">￥{{ money(summary.totals.paid_total) }}</div>
-          <div class="stat-sub">占预算 {{ paidPctOf('list') }}%</div>
+          <div class="stat-foot-row">
+            <div class="stat-foot">
+              <span class="foot-label">实际优惠</span>
+              <span :class="discountClass(summary.totals.actual_discount_total)">
+                ￥{{ money(summary.totals.actual_discount_total) }}
+              </span>
+            </div>
+            <div class="stat-foot">
+              <span class="foot-label">日常价优惠</span>
+              <span :class="discountClass(summary.totals.daily_discount_total)">
+                ￥{{ money(summary.totals.daily_discount_total) }}
+              </span>
+            </div>
+          </div>
         </el-card>
       </el-col>
       <el-col :span="6">
@@ -274,10 +333,34 @@ const paidPctOf = (base) => {
             <span class="stat-label">未付</span>
           </div>
           <div class="stat-value remain">￥{{ money(summary.totals.unpaid_total) }}</div>
-          <div class="stat-sub">未买清单 {{ summary.unbought.length }} 项</div>
+          <div class="stat-foot-row">
+            <div class="stat-foot">
+              <span class="foot-label">未买清单</span>
+              <span>{{ summary.unbought.length }} 项</span>
+            </div>
+            <div class="stat-foot">
+              <span class="foot-label">日常价未付</span>
+              <span class="saving daily">￥{{ money(summary.totals.daily_unpaid_total) }}</span>
+            </div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 额外费用：运费/安装费这类不进单价的支出，单独一条，不掺进上面的口径 -->
+    <div class="glass panel expense-bar">
+      <span class="eb-title">额外费用</span>
+      <span class="eb-total">￥{{ money(summary.expenses_total || 0) }}</span>
+      <span v-if="summary.expenses_by_kind?.length" class="eb-kinds">
+        <span v-for="k in summary.expenses_by_kind" :key="k.kind" class="eb-kind">
+          {{ k.kind }} ￥{{ money(k.amount) }}
+        </span>
+      </span>
+      <span v-else class="eb-empty">运费、安装费这类不进单价的支出记在这里，不用摊进单价</span>
+      <el-button size="small" class="eb-btn" @click="expensesVisible = true">
+        管理（{{ summary.expenses_count || 0 }}）
+      </el-button>
+    </div>
 
     <el-row :gutter="12" class="donuts-row">
       <el-col :span="8">
@@ -301,16 +384,30 @@ const paidPctOf = (base) => {
     </el-row>
 
     <el-row :gutter="12" class="bars-row">
-      <el-col :span="14">
+      <el-col :span="8">
         <el-card shadow="never" class="bar-card">
-          <template #header>类目对比：原价 / 日常价 / 实付</template>
+          <template #header>分类对比</template>
           <div ref="barCatEl" class="bar"></div>
         </el-card>
       </el-col>
-      <el-col :span="10">
+      <el-col :span="8">
         <el-card shadow="never" class="bar-card">
-          <template #header>房间金额分布</template>
+          <template #header>分组金额分布</template>
           <div ref="barRoomEl" class="bar"></div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card shadow="never" class="bar-card">
+          <template #header>
+            <div class="unbought-header">
+              <span>按月已付</span>
+              <span v-if="summary.by_month_undated" class="undated-hint">
+                ￥{{ money(summary.by_month_undated) }} 未填日期
+              </span>
+            </div>
+          </template>
+          <el-empty v-if="!hasMonthlyPaid" description="还没有带日期的付款" :image-size="58" />
+          <div v-else ref="barMonthEl" class="bar"></div>
         </el-card>
       </el-col>
     </el-row>
@@ -341,7 +438,7 @@ const paidPctOf = (base) => {
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="category_name" label="类目" width="90" />
+              <el-table-column prop="category_name" label="分类" width="90" />
               <el-table-column label="数量" width="80" align="right">
                 <template #default="{ row }">
                   {{ row.total_qty }}
@@ -357,6 +454,8 @@ const paidPctOf = (base) => {
         </el-card>
       </el-col>
     </el-row>
+
+    <ExpensesDialog v-model="expensesVisible" @changed="refreshSummary" />
   </div>
 </template>
 
@@ -392,6 +491,19 @@ const paidPctOf = (base) => {
 .chip-green { background: linear-gradient(135deg, #34c759, #7ce38b); box-shadow: 0 3px 10px rgba(52,199,89,.3); }
 .chip-orange { background: linear-gradient(135deg, #ff9f0a, #ffd60a); box-shadow: 0 3px 10px rgba(255,159,10,.3); }
 .stat-sub { font-size: 10px; color: var(--ios-label-3); margin-top: 4px; }
+/* 卡片副行：把「已付 / 未付」按两个口径拆开，与上方 stat-sub 同号数 */
+.stat-foot {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 10px; margin-top: 3px; font-variant-numeric: tabular-nums;
+}
+/* 卡片副信息并排一行、各占一半：四张卡都是「标题 + 大数 + 一行副信息」，
+   行数一样高就自然一样高（margin-top 与 stat-sub 对齐，高度也一致） */
+.stat-foot-row { display: flex; gap: 14px; margin-top: 4px; }
+.stat-foot-row .stat-foot { flex: 1 1 0; min-width: 0; margin-top: 0; }
+.foot-label { color: var(--ios-label-3); }
+.saving { color: var(--ios-green); }
+.saving.warn { color: var(--ios-orange); }
+.saving.daily { color: #30b0c7; }
 .stat-value { font-size: 20px; font-weight: 700; letter-spacing: -0.03em; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .stat-value.paid { color: var(--ios-green); }
 .stat-value.remain { color: var(--ios-orange); }
@@ -446,4 +558,21 @@ const paidPctOf = (base) => {
 
 .unbought-header { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .partial-hint { color: var(--ios-orange); font-size: 11px; }
+/* 「按月已付」表头右侧的小字：提醒还有多少钱没记日期（当月卡片里也要占位） */
+.undated-hint { color: var(--ios-label-3); font-size: 11px; font-weight: 400; }
+
+/* 额外费用细条：只占一行高度，给个数字和入口 */
+.expense-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  margin-bottom: 12px;
+}
+.eb-title { font-size: 12px; color: var(--ios-label-2); }
+.eb-total { font-size: 15px; font-weight: 700; color: #5856d6; font-variant-numeric: tabular-nums; }
+.eb-kinds { display: flex; gap: 12px; font-size: 12px; color: var(--ios-label-2); flex: 1; }
+.eb-empty { flex: 1; font-size: 12px; color: var(--ios-label-3); }
+.eb-btn { flex: none; }
 </style>

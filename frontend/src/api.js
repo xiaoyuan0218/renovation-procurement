@@ -5,13 +5,22 @@ export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn
 }
 
+// 当前清单 id，由 lists.js 反向注册（同样是为了避免循环 import）。
+// 每个业务请求都带上它，后端才知道这次要动哪一份清单。
+let currentListId = null
+
+export function setCurrentListId(id) {
+  currentListId = id
+}
+
 // 登录、查询登录态这些接口返回 401 是正常结果，不该被当成"会话失效"
 const AUTH_ENDPOINTS = ['/api/auth/']
 
 async function request(method, url, body, isForm = false) {
   // 凭证放在 httpOnly Cookie 里，同源请求自动带上；
-  // 设置页那两个 <a href="/api/export"> 下载链接也因此无需改造。
+  // 设置页的下载链接是 <a href> 直接导航（带不了自定义头），走 ?list_id= 参数。
   const opts = { method, headers: {}, credentials: 'same-origin' }
+  if (currentListId != null) opts.headers['X-List-Id'] = String(currentListId)
   if (body !== undefined) {
     if (isForm) {
       opts.body = body
@@ -30,7 +39,10 @@ async function request(method, url, body, isForm = false) {
     if (res.status === 401 && onUnauthorized && !AUTH_ENDPOINTS.some((p) => url.startsWith(p))) {
       onUnauthorized()
     }
-    throw new Error(detail)
+    // 带上状态码：调用方要能区分 409（别处已改）这类需要特殊处理的情况
+    const err = new Error(detail)
+    err.status = res.status
+    throw err
   }
   const ct = res.headers.get('content-type') || ''
   return ct.includes('json') ? res.json() : res

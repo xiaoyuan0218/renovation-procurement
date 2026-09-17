@@ -161,6 +161,82 @@ body {
 }
 .el-card__body { padding: 16px 18px; }
 
+/* ---------- 聚焦时只留一层描边 ----------
+   输入框/下拉聚焦时，Element Plus 自己会把 wrapper 描成蓝色，浏览器再按默认
+   行为叠一圈 focus outline —— 看上去就是"套了两个蓝框"。这里把后者去掉，
+   聚焦反馈仍由 EP 的描边提供，键盘可达性不受影响。 */
+.el-input__inner:focus,
+.el-input__inner:focus-visible,
+.el-textarea__inner:focus,
+.el-textarea__inner:focus-visible,
+.el-select__wrapper:focus,
+.el-select__wrapper:focus-within,
+.el-date-editor:focus,
+.el-date-editor:focus-within {
+  outline: none;
+}
+/* Chrome 对可聚焦元素默认还有一圈高亮环，一并关掉 */
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner,
+.el-date-editor {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- 行内操作按钮：有底有影的小胶囊 ----------
+   表格里的编辑/删除/改名这类按钮原来是 el-button link（纯文字），
+   放在玻璃底子上看着像没样式、也看不出哪块能点。给它们淡色底 + 一层很浅
+   的投影，hover 时抬起来一点、底色转实。 */
+.el-button.is-link {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ios-label);
+  background: rgba(60, 60, 67, 0.07);
+  box-shadow: 0 1px 2px rgba(29, 45, 78, 0.10), 0 1px 1px rgba(29, 45, 78, 0.05);
+  transition: transform 0.12s ease, box-shadow 0.12s ease,
+              background 0.12s ease, color 0.12s ease;
+}
+.el-button.is-link:hover,
+.el-button.is-link:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(29, 45, 78, 0.16);
+}
+.el-button.is-link.el-button--primary {
+  color: var(--ios-blue);
+  background: rgba(10, 132, 255, 0.10);
+  border-color: rgba(10, 132, 255, 0.20);
+}
+.el-button.is-link.el-button--primary:hover {
+  color: #fff;
+  background: var(--ios-blue);
+  border-color: var(--ios-blue);
+  box-shadow: 0 4px 10px rgba(10, 132, 255, 0.34);
+}
+.el-button.is-link.el-button--danger {
+  color: var(--ios-red);
+  background: rgba(255, 59, 48, 0.10);
+  border-color: rgba(255, 59, 48, 0.20);
+}
+.el-button.is-link.el-button--danger:hover {
+  color: #fff;
+  background: var(--ios-red);
+  border-color: var(--ios-red);
+  box-shadow: 0 4px 10px rgba(255, 59, 48, 0.30);
+}
+/* 禁用的（比如当前清单那一行的「切换」）：留一点底表示它在那儿，但不抬不投影 */
+.el-button.is-link.is-disabled,
+.el-button.is-link:disabled {
+  color: var(--ios-label-3) !important;
+  background: rgba(60, 60, 67, 0.05) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
 /* 表格：透明底 + 发丝分隔线（iOS 分组列表质感） */
 .el-table {
   --el-table-bg-color: transparent;
@@ -497,6 +573,18 @@ body {
   outline: 2px solid rgba(0, 122, 255, 0.55);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/* 输入类控件排除在外：Element Plus 聚焦时会自己把 wrapper 描成蓝色，
+   这里再按 outline-offset 画一圈就正好叠成"双层蓝框"。
+   聚焦反馈仍由 EP 的描边提供，键盘可达性不受影响。 */
+.el-select__input:focus-visible,
+.el-select__wrapper:focus-visible,
+.el-input__inner:focus-visible,
+.el-input__wrapper:focus-visible,
+.el-textarea__inner:focus-visible,
+.el-input-number .el-input__inner:focus-visible {
+  outline: none !important;
 }
 
 /* 空状态 */

@@ -1,27 +1,62 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { auth, loadAuthState, logout } from './auth'
+import { lists, loadLists, setCurrentList } from './lists'
 import Dashboard from './views/Dashboard.vue'
 import Items from './views/Items.vue'
 import Matrix from './views/Matrix.vue'
 import Login from './views/Login.vue'
+import NewListDialog from './components/NewListDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 
 const tabs = [
   { key: 'dashboard', label: '总览' },
   { key: 'items', label: '物料清单' },
-  { key: 'matrix', label: '布点矩阵' },
+  { key: 'matrix', label: '分配矩阵' },
 ]
 const view = ref('dashboard')
 const settingsVisible = ref(false)
+const newListVisible = ref(false)
 const reloadKey = ref(0)
 
 // 先问后端登录态，再决定显示登录页还是主界面
 onMounted(loadAuthState)
 
+// 登录之后才知道有哪些清单：清单接口也要登录才能调
+watch(() => auth.status, async (status) => {
+  if (status !== 'ready') return
+  try {
+    await loadLists()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+  reloadKey.value++
+}, { immediate: true })
+
 function onImported() {
   reloadKey.value++
+}
+
+function onSwitchList(id) {
+  if (id === lists.currentId) return
+  setCurrentList(id)
+  reloadKey.value++
+  const name = lists.all.find((l) => l.id === id)?.name || ''
+  ElMessage.success(`已切换到「${name}」`)
+}
+
+function onCreateList() {
+  newListVisible.value = true
+}
+
+function onListCreated(created) {
+  reloadKey.value++
+  // 复制了结构就把数量说出来，用户能预期进去会看到什么
+  const copied = created.room_count
+    ? `，已复制 ${created.room_count} 个分组、${created.category_count} 个分类`
+    : ''
+  ElMessage.success(`已创建「${created.name}」${copied}`)
 }
 
 async function onLogout() {
@@ -35,6 +70,8 @@ async function onLogout() {
     return // 用户取消
   }
   await logout()
+  lists.all = []
+  lists.currentId = null
   view.value = 'dashboard'
   ElMessage.success('已退出登录')
 }
@@ -58,8 +95,28 @@ async function onLogout() {
               <path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5" />
             </svg>
           </span>
-          <span class="brand-text">装修采购清单</span>
+          <span class="brand-text">采购清单</span>
         </div>
+
+        <div class="list-pick">
+          <el-select :model-value="lists.currentId" class="list-select" size="small"
+                     popper-class="list-popper" placeholder="选择清单"
+                     @change="onSwitchList">
+            <el-option v-for="l in lists.all" :key="l.id" :label="l.name" :value="l.id">
+              <span>{{ l.name }}</span>
+              <span class="opt-count">{{ l.item_count }} 项</span>
+            </el-option>
+          </el-select>
+          <el-tooltip content="新建清单" placement="bottom" :show-after="300">
+            <button class="add-list" type="button" aria-label="新建清单" @click="onCreateList">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                   stroke-width="2.6" stroke-linecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </el-tooltip>
+        </div>
+
         <nav class="seg" role="tablist">
           <button v-for="t in tabs" :key="t.key" class="seg-item"
                   :class="{ active: view === t.key }" role="tab"
@@ -80,7 +137,9 @@ async function onLogout() {
         <Matrix v-else :key="`m${reloadKey}`" />
       </Transition>
     </el-main>
-    <SettingsDialog v-model="settingsVisible" @imported="onImported" />
+    <SettingsDialog v-model="settingsVisible" @imported="onImported"
+                    @switched="onSwitchList" />
+    <NewListDialog v-model="newListVisible" @created="onListCreated" />
   </el-container>
 </template>
 
@@ -122,7 +181,7 @@ async function onLogout() {
 .header-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 10px 0;
 }
 .brand {
@@ -145,6 +204,41 @@ async function onLogout() {
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 12px rgba(10, 132, 255, 0.35);
+}
+/* 清单切换：当前在看哪一份，永远摆在最显眼的位置 */
+.list-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.list-select {
+  width: 150px;
+}
+.list-select :deep(.el-select__wrapper) {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: none;
+  border: 1px solid var(--glass-border);
+  font-weight: 600;
+}
+.list-select :deep(.el-select__wrapper.is-focused) {
+  border-color: var(--ios-blue);
+}
+.add-list {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ios-blue);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.add-list:hover {
+  background: #fff;
 }
 .seg {
   display: flex;
@@ -205,5 +299,19 @@ async function onLogout() {
   /* 内容区衬底提亮：卡片间隙露出的是衬底而非原样壁纸，
      否则缝隙底色比玻璃卡片暗一截，看起来像"留白与内容不同色" */
   background: rgba(255, 255, 255, 0.34);
+}
+@media (max-width: 700px) {
+  .list-select { width: 104px; }
+  .brand-text { display: none; }
+}
+</style>
+
+<!-- 下拉是 teleport 到 body 的，scoped 样式够不着，单独写一条 -->
+<style>
+.list-popper .opt-count {
+  float: right;
+  margin-left: 16px;
+  color: var(--ios-label-3);
+  font-size: 12px;
 }
 </style>

@@ -116,7 +116,7 @@ function summaryMethod({ columns }) {
         <i class="lg lg-green" /> 已买齐
         <i class="lg lg-dot" /> 有备注/单独价
       </span>
-      <span class="hint">点单元格填写该房间的数量</span>
+      <span class="hint">点单元格填写该分组的数量</span>
     </div>
 
     <div class="glass panel matrix-panel">
@@ -130,15 +130,12 @@ function summaryMethod({ columns }) {
           <template #default="{ row }">
             <div class="item-name" :class="{ bought: row.status === 'done' }">{{ row.name }}</div>
             <div class="item-sub">
-              {{ row.category_name || '未分类' }}{{ row.price ? ` · ￥${money(row.price)}` : '' }}
+              {{ row.category_name || '未分类' }}{{ row.model ? ` · ${row.model}` : '' }}{{ row.price ? ` · ￥${money(row.price)}` : '' }}
               <span v-if="row.status === 'partial'" class="partial-tag">
                 实付 {{ fmtQty(row.paid_qty) }}/{{ fmtQty(row.total_qty) }}
               </span>
             </div>
           </template>
-        </el-table-column>
-        <el-table-column prop="model" label="型号" width="110" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.model || '-' }}</template>
         </el-table-column>
         <el-table-column v-for="room in data.rooms" :key="room.id"
                          :prop="`r${room.id}`" :label="room.name" min-width="62" align="center">

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, money, qty as fmtQty } from '../api'
 import ItemDialog from '../components/ItemDialog.vue'
@@ -9,7 +9,15 @@ const rooms = ref([])
 const categories = ref([])
 const q = ref('')
 const categoryId = ref(null)
+const brand = ref('')
 const statusFilter = ref('all')
+
+// 品牌下拉的选项从当前清单实际用到的品牌里取（去重、排序、忽略空值）——
+// 写死一份品牌表没意义，家具家电和年货的品牌完全不是一回事
+const brands = computed(() => {
+  const seen = new Set(items.value.map((it) => (it.brand || '').trim()).filter(Boolean))
+  return [...seen].sort((a, b) => a.localeCompare(b, 'zh'))
+})
 
 const STATUS = {
   done: { label: '已买完', type: 'success' },
@@ -20,10 +28,20 @@ const STATUS = {
 
 const filtered = computed(() => items.value.filter((it) => {
   if (categoryId.value && it.category_id !== categoryId.value) return false
+  if (brand.value && (it.brand || '').trim() !== brand.value) return false
   if (statusFilter.value !== 'all' && it.status !== statusFilter.value) return false
   if (q.value && !it.name.includes(q.value)) return false
   return true
 }))
+
+// 空清单和"筛不出结果"是两回事：前者要告诉人怎么开始
+const emptyText = computed(() => {
+  const untouched = !items.value.length && !q.value && !categoryId.value
+    && !brand.value && statusFilter.value === 'all'
+  return untouched
+    ? '这个清单还是空的：点「新增物料」加第一条，分组可以在「设置 / 数据 → 分组」里建'
+    : '没有符合条件的物料'
+})
 
 const today = new Date().toISOString().slice(0, 10)
 const tableBoxRef = ref(null)
@@ -34,6 +52,50 @@ function calcTableHeight() {
   if (!el) return
   const h = Math.max(160, Math.floor(el.clientHeight))
   if (Math.abs(h - tableHeight.value) > 1) tableHeight.value = h
+}
+
+// 分页与排序：每页条数记在 localStorage，下次打开还是这个数
+const page = ref(1)
+const SIZE_OPTIONS = [10, 20, 50, 100, 200]
+const pageSize = ref(Number(localStorage.getItem('items.pageSize')) || 20)
+const sortState = ref({ prop: 'discount_total', order: 'descending' })
+
+watch(pageSize, (v) => {
+  page.value = 1
+  const n = Math.floor(Number(v))
+  if (Number.isFinite(n) && n >= 1) {
+    try { localStorage.setItem('items.pageSize', String(n)) } catch { /* 隐私模式禁写 */ }
+  }
+})
+
+// 下拉里可以手输任意数字（allow-create 给的是字符串），这里统一规整：
+// 不合法就退回 20，上限一万（再多浏览器也吃不消）
+function onSizeChange(v) {
+  const n = Math.floor(Number(v))
+  pageSize.value = Number.isFinite(n) && n >= 1 ? Math.min(n, 10000) : 20
+}
+// 筛选一改就回第一页，否则可能停在一个空页上
+watch([q, categoryId, brand, statusFilter], () => { page.value = 1 })
+
+// 先排序、再切页：排序必须作用于**全量**筛选结果，
+// 交给 el-table 自己排的话只会在当前页内排，翻到第二页数字就乱了
+const sorted = computed(() => {
+  const arr = [...filtered.value]
+  const { prop, order } = sortState.value
+  if (!prop || !order) return arr
+  const dir = order === 'ascending' ? 1 : -1
+  return arr.sort((a, b) => ((Number(a[prop]) || 0) - (Number(b[prop]) || 0)) * dir)
+})
+
+const paged = computed(() => {
+  const size = Math.max(1, Math.floor(Number(pageSize.value) || 20))
+  const start = (page.value - 1) * size
+  return sorted.value.slice(start, start + size)
+})
+
+function onSortChange({ prop, order }) {
+  sortState.value = { prop, order }
+  page.value = 1
 }
 
 const dialogVisible = ref(false)
@@ -90,7 +152,16 @@ function openEdit(row) {
 const payVisible = ref(false)
 const payBusy = ref(false)
 const payForm = ref({ id: null, name: '', unit: '', totalQty: 0, recordCount: 0,
-                      paid: 0, qty: 0, amount: 0, date: '', row: null })
+                      paid: 0, qty: 0, amount: 0, date: '', vendor: '', order_no: '',
+                      room_ids: [], row: null })
+
+// 这笔钱涉及哪几间：只列这条物料分到的分组，不选就按老规矩推算
+const payRooms = computed(() => {
+  const row = payForm.value.row
+  if (!row?.allocations?.length) return []
+  const ids = new Set(row.allocations.map((a) => a.room_id))
+  return rooms.value.filter((r) => ids.has(r.id))
+})
 
 function openPay(row) {
   payForm.value = {
@@ -101,6 +172,9 @@ function openPay(row) {
     qty: Math.max(0, (row.total_qty || 0) - (row.paid_qty || 0)),
     amount: 0,
     date: today,
+    vendor: '',
+    order_no: '',
+    room_ids: [],
     row,
   }
   payVisible.value = true
@@ -123,6 +197,9 @@ async function addRecord() {
       qty: Number(f.qty) || 0,
       amount: Number(f.amount) || 0,
       date: f.date || today,
+      vendor: f.vendor || '',
+      order_no: f.order_no || '',
+      room_ids: f.room_ids || [],
     })
     _applyPay(updated)
     ElMessage.success('已记录一笔采购')
@@ -139,6 +216,9 @@ async function quickPaid() {
       qty: Number(f.totalQty) || 0,
       amount: Number(f.row?.discount_total) || 0,
       date: f.date || today,
+      vendor: f.vendor || '',
+      order_no: f.order_no || '',
+      room_ids: f.room_ids || [],
     })
     _applyPay(updated)
     ElMessage.success('已按日常价付清')
@@ -165,11 +245,13 @@ async function clearRecords() {
 async function batchDelete() {
   if (!selectedIds.value.length) return
   try {
-    await ElMessageBox.confirm(`确定删除选中的 ${selectedIds.value.length} 项物料？相关布点和采购记录也会一并删除。`, '批量删除', { type: 'warning' })
+    await ElMessageBox.confirm(
+      `把选中的 ${selectedIds.value.length} 项移入回收站？之后可以恢复。`,
+      '移入回收站', { type: 'warning', confirmButtonText: '移入回收站' })
   } catch { return }
   try {
     const res = await api.post('/api/items/batch/delete', { ids: selectedIds.value })
-    ElMessage.success(`已删除 ${res.deleted} 项`)
+    ElMessage.success(`已移入回收站 ${res.deleted} 项`)
     selectedIds.value = []
     await load()
   } catch (e) { ElMessage.error(e.message) }
@@ -177,11 +259,13 @@ async function batchDelete() {
 
 async function removeItem(row) {
   try {
-    await ElMessageBox.confirm(`确定删除物料「${row.name}」？其布点明细会一并删除。`, '删除确认', { type: 'warning' })
+    await ElMessageBox.confirm(
+      `把「${row.name}」移入回收站？它的分配合采购记录都会留着，之后可以恢复。`,
+      '移入回收站', { type: 'warning', confirmButtonText: '移入回收站' })
   } catch { return }
   try {
     await api.del(`/api/items/${row.id}`)
-    ElMessage.success('已删除')
+    ElMessage.success('已移入回收站（设置 / 数据 → 回收站 里可以恢复）')
     await load()
   } catch (e) { ElMessage.error(e.message) }
 }
@@ -201,8 +285,12 @@ function onSaved() {
   <div v-loading="loading" class="page-wrap">
     <div class="toolbar">
       <el-input v-model="q" placeholder="搜索物料名称" clearable class="search" />
-      <el-select v-model="categoryId" placeholder="全部类目" clearable class="cat-select">
+      <el-select v-model="categoryId" placeholder="全部分类" clearable class="cat-select">
         <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
+      </el-select>
+      <el-select v-model="brand" placeholder="全部品牌" clearable filterable
+                 class="brand-select">
+        <el-option v-for="b in brands" :key="b" :label="b" :value="b" />
       </el-select>
       <el-radio-group v-model="statusFilter">
         <el-radio-button value="all">全部</el-radio-button>
@@ -224,12 +312,14 @@ function onSaved() {
       <div v-show="loading && !filtered.length" class="table-box skeleton-pad">
         <el-skeleton :rows="8" animated />
       </div>
-      <el-empty v-show="!loading && !filtered.length" description="没有符合条件的物料" :image-size="80" />
+      <el-empty v-show="!loading && !filtered.length" :description="emptyText" :image-size="80" />
       <div v-show="filtered.length" ref="tableBoxRef" class="table-box">
-      <el-table :data="filtered" size="default" row-key="id" :height="tableHeight"
+      <el-table :data="paged" size="default" row-key="id" :height="tableHeight"
                 :default-sort="{ prop: 'discount_total', order: 'descending' }"
+                @sort-change="onSortChange"
                 @selection-change="onSelectionChange">
-        <el-table-column type="selection" width="36" />
+        <!-- reserve-selection：翻页勾选的也留着，不然跨页批量删会漏 -->
+        <el-table-column type="selection" width="36" reserve-selection />
         <el-table-column prop="name" label="物料" min-width="150" />
         <el-table-column prop="brand" label="品牌" width="80" show-overflow-tooltip>
           <template #default="{ row }">{{ row.brand || '-' }}</template>
@@ -237,7 +327,7 @@ function onSaved() {
         <el-table-column prop="model" label="型号" width="110" show-overflow-tooltip>
           <template #default="{ row }">{{ row.model || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="category_name" label="类目" width="96">
+        <el-table-column prop="category_name" label="分类" width="96">
           <template #default="{ row }">
             <span v-if="row.category_name" class="cat-cell">
               <i class="cat-dot" :style="{ background: catColor(row.category_name) }" />
@@ -249,10 +339,12 @@ function onSaved() {
         <el-table-column label="数量" width="80" align="right">
           <template #default="{ row }">{{ fmtQty(row.total_qty) }} {{ row.unit }}</template>
         </el-table-column>
-        <el-table-column label="单价" width="90" align="right">
+        <el-table-column prop="price" label="单价" width="90" align="right"
+                         sortable="custom">
           <template #default="{ row }">{{ row.price ? money(row.price) : '-' }}</template>
         </el-table-column>
-        <el-table-column label="日常价" width="100" align="right" sortable prop="discount_total">
+        <el-table-column label="日常价" width="100" align="right"
+                         sortable="custom" prop="discount_total">
           <template #default="{ row }">￥{{ money(row.discount_total) }}</template>
         </el-table-column>
         <el-table-column label="已付 / 未付" width="118" align="right">
@@ -275,13 +367,28 @@ function onSaved() {
           </template>
         </el-table-column>
         <el-table-column prop="note" label="备注" min-width="110" show-overflow-tooltip />
-        <el-table-column label="操作" width="112">
+        <!-- 宽度按胶囊按钮算：两个按钮 + 间距 + 单元格内边距 -->
+        <el-table-column label="操作" width="140">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
             <el-button link type="danger" size="small" @click="removeItem(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
+      </div>
+
+      <div v-if="filtered.length" class="pager">
+        <span class="pager-total">共 {{ filtered.length }} 条</span>
+        <el-select v-model="pageSize" class="pager-size" size="small"
+                   filterable allow-create default-first-option
+                   @change="onSizeChange">
+          <el-option v-for="n in SIZE_OPTIONS" :key="n" :label="`${n} 条/页`"
+                     :value="String(n)" />
+        </el-select>
+        <el-pagination v-model:current-page="page"
+                       :page-size="Math.max(1, Math.floor(Number(pageSize) || 20))"
+                       :total="filtered.length"
+                       layout="prev, pager, next, jumper" background />
       </div>
     </div>
 
@@ -321,6 +428,19 @@ function onSaved() {
           <el-date-picker v-model="payForm.date" type="date" value-format="YYYY-MM-DD"
                           :default-value="today" placeholder="付款日期" style="width: 100%" />
         </el-form-item>
+        <el-form-item v-if="payRooms.length" label="涉及分组">
+          <el-select v-model="payForm.room_ids" multiple clearable collapse-tags
+                     placeholder="不选则按分配顺序推算" style="width: 100%">
+            <el-option v-for="r in payRooms" :key="r.id" :label="r.name" :value="r.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="商家">
+          <el-input v-model="payForm.vendor" placeholder="选填，如 京东" maxlength="50" />
+        </el-form-item>
+        <el-form-item label="订单号">
+          <el-input v-model="payForm.order_no" placeholder="选填，售后与对账用"
+                    maxlength="50" @keyup.enter="addRecord" />
+        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -345,6 +465,7 @@ function onSaved() {
 }
 .search { width: 200px; }
 .cat-select { width: 130px; }
+.brand-select { width: 130px; }
 .totals { color: var(--ios-label-2); font-size: 13px; margin-right: auto; }
 .t-blue { color: var(--ios-blue); font-weight: 700; font-style: normal; }
 .t-green { color: var(--ios-green); font-weight: 700; font-style: normal; }
@@ -359,6 +480,16 @@ function onSaved() {
 }
 .fill-panel > .el-empty { flex: 1 1 auto; min-height: 0; }
 .table-box { flex: 1 1 auto; min-height: 0; }
+.pager {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 2px 0;
+}
+/* 总数靠左，条数下拉与翻页靠右 */
+.pager-total { margin-right: auto; font-size: 13px; color: var(--ios-label-2); }
+.pager-size { width: 112px; }
 .skeleton-pad { padding: 10px 8px; }
 .cat-cell { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .cat-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, money, qty as fmtQty } from '../api'
 
 const props = defineProps({
@@ -33,6 +33,8 @@ watch(visible, (v) => {
       allocations: props.item.allocations.map((a) => ({ ...a })),
       records: (props.item.records || []).map((r) => ({
         qty: r.qty || 0, amount: r.amount || 0, date: r.date || '', note: r.note || '',
+        vendor: r.vendor || '', order_no: r.order_no || '',
+        room_ids: [...(r.room_ids || [])],
       })),
     }
   } else {
@@ -93,16 +95,28 @@ const discTotal = computed(() => {
 })
 
 function addRecord() {
-  form.value.records.push({ qty: 0, amount: null, date: '', note: '' })
+  form.value.records.push({ qty: 0, amount: null, date: '', note: '',
+                            vendor: '', order_no: '', room_ids: [] })
 }
 
 function removeRecord(idx) {
   form.value.records.splice(idx, 1)
 }
 
+// 采购记录里的「归属分组」只列这条物料实际分到的分组 ——
+// 归到一个它根本没分到的分组没有意义
+const allocRooms = computed(() => {
+  const ids = new Set(form.value.allocations.map((a) => a.room_id))
+  return props.rooms.filter((r) => ids.has(r.id))
+})
+
 function addAlloc() {
+  if (!props.rooms.length) {
+    ElMessage.info('这个清单还没有分组，先去「设置 / 数据 → 分组」添加')
+    return
+  }
   const free = props.rooms.find((r) => !usedRoomIds.value.has(r.id))
-  if (!free) { ElMessage.info('所有房间都已添加'); return }
+  if (!free) { ElMessage.info('所有分组都已添加'); return }
   form.value.allocations.push({ room_id: free.id, qty: 1, price_override: null, note: '' })
 }
 
@@ -136,15 +150,35 @@ async function save() {
         amount: Number(r.amount) || 0,
         date: r.date || '',
         note: r.note || '',
+        vendor: r.vendor || '',
+        order_no: r.order_no || '',
+        room_ids: r.room_ids || [],
       })),
     }
     const saved = props.item
-      ? await api.put(`/api/items/${props.item.id}`, payload)
+      ? await api.put(`/api/items/${props.item.id}`, { ...payload, base_rev: props.item.rev })
       : await api.post('/api/items', payload)
     ElMessage.success('已保存')
     emit('saved', saved)
   } catch (e) {
-    ElMessage.error(e.message)
+    if (e.status === 409) {
+      // 打开这个弹窗之后，别处（另一台设备/另一个标签页）改了这条。此时直接
+      // 整条写回去会把对方的改动盖掉（比如刚记的那笔付款就没了），所以交给用户定。
+      ElMessageBox.confirm(e.message, '这条已被别处修改', {
+        confirmButtonText: '以我这边为准，覆盖',
+        cancelButtonText: '取消，我先看看最新',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger',
+      }).then(async () => {
+        const fresh = await api.get(`/api/items/${props.item.id}`)
+        const saved = await api.put(`/api/items/${props.item.id}`,
+                                    { ...payload, base_rev: fresh.rev })
+        ElMessage.success('已按你这边的版本覆盖保存')
+        emit('saved', saved)
+      }).catch(() => { /* 用户选择先刷新，什么都不做 */ })
+    } else {
+      ElMessage.error(e.message)
+    }
   } finally {
     saving.value = false
   }
@@ -152,7 +186,9 @@ async function save() {
 </script>
 
 <template>
-  <el-dialog v-model="visible" width="720px"
+  <!-- 宽度要装得下「采购记录」那张表（数量/金额/单价/日期/分组/商家/订单号/备注/删除），
+       否则最右边的备注和删除要横滑才看得到 -->
+  <el-dialog v-model="visible" width="1060px"
              :close-on-click-modal="false" class="item-dialog">
     <template #header>
       <div class="dlg-title">
@@ -183,7 +219,7 @@ async function save() {
       </el-row>
       <el-row :gutter="12">
         <el-col :xs="12" :sm="6">
-          <el-form-item label="类目">
+          <el-form-item label="分类">
             <el-select v-model="form.category_id" placeholder="选择" clearable style="width: 100%">
               <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
             </el-select>
@@ -200,7 +236,7 @@ async function save() {
                              :min="0" :disabled="allocationsLocked"
                              controls-position="right" :value-on-clear="0" style="width: 100%"
                              @update:model-value="form.qty_total = $event" />
-            <div v-if="allocationsLocked" class="field-hint">总量由布点合计决定</div>
+            <div v-if="allocationsLocked" class="field-hint">总量由分配合计决定</div>
           </el-form-item>
         </el-col>
         <el-col :xs="12" :sm="6">
@@ -267,7 +303,7 @@ async function save() {
 
       <el-divider content-position="left">采购记录（每笔付款一行，可多笔）</el-divider>
       <div class="table-wrap">
-        <el-table :data="form.records" size="small" style="min-width: 560px">
+        <el-table :data="form.records" size="small" style="min-width: 1030px">
           <el-table-column label="实付数量" width="100">
             <template #default="{ row }">
               <el-input-number v-model="row.qty" :min="0" size="small" controls-position="right"
@@ -291,12 +327,32 @@ async function save() {
                               placeholder="选择日期" size="small" style="width:100%" />
             </template>
           </el-table-column>
-          <el-table-column label="备注" min-width="110">
+          <!-- 涉及分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 -->
+          <el-table-column label="涉及分组" width="186">
             <template #default="{ row }">
-              <el-input v-model="row.note" size="small" placeholder="如 订单号/店铺" />
+              <el-select v-model="row.room_ids" multiple collapse-tags size="small"
+                         placeholder="不指定" style="width: 100%">
+                <el-option v-for="r in allocRooms" :key="r.id"
+                           :label="r.name" :value="r.id" />
+              </el-select>
             </template>
           </el-table-column>
-          <el-table-column width="52">
+          <el-table-column label="商家" width="100">
+            <template #default="{ row }">
+              <el-input v-model="row.vendor" size="small" placeholder="如 京东" />
+            </template>
+          </el-table-column>
+          <el-table-column label="订单号" width="126">
+            <template #default="{ row }">
+              <el-input v-model="row.order_no" size="small" placeholder="选填" />
+            </template>
+          </el-table-column>
+          <el-table-column label="备注" min-width="110">
+            <template #default="{ row }">
+              <el-input v-model="row.note" size="small" placeholder="如 定金/尾款" />
+            </template>
+          </el-table-column>
+          <el-table-column width="66">
             <template #default="{ $index }">
               <el-button link type="danger" size="small" @click="removeRecord($index)">删除</el-button>
             </template>
@@ -312,10 +368,10 @@ async function save() {
         <span v-else class="alloc-hint">没填记录则视为未买</span>
       </div>
 
-      <el-divider content-position="left">按房间布点（选填，总量以布点合计为准）</el-divider>
+      <el-divider content-position="left">按分组分配（选填，总量以分配合计为准）</el-divider>
       <div class="table-wrap">
         <el-table :data="form.allocations" size="small" style="min-width: 560px">
-          <el-table-column label="房间" width="140">
+          <el-table-column label="分组" width="140">
             <template #default="{ row }">
               <el-select v-model="row.room_id" style="width: 100%">
                 <el-option v-for="r in rooms" :key="r.id" :label="r.name" :value="r.id"
@@ -341,7 +397,7 @@ async function save() {
               <el-input v-model="row.note" size="small" placeholder="如：双口面板" />
             </template>
           </el-table-column>
-          <el-table-column width="52">
+          <el-table-column width="66">
             <template #default="{ $index }">
               <el-button link type="danger" size="small" @click="removeAlloc($index)">删除</el-button>
             </template>
@@ -349,11 +405,11 @@ async function save() {
         </el-table>
       </div>
       <div class="alloc-footer">
-        <el-button size="small" @click="addAlloc">+ 添加房间</el-button>
+        <el-button size="small" @click="addAlloc">+ 添加分组</el-button>
         <span v-if="form.allocations.length" class="alloc-hint">
-          布点合计 {{ allocQtyTotal }}{{ form.unit || '' }} · 原价小计 ￥{{ money(allocListTotal) }}
+          分配合计 {{ allocQtyTotal }}{{ form.unit || '' }} · 原价小计 ￥{{ money(allocListTotal) }}
         </span>
-        <span v-else class="alloc-hint">不填布点则直接使用上方"数量"</span>
+        <span v-else class="alloc-hint">不填分配则直接使用上方"数量"</span>
       </div>
     </el-form>
     <template #footer>
