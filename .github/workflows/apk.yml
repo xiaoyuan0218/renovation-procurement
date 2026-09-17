@@ -100,22 +100,35 @@ jobs:
           cp "$(find apks/mobile  -name app-debug.apk   -print -quit)" out/caizhidao-offline-debug.apk
           ls -la out
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: 最新构建
-          make_latest: true
-          body: |
-            手机点链接直接下载安装，不用登录：
+      # 发布用 gh CLI，不用 softprops/action-gh-release：后者在当前 Node 24 的
+      # runner 上会在发布环节抛 TypeError: Invalid URL，release 停在 draft ——
+      # 资产传上去了但直链要登录才能下。每次删掉重建，latest 永远指向最新构建。
+      - name: 发布到固定链接
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/notes.md <<'EOF'
+          手机点链接直接下载安装，不用登录：
 
-            **网络版**（连服务器，数据存在服务器上）
-            - [caizhidao-online.apk](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-online.apk)
-            - [caizhidao-online-debug.apk（调试包）](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-online-debug.apk)
+          **网络版**（连服务器，数据存在服务器上）
+          - [caizhidao-online.apk](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-online.apk)
+          - [caizhidao-online-debug.apk（调试包）](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-online-debug.apk)
 
-            **单机版**（数据存在手机本地，可选连服务器）
-            - [caizhidao-offline.apk](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-offline.apk)
-            - [caizhidao-offline-debug.apk（调试包）](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-offline-debug.apk)
+          **单机版**（数据存在手机本地，可选连服务器）
+          - [caizhidao-offline.apk](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-offline.apk)
+          - [caizhidao-offline-debug.apk（调试包）](${{ github.server_url }}/${{ github.repository }}/releases/latest/download/caizhidao-offline-debug.apk)
 
-            带 `-debug` 的包名多一个 `.debug` 后缀，与正式版可以并存、互不覆盖；
-            拿不准装哪个就用不带 debug 的。这个页面每次 push 自动更新，链接不变。
-          files: out/*.apk
+          带 `-debug` 的包名多一个 `.debug` 后缀，与正式版可以并存、互不覆盖；
+          拿不准装哪个就用不带 debug 的。这个页面每次 push 自动更新，链接不变。
+          EOF
+
+          # 清掉旧的（连残留的 draft 一起）：gh release delete 看不到 draft，走 API 更彻底
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "latest") | .id' |
+            while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/releases/$id"; done
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/latest" 2>/dev/null || true
+
+          gh release create latest --title "最新构建" --notes-file /tmp/notes.md
+          gh release upload latest out/*.apk
+          gh release view latest --json tagName,isDraft,assets \
+            --jq '"发布完成: " + .tagName + " draft=" + (.isDraft|tostring) + " 资产=" + ([.assets[].name]|join(", "))'
