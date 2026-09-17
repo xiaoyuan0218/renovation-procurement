@@ -270,9 +270,17 @@ async function removeItem(row) {
   } catch (e) { ElMessage.error(e.message) }
 }
 
-const CAT_COLORS = { 照明: '#0a84ff', 开关插座: '#34c759', 网络: '#ff9f0a', 家装: '#ff375f' }
+// 分类色：按名字算一个稳定的颜色，而不是写死一张表。
+// 写死表的后果就是新建的分类（不在表里）圆点全变灰 —— 真实数据里的
+// 「灯具照明 / 网络面板 / 家电家装」就一个都匹配不上。
+// 用 hash 取色：同一个名字永远同一个色，以后再加分类也自动有颜色。
+const CAT_PALETTE = ['#0a84ff', '#34c759', '#ff9f0a', '#ff375f',
+                     '#5e5ce6', '#30b0c7', '#af52de', '#ff6482']
 function catColor(name) {
-  return CAT_COLORS[name] || '#8e8e93'
+  if (!name) return '#8e8e93'
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 9973
+  return CAT_PALETTE[h % CAT_PALETTE.length]
 }
 
 function onSaved() {
