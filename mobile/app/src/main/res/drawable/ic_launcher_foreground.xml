@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  采买的事，一件件划掉：前两行已办，第三行还空着。
+  monochrome 层也用这张图，所以全部用线条画，单色渲染时照样认得出。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 玻璃衬底 -->
+    <path
+        android:pathData="M36,26 h36 a10,10 0 0 1 10,10 v36 a10,10 0 0 1 -10,10 h-36 a10,10 0 0 1 -10,-10 v-36 a10,10 0 0 1 10,-10 z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.10" />
+
+    <!-- 第一件：办好了 -->
+    <path
+        android:pathData="M33,38 l5,5 l8,-10"
+        android:strokeColor="#5AC8FA"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M51,38 h25"
+        android:strokeColor="#FFFFFF"
+        android:strokeAlpha="0.88"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- 第二件：办好了 -->
+    <path
+        android:pathData="M33,54 l5,5 l8,-10"
+        android:strokeColor="#5AC8FA"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M51,54 h25"
+        android:strokeColor="#FFFFFF"
+        android:strokeAlpha="0.88"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- 第三件：还没办 -->
+    <path
+        android:pathData="M51,70 h16"
+        android:strokeColor="#FFFFFF"
+        android:strokeAlpha="0.35"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>

@@ -1,0 +1,510 @@
+{
+  "rooms": [
+    "客厅",
+    "主卧",
+    "厨房"
+  ],
+  "category": "照明",
+  "cases": [
+    {
+      "name": "无布点-部分已付",
+      "item": {
+        "qty_total": 10.0,
+        "price": 8.5,
+        "discount_price": 8.0,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [],
+      "records": [
+        {
+          "qty": 4.0,
+          "amount": 32.0,
+          "date": "2026-08-03",
+          "vendor": "京东",
+          "rooms": []
+        }
+      ],
+      "expected": {
+        "total_qty": 10.0,
+        "list_total": 85.0,
+        "discount_total": 80.0,
+        "paid_qty": 4.0,
+        "paid_price": 8.0,
+        "paid": 32.0,
+        "unpaid_qty": 6.0,
+        "unpaid": 51.0,
+        "daily_unpaid": 48.0,
+        "actual_discount": 2.0,
+        "daily_discount": 0,
+        "status": "partial"
+      },
+      "expected_cover": {}
+    },
+    {
+      "name": "多分组-未写归属-未买齐",
+      "item": {
+        "qty_total": 0.0,
+        "price": 12.0,
+        "discount_price": null,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [
+        {
+          "room": 0,
+          "qty": 2.0,
+          "price_override": null
+        },
+        {
+          "room": 1,
+          "qty": 4.0,
+          "price_override": null
+        },
+        {
+          "room": 2,
+          "qty": 6.0,
+          "price_override": null
+        }
+      ],
+      "records": [
+        {
+          "qty": 3.0,
+          "amount": 30.0,
+          "date": "",
+          "vendor": "",
+          "rooms": []
+        }
+      ],
+      "expected": {
+        "total_qty": 12.0,
+        "list_total": 144.0,
+        "discount_total": 144.0,
+        "paid_qty": 3.0,
+        "paid_price": 10.0,
+        "paid": 30.0,
+        "unpaid_qty": 9.0,
+        "unpaid": 108.0,
+        "daily_unpaid": 108.0,
+        "actual_discount": 6.0,
+        "daily_discount": 6.0,
+        "status": "partial"
+      },
+      "expected_cover": {}
+    },
+    {
+      "name": "多分组-未写归属-已买齐",
+      "item": {
+        "qty_total": 0.0,
+        "price": 10.0,
+        "discount_price": null,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [
+        {
+          "room": 0,
+          "qty": 1.0,
+          "price_override": null
+        },
+        {
+          "room": 1,
+          "qty": 2.0,
+          "price_override": null
+        },
+        {
+          "room": 2,
+          "qty": 3.0,
+          "price_override": null
+        }
+      ],
+      "records": [
+        {
+          "qty": 6.0,
+          "amount": 54.0,
+          "date": "",
+          "vendor": "",
+          "rooms": []
+        }
+      ],
+      "expected": {
+        "total_qty": 6.0,
+        "list_total": 60.0,
+        "discount_total": 60.0,
+        "paid_qty": 6.0,
+        "paid_price": 9.0,
+        "paid": 54.0,
+        "unpaid_qty": 0,
+        "unpaid": 0,
+        "daily_unpaid": 0,
+        "actual_discount": 6.0,
+        "daily_discount": 6.0,
+        "status": "done"
+      },
+      "expected_cover": {
+        "1": 1.0,
+        "2": 2.0,
+        "3": 3.0
+      }
+    },
+    {
+      "name": "多分组-写明归属",
+      "item": {
+        "qty_total": 0.0,
+        "price": 20.0,
+        "discount_price": null,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [
+        {
+          "room": 0,
+          "qty": 2.0,
+          "price_override": null
+        },
+        {
+          "room": 1,
+          "qty": 2.0,
+          "price_override": null
+        },
+        {
+          "room": 2,
+          "qty": 2.0,
+          "price_override": null
+        }
+      ],
+      "records": [
+        {
+          "qty": 2.0,
+          "amount": 36.0,
+          "date": "",
+          "vendor": "",
+          "rooms": [
+            2
+          ]
+        }
+      ],
+      "expected": {
+        "total_qty": 6.0,
+        "list_total": 120.0,
+        "discount_total": 120.0,
+        "paid_qty": 2.0,
+        "paid_price": 18.0,
+        "paid": 36.0,
+        "unpaid_qty": 4.0,
+        "unpaid": 80.0,
+        "daily_unpaid": 80.0,
+        "actual_discount": 4.0,
+        "daily_discount": 4.0,
+        "status": "partial"
+      },
+      "expected_cover": {
+        "1": 0,
+        "2": 0,
+        "3": 2.0
+      }
+    },
+    {
+      "name": "房间覆盖单价",
+      "item": {
+        "qty_total": 0.0,
+        "price": 30.0,
+        "discount_price": 28.0,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [
+        {
+          "room": 0,
+          "qty": 5.0,
+          "price_override": 25.0
+        },
+        {
+          "room": 1,
+          "qty": 3.0,
+          "price_override": null
+        }
+      ],
+      "records": [
+        {
+          "qty": 5.0,
+          "amount": 120.0,
+          "date": "",
+          "vendor": "",
+          "rooms": []
+        }
+      ],
+      "expected": {
+        "total_qty": 8.0,
+        "list_total": 215.0,
+        "discount_total": 224.0,
+        "paid_qty": 5.0,
+        "paid_price": 24.0,
+        "paid": 120.0,
+        "unpaid_qty": 3.0,
+        "unpaid": 90.0,
+        "daily_unpaid": 84.0,
+        "actual_discount": 5.0,
+        "daily_discount": 20.0,
+        "status": "partial"
+      },
+      "expected_cover": {}
+    },
+    {
+      "name": "小数金额",
+      "item": {
+        "qty_total": 7.0,
+        "price": 3.33,
+        "discount_price": 2.99,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [],
+      "records": [
+        {
+          "qty": 3.0,
+          "amount": 9.99,
+          "date": "",
+          "vendor": "",
+          "rooms": []
+        },
+        {
+          "qty": 4.0,
+          "amount": 13.34,
+          "date": "",
+          "vendor": "",
+          "rooms": []
+        }
+      ],
+      "expected": {
+        "total_qty": 7.0,
+        "list_total": 23.31,
+        "discount_total": 20.93,
+        "paid_qty": 7.0,
+        "paid_price": 3.33,
+        "paid": 23.33,
+        "unpaid_qty": 0,
+        "unpaid": 0,
+        "daily_unpaid": 0,
+        "actual_discount": -0.02,
+        "daily_discount": -2.4,
+        "status": "done"
+      },
+      "expected_cover": {}
+    },
+    {
+      "name": "完全未买-无分类",
+      "item": {
+        "qty_total": 0.0,
+        "price": 15.0,
+        "discount_price": 13.5,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": false
+      },
+      "allocations": [
+        {
+          "room": 2,
+          "qty": 4.0,
+          "price_override": null
+        }
+      ],
+      "records": [],
+      "expected": {
+        "total_qty": 4.0,
+        "list_total": 60.0,
+        "discount_total": 54.0,
+        "paid_qty": 0,
+        "paid_price": null,
+        "paid": 0,
+        "unpaid_qty": 4.0,
+        "unpaid": 60.0,
+        "daily_unpaid": 54.0,
+        "actual_discount": 0,
+        "daily_discount": 0,
+        "status": "unbought"
+      },
+      "expected_cover": {
+        "1": 0
+      }
+    },
+    {
+      "name": "总量为零",
+      "item": {
+        "qty_total": 0.0,
+        "price": 9.0,
+        "discount_price": null,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [],
+      "records": [],
+      "expected": {
+        "total_qty": 0,
+        "list_total": 0,
+        "discount_total": 0,
+        "paid_qty": 0,
+        "paid_price": null,
+        "paid": 0,
+        "unpaid_qty": 0,
+        "unpaid": 0,
+        "daily_unpaid": 0,
+        "actual_discount": 0,
+        "daily_discount": 0,
+        "status": "none"
+      },
+      "expected_cover": {}
+    },
+    {
+      "name": "实付高于原价",
+      "item": {
+        "qty_total": 2.0,
+        "price": 10.0,
+        "discount_price": null,
+        "unit": "个",
+        "brand": "",
+        "model": "",
+        "note": "",
+        "has_category": true
+      },
+      "allocations": [],
+      "records": [
+        {
+          "qty": 2.0,
+          "amount": 30.0,
+          "date": "2026-09-14 00:00:00",
+          "vendor": "",
+          "rooms": []
+        }
+      ],
+      "expected": {
+        "total_qty": 2.0,
+        "list_total": 20.0,
+        "discount_total": 20.0,
+        "paid_qty": 2.0,
+        "paid_price": 15.0,
+        "paid": 30.0,
+        "unpaid_qty": 0,
+        "unpaid": 0,
+        "daily_unpaid": 0,
+        "actual_discount": -10.0,
+        "daily_discount": -10.0,
+        "status": "done"
+      },
+      "expected_cover": {}
+    }
+  ],
+  "summary": {
+    "totals": {
+      "list_total": 727.31,
+      "discount_total": 722.93,
+      "paid_total": 325.33,
+      "item_count": 9,
+      "unpaid_total": 389.0,
+      "daily_unpaid_total": 374.0,
+      "actual_discount_total": 12.98,
+      "daily_discount_total": 23.6,
+      "status_count": {
+        "done": 3,
+        "partial": 4,
+        "unbought": 1,
+        "none": 1
+      },
+      "bought_count": 3,
+      "partial_count": 4
+    },
+    "by_category": [
+      {
+        "id": 1,
+        "name": "照明",
+        "list_total": 667.31,
+        "discount_total": 668.93,
+        "paid_total": 325.33
+      },
+      {
+        "id": null,
+        "name": "未分类",
+        "list_total": 60.0,
+        "discount_total": 54.0,
+        "paid_total": 0
+      }
+    ],
+    "by_room": [
+      {
+        "id": 1,
+        "name": "客厅",
+        "qty": 10.0,
+        "list_total": 199.0
+      },
+      {
+        "id": 2,
+        "name": "主卧",
+        "qty": 11.0,
+        "list_total": 198.0
+      },
+      {
+        "id": 3,
+        "name": "厨房",
+        "qty": 15.0,
+        "list_total": 202.0
+      }
+    ],
+    "unbought_ids": [
+      5,
+      2,
+      4,
+      1,
+      7
+    ],
+    "by_month": [
+      {
+        "month": "2026-08",
+        "paid": 32.0
+      },
+      {
+        "month": "2026-09",
+        "paid": 30.0
+      }
+    ],
+    "by_month_undated": 263.33,
+    "expenses_total": 255.0,
+    "expenses_by_kind": [
+      {
+        "kind": "安装费",
+        "amount": 120.0
+      },
+      {
+        "kind": "运费",
+        "amount": 115.0
+      },
+      {
+        "kind": "其他",
+        "amount": 20.0
+      }
+    ],
+    "expenses_count": 4
+  }
+}
