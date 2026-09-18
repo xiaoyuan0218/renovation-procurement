@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xiaoyuan.renovation.ui.theme.Ink
@@ -346,7 +348,7 @@ fun <T> AppSelect(
     }
 }
 
-/** 横向滚动的单选胶囊组（筛选用）。 */
+/** 横向滚动的单选组（筛选用）：整组套在一张卡片里，选项是卡片内的胶囊。 */
 @Composable
 fun <T> ChoiceChips(
     options: List<Pair<T, String>>,
@@ -354,30 +356,51 @@ fun <T> ChoiceChips(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
     accent: Color = Ink.Blue,
+    /** 与同排其它卡片对齐用（比如 2×2 网格里给同一高度） */
+    height: Dp? = null,
 ) {
+    val outerShape = RoundedCornerShape(14.dp)
+    val chipShape = RoundedCornerShape(50)
     Row(
-        // clipToBounds：放在 Row 里并排时（比如状态标签与合计同一行），
-        // 横向滚动的内容会按自身宽度绘制、溢出到邻居身上；裁掉才不会盖住旁边
         modifier = modifier
+            .then(if (height != null) Modifier.height(height) else Modifier)
+            .clip(outerShape)
+            .background(Brush.verticalGradient(listOf(Ink.GlassFillStrong, Ink.GlassFill)))
+            .border(1.dp, Ink.GlassBorder, outerShape)
             .clipToBounds()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         options.forEach { (value, label) ->
             val isSelected = value == selected
-            val shape = RoundedCornerShape(50)
-            Text(
-                text = label,
-                fontSize = 13.sp,
-                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (isSelected) Color.White else Ink.TextSecondary,
+            Box(
                 modifier = Modifier
-                    .clip(shape)
-                    .background(if (isSelected) accent.copy(alpha = 0.85f) else Ink.GlassFill)
-                    .border(1.dp, if (isSelected) accent else Ink.GlassBorder, shape)
+                    .clip(chipShape)
+                    .background(
+                        if (isSelected) {
+                            Brush.horizontalGradient(listOf(accent.copy(alpha = 0.85f), accent.copy(alpha = 0.6f)))
+                        } else {
+                            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                        },
+                    )
+                    .then(
+                        if (isSelected) Modifier.border(1.dp, accent.copy(alpha = 0.7f), chipShape)
+                        else Modifier,
+                    )
                     .clickable { onSelect(value) }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-            )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) Color.White else Ink.TextSecondary,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }

@@ -150,11 +150,12 @@ fun ItemsScreen(
                     )
                     Spacer(Modifier.height(14.dp))
 
-                    // 搜索与分类并排一行：各占一半宽。原来各占一行、中间还夹着间距，
-                    // 光这两项就吃掉近 20% 屏高，内容区被挤得只剩半屏。
-                    // 给两者同一个高度，并排时上下边才对得齐
-                    val fieldHeight = 56.dp
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // 筛选区排成 2×2 四格：搜索、分类、状态、合计，四格等宽等高。
+                    // 原来四项各占一整行（加间距吃掉 35% 屏高），并排后降到两行、
+                    // 内容区多出约七分之一屏
+                    val cellHeight = 56.dp
+                    val gap = 10.dp
+                    Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                         AppTextField(
                             value = query,
                             onValueChange = vm::setQuery,
@@ -164,7 +165,7 @@ fun ItemsScreen(
                             imeAction = ImeAction.Search,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(fieldHeight),
+                                .height(cellHeight),
                         )
                         AppSelect(
                             label = "分类",
@@ -177,24 +178,25 @@ fun ItemsScreen(
                             clearLabel = "全部分类",
                             modifier = Modifier
                                 .weight(1f)
-                                .height(fieldHeight),
+                                .height(cellHeight),
                         )
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(gap))
 
-                    // 状态标签与合计并成一行：合计本来就只是两个数字，
-                    // 单独占一条卡片太高，挂在标签右边刚好把空档填上。
-                    // 标签区拿剩余宽度（内部横向滚动，标签多也不会被挤没），
-                    // 合计给个固定宽度，免得跟着标签数量一起变
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
                         ChoiceChips(
                             options = StatusFilter.entries.map { it to it.label },
                             selected = statusFilter,
                             onSelect = vm::setStatus,
                             modifier = Modifier.weight(1f),
+                            height = cellHeight,
                         )
-                        Spacer(Modifier.width(10.dp))
-                        TotalsBar(items = filtered, modifier = Modifier.width(200.dp))
+                        TotalsBar(
+                            items = filtered,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(cellHeight),
+                        )
                     }
 
                     val banner = message
@@ -292,36 +294,37 @@ const val NEW_ITEM_ID = -1
 
 @Composable
 private fun TotalsBar(items: List<ItemDto>, modifier: Modifier = Modifier) {
-    // 与状态标签并排后只剩半屏宽，所以收成两行：上面「合计」标签，下面两个金额，
-    // 不再用「当前筛选合计 …… 日常价 X · 实付 Y」那种一条到底的排法
-    GlassCard(corner = 16.dp, padding = 10.dp, modifier = modifier) {
-        Column {
+    // 四格之一，只有半屏宽、56dp 高：竖排两行会被裁掉，所以单行横排 ——
+    // 左「合计」，右侧两个金额各自成段。金额太大时靠 maxLines 截断，
+    // 不让它顶破卡片
+    GlassCard(corner = 14.dp, padding = 12.dp, modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "合计",
-                style = MaterialTheme.typography.bodySmall,
+                fontSize = 11.sp,
                 color = Ink.TextSecondary,
+                maxLines = 1,
             )
-            Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "日常价 ${Fmt.money(items.sumOf { it.discountTotal })}",
-                    fontSize = 12.sp,
-                    color = Ink.TextPrimary,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                )
-                Text(
-                    text = " · ",
-                    color = Ink.TextMuted,
-                )
-                Text(
-                    text = "实付 ${Fmt.money(items.sumOf { it.paid })}",
-                    fontSize = 12.sp,
-                    color = Ink.Mint,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                )
-            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = Fmt.money(items.sumOf { it.discountTotal }),
+                fontSize = 12.sp,
+                color = Ink.TextPrimary,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+            Text(
+                text = " / ",
+                color = Ink.TextMuted,
+                fontSize = 11.sp,
+            )
+            Text(
+                text = Fmt.money(items.sumOf { it.paid }),
+                fontSize = 12.sp,
+                color = Ink.Mint,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
         }
     }
 }
