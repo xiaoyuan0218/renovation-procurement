@@ -37,7 +37,8 @@ fun SettingsPage(
     content: LazyListScope.() -> Unit,
 ) {
     // 全屏独立页面（不在 AppShell 的顶栏下面），要自己让开状态栏/刘海，
-    // 否则标题和返回按钮会被顶到刘海底下 —— 点不到也看不清
+    // 否则标题和返回按钮会被顶到刘海底下 —— 点不到也看不清。
+    // 页眉不画背景：直接浮在渐变上，与主界面顶部栏同一效果
     Column(
         Modifier
             .fillMaxSize()

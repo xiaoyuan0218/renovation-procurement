@@ -279,10 +279,11 @@ private fun ListSwitcherBar(
         }
     }
 
+    // 不画背景：直接浮在渐变上，和「设置」里那些详情页的页眉一个效果。
+    // 画一条近不透明的色块会在顶部切出一道明显的分界，把整屏渐变割开
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Ink.BgMid.copy(alpha = 0.94f))
             .statusBarsPadding()
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
