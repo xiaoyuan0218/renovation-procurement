@@ -80,7 +80,7 @@ fun SettingsScreen(
             Column {
                 Text(
                     text = "设置",
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     color = Ink.TextPrimary,
                 )
                 Spacer(Modifier.height(2.dp))

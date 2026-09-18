@@ -199,7 +199,7 @@ fun InlineBanner(
     }
 }
 
-/** 品牌头部：渐变标题，对应参考图左上角的品牌区。 */
+/** 页面头部：标题 + 一行说明，与「设置」里那些详情页同一套字号（titleLarge）。 */
 @Composable
 fun BrandHeader(
     title: String,
@@ -214,8 +214,7 @@ fun BrandHeader(
         Column(Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge,
                 color = Ink.TextPrimary,
             )
             Spacer(Modifier.height(2.dp))
