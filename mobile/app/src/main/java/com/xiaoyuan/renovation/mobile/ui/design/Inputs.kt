@@ -47,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -355,7 +356,11 @@ fun <T> ChoiceChips(
     accent: Color = Ink.Blue,
 ) {
     Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
+        // clipToBounds：放在 Row 里并排时（比如状态标签与合计同一行），
+        // 横向滚动的内容会按自身宽度绘制、溢出到邻居身上；裁掉才不会盖住旁边
+        modifier = modifier
+            .clipToBounds()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         options.forEach { (value, label) ->
@@ -387,7 +392,11 @@ fun <T> MultiChoiceChips(
     accent: Color = Ink.Blue,
 ) {
     Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
+        // clipToBounds：放在 Row 里并排时（比如状态标签与合计同一行），
+        // 横向滚动的内容会按自身宽度绘制、溢出到邻居身上；裁掉才不会盖住旁边
+        modifier = modifier
+            .clipToBounds()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         options.forEach { (value, label) ->

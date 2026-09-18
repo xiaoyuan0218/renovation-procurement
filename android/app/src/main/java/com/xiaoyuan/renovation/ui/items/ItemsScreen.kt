@@ -150,43 +150,59 @@ fun ItemsScreen(
                     )
                     Spacer(Modifier.height(14.dp))
 
-                    AppTextField(
-                        value = query,
-                        onValueChange = vm::setQuery,
-                        label = "搜索物料",
-                        placeholder = "名称关键词",
-                        leadingIcon = Icons.Filled.Search,
-                        imeAction = ImeAction.Search,
-                    )
+                    // 搜索与分类并排一行：各占一半宽。原来各占一行、中间还夹着间距，
+                    // 光这两项就吃掉近 20% 屏高，内容区被挤得只剩半屏。
+                    // 给两者同一个高度，并排时上下边才对得齐
+                    val fieldHeight = 56.dp
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        AppTextField(
+                            value = query,
+                            onValueChange = vm::setQuery,
+                            label = "搜索",
+                            placeholder = "名称关键词",
+                            leadingIcon = Icons.Filled.Search,
+                            imeAction = ImeAction.Search,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(fieldHeight),
+                        )
+                        AppSelect(
+                            label = "分类",
+                            items = data.categories,
+                            selected = selectedCategory,
+                            itemLabel = { it.name },
+                            onSelect = { vm.setCategory(it?.id) },
+                            placeholder = "全部",
+                            allowClear = true,
+                            clearLabel = "全部分类",
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(fieldHeight),
+                        )
+                    }
                     Spacer(Modifier.height(10.dp))
 
-                    AppSelect(
-                        label = "分类",
-                        items = data.categories,
-                        selected = selectedCategory,
-                        itemLabel = { it.name },
-                        onSelect = { vm.setCategory(it?.id) },
-                        placeholder = "全部分类",
-                        allowClear = true,
-                        clearLabel = "全部分类",
-                    )
-                    Spacer(Modifier.height(12.dp))
-
-                    ChoiceChips(
-                        options = StatusFilter.entries.map { it to it.label },
-                        selected = statusFilter,
-                        onSelect = vm::setStatus,
-                    )
-
-                    Spacer(Modifier.height(12.dp))
-                    TotalsBar(items = filtered)
+                    // 状态标签与合计并成一行：合计本来就只是两个数字，
+                    // 单独占一条卡片太高，挂在标签右边刚好把空档填上。
+                    // 标签区拿剩余宽度（内部横向滚动，标签多也不会被挤没），
+                    // 合计给个固定宽度，免得跟着标签数量一起变
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ChoiceChips(
+                            options = StatusFilter.entries.map { it to it.label },
+                            selected = statusFilter,
+                            onSelect = vm::setStatus,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        TotalsBar(items = filtered, modifier = Modifier.width(200.dp))
+                    }
 
                     val banner = message
                     if (banner != null) {
                         Spacer(Modifier.height(10.dp))
                         InlineBanner(text = banner, accent = Ink.Mint)
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                 }
 
                 if (filtered.isEmpty()) {
@@ -275,31 +291,37 @@ fun ItemsScreen(
 const val NEW_ITEM_ID = -1
 
 @Composable
-private fun TotalsBar(items: List<ItemDto>) {
-    GlassCard(corner = 16.dp, padding = 12.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+private fun TotalsBar(items: List<ItemDto>, modifier: Modifier = Modifier) {
+    // 与状态标签并排后只剩半屏宽，所以收成两行：上面「合计」标签，下面两个金额，
+    // 不再用「当前筛选合计 …… 日常价 X · 实付 Y」那种一条到底的排法
+    GlassCard(corner = 16.dp, padding = 10.dp, modifier = modifier) {
+        Column {
             Text(
-                text = "当前筛选合计",
+                text = "合计",
                 style = MaterialTheme.typography.bodySmall,
                 color = Ink.TextSecondary,
-                modifier = Modifier.weight(1f),
             )
-            Text(
-                text = "日常价 ${Fmt.money(items.sumOf { it.discountTotal })}",
-                fontSize = 13.sp,
-                color = Ink.TextPrimary,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = " · ",
-                color = Ink.TextMuted,
-            )
-            Text(
-                text = "实付 ${Fmt.money(items.sumOf { it.paid })}",
-                fontSize = 13.sp,
-                color = Ink.Mint,
-                fontWeight = FontWeight.Medium,
-            )
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "日常价 ${Fmt.money(items.sumOf { it.discountTotal })}",
+                    fontSize = 12.sp,
+                    color = Ink.TextPrimary,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+                Text(
+                    text = " · ",
+                    color = Ink.TextMuted,
+                )
+                Text(
+                    text = "实付 ${Fmt.money(items.sumOf { it.paid })}",
+                    fontSize = 12.sp,
+                    color = Ink.Mint,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }
