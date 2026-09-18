@@ -106,7 +106,10 @@ jobs:
 
       # 发布用 gh CLI，不用 softprops/action-gh-release：后者在当前 Node 24 的
       # runner 上会在发布环节抛 TypeError: Invalid URL，release 停在 draft ——
-      # 资产传上去了但直链要登录才能下。每次删掉重建，latest 永远指向最新构建。
+      # 资产传上去了但直链要登录才能下。
+      #
+      # 更新方式是"就地覆盖资产"而不是"删掉重建"：删了再建的那几分钟里
+      # /releases/latest/download/ 会 404，正好在这时下载的人就撞上了。
       - name: 发布到固定链接
         env:
           GH_TOKEN: ${{ github.token }}
@@ -126,13 +129,18 @@ jobs:
           拿不准装哪个就用不带 debug 的。这个页面每次 push 自动更新，链接不变。
           EOF
 
-          # 清掉旧的（连残留的 draft 一起）：gh release delete 看不到 draft，走 API 更彻底
+          # 只清残留的 draft（gh release delete 看不到 draft，走 API 更彻底）；
+          # 已发布的那个不动，免得下载链接空窗
           gh api "repos/${{ github.repository }}/releases?per_page=100" \
-            --jq '.[] | select(.tag_name == "latest") | .id' |
+            --jq '.[] | select(.tag_name == "latest" and .draft) | .id' |
             while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/releases/$id"; done
-          gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/latest" 2>/dev/null || true
 
-          gh release create latest --title "最新构建" --notes-file /tmp/notes.md
-          gh release upload latest out/*.apk
+          if gh release view latest >/dev/null 2>&1; then
+            gh release edit latest --title "最新构建" --notes-file /tmp/notes.md
+          else
+            gh release create latest --title "最新构建" --notes-file /tmp/notes.md
+          fi
+          # --clobber：同名资产就地替换，上传期间旧的那份还在，链接不断
+          gh release upload latest out/*.apk --clobber
           gh release view latest --json tagName,isDraft,assets \
             --jq '"发布完成: " + .tagName + " draft=" + (.isDraft|tostring) + " 资产=" + ([.assets[].name]|join(", "))'
