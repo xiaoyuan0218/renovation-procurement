@@ -207,20 +207,28 @@ private fun DashboardContent(
         GlassCard(corner = 18.dp, padding = 14.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "付款进度",
+                    text = "采购进度",
                     style = MaterialTheme.typography.bodySmall,
                     color = Ink.TextSecondary,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = Fmt.percentOf(totals.paidTotal, totals.listTotal),
+                    // 按项数：已买齐的项数占比。金额进度会被单件贵的带偏，
+                    // 项数更贴近"还剩几件事要办"
+                    text = Fmt.percent(totals.boughtRatioByCount),
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Ink.Amber,
                 )
             }
             Spacer(Modifier.height(10.dp))
-            ThinProgressBar(ratio = totals.paidRatioOfList, color = Ink.Mint)
+            ThinProgressBar(ratio = totals.boughtRatioByCount, color = Ink.Mint)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "已买齐 ${totals.boughtCount} / ${totals.itemCount} 项",
+                style = MaterialTheme.typography.bodySmall,
+                color = Ink.TextSecondary,
+            )
         }
 
         /* ---------- 三个环形图 ---------- */

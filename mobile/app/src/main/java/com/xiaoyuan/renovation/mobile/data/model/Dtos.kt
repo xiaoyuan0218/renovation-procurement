@@ -246,6 +246,16 @@ data class TotalsDto(
     /** 已付占预算（原价合计）比例，0..1 */
     val paidRatioOfList: Float
         get() = if (listTotal > 0) (paidTotal / listTotal).toFloat().coerceIn(0f, 1f) else 0f
+
+    /**
+     * 已买齐的项数占全部项数比例，0..1。
+     *
+     * 「付款进度」用它而不是金额：金额进度会被单件贵的东西带偏 ——
+     * 买齐 9 件便宜货、只剩 1 件贵的没买，金额上可能才走了一半，
+     * 但实际"要买的东西"已经买掉九成。项数更贴近"还剩几件事要办"。
+     */
+    val boughtRatioByCount: Float
+        get() = if (itemCount > 0) (boughtCount.toFloat() / itemCount).coerceIn(0f, 1f) else 0f
 }
 
 @Serializable
