@@ -4,6 +4,12 @@
 
 装修买建材、办年货、备项目物料……凡是"一批东西要分头买、分次付、还得盯着进度"的场合都能用。默认只给一个示例分组与分类（照着你的习惯改掉就行），也可以建**多份互相独立的清单**，换件事用不需要再装一个程序。
 
+**手机安装**（点链接直接下载，不用登录，永远是最新构建）：
+
+[网络版 APK](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-online.apk)　·　[单机版 APK](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-offline.apk)
+
+（两个都要连自家服务器的话装网络版；想完全离线用就装单机版。调试包见 [最新构建](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest) 页面。）
+
 **它解决什么**：一批东西几十上百种、分布在十几个分组里，还得分次付款、随时看"总共多少 / 花了多少 / 还差多少"。用表格维护容易算错、改乱、看不出进度。这里把这些做成结构化数据：
 
 - **物料 × 分组的分配矩阵**：每样东西用在哪里、各几个，一眼看全，某个分组还能单独定价
@@ -120,10 +126,10 @@ cd mobile                    # 单机版，命令相同；testDebugUnitTest 是�
 
 手机浏览器打开下面的链接直接下载安装（不用登录，链接永远指向最新构建）：
 
-- 网络版（连服务器）：`https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-online.apk`
-- 单机版（数据在手机本地）：`https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-offline.apk`
+- 网络版（连服务器）：[caizhidao-online.apk](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-online.apk)
+- 单机版（数据在手机本地）：[caizhidao-offline.apk](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-offline.apk)
 
-把上面链接里的文件名换成 `caizhidao-online-debug.apk` / `caizhidao-offline-debug.apk` 就是对应的调试包 —— 包名多一个 `.debug` 后缀，和正式版并存、互不覆盖，拿不准就用不带 debug 的。
+两个调试包在 [最新构建](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest) 页面上（`caizhidao-online-debug.apk` / `caizhidao-offline-debug.apk`）—— 包名多一个 `.debug` 后缀，和正式版并存、互不覆盖，拿不准就用不带 debug 的。
 
 也可以把本地构建的 APK 传到手机点击安装（debug 与 release 都使用 debug 签名，个人自用足够）。手机需与后端在同一个局域网。模拟器里调试宿主机上的后端，地址填 `10.0.2.2:8000`。
 
