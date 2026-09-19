@@ -45,8 +45,7 @@ def list_lists(db: Session = Depends(get_db)):
 
 @router.post("", response_model=ItemListOut)
 def create_list(data: ItemListIn, db: Session = Depends(get_db)):
-    if db.query(ItemList).filter(ItemList.name == data.name).first():
-        raise HTTPException(400, f"清单「{data.name}」已存在")
+    # 名字允许重复：编号才是身份。同名两份清单各自独立，不拦也不加后缀
     source = None
     if data.copy_from is not None:
         source = db.get(ItemList, data.copy_from)
@@ -79,10 +78,7 @@ def update_list(list_id: int, data: ItemListIn, db: Session = Depends(get_db)):
     lst = db.get(ItemList, list_id)
     if not lst:
         raise HTTPException(404, "清单不存在")
-    dup = (db.query(ItemList)
-           .filter(ItemList.name == data.name, ItemList.id != list_id).first())
-    if dup:
-        raise HTTPException(400, f"清单「{data.name}」已存在")
+    # 名字重复不拦（身份是编号）；只更新，不做重名检查
     lst.name = data.name
     lst.note = data.note or ""
     lst.sort = data.sort

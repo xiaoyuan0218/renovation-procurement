@@ -18,9 +18,7 @@ from app.main import app
 from app.models import (Allocation, Category, Item, ItemList, PurchaseRecord,
                         Room, User)
 from app.seed import init_db
-
-USER = "admin"
-PASSWORD = "s3cret-pass"
+from tests.conftest import TEST_PASSWORD as PASSWORD, TEST_USER as USER
 
 
 @pytest.fixture()
@@ -78,8 +76,12 @@ def test_list_crud_and_usage_counts(client):
     assert r.json()["name"] == "装修采购"
     assert r.json()["note"] == "2026 老房翻新"
 
+    # 名字允许重复：编号才是身份，同名两份各自独立（不再报「已存在」）
     dup = client.post("/api/lists", json={"name": "装修采购"})
-    assert dup.status_code == 400 and "已存在" in dup.json()["detail"]
+    assert dup.status_code == 200
+    assert dup.json()["name"] == "装修采购"
+    assert dup.json()["id"] != r.json()["id"]
+    assert dup.json()["code"] != r.json()["code"]
 
 
 def test_items_are_isolated_between_lists(client):

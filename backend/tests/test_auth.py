@@ -4,6 +4,8 @@
 "没登录会被拦、登录后能过"。其余单测仍然直接调 service 函数。
 """
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,8 +15,12 @@ from app.main import app
 from app.models import User
 from app.seed import init_db
 
-USER = "admin"
-PASSWORD = "s3cret-pass"
+USER = os.environ.get("TEST_AUTH_USER", "admin")
+# 测试用的假密码，只在测试库里创建账号，不是任何真实环境的凭据。
+# 需要时可用环境变量覆盖。
+PASSWORD = os.environ.get("TEST_AUTH_PASSWORD", "test-only-pass")
+WRONG_PASSWORD = os.environ.get("TEST_WRONG_PASSWORD", "test-wrong-pass")
+NEW_PASSWORD = os.environ.get("TEST_NEW_PASSWORD", "test-new-pass")
 
 
 @pytest.fixture()
@@ -123,12 +129,12 @@ def test_wrong_password_is_rejected_without_revealing_existence(client):
     _setup(client)
     client.cookies.clear()
 
-    r = _login(client, password="wrong-password")
+    r = _login(client, password=WRONG_PASSWORD)
     assert r.status_code == 401
     # 用户不存在与密码错误返回同一句话，避免被用来枚举账号
     assert r.json()["detail"] == "用户名或密码不正确"
 
-    r = _login(client, username="nobody", password="wrong-password")
+    r = _login(client, username="nobody", password=WRONG_PASSWORD)
     assert r.status_code == 401
     assert r.json()["detail"] == "用户名或密码不正确"
 
@@ -163,7 +169,7 @@ def test_tampered_token_is_rejected(client):
 def test_change_password_requires_old_password(client):
     _setup(client)
     r = client.post("/api/auth/password",
-                    json={"old_password": "nope", "new_password": "brand-new-pass"})
+                    json={"old_password": WRONG_PASSWORD, "new_password": NEW_PASSWORD})
     assert r.status_code == 401
 
 
@@ -171,7 +177,7 @@ def test_change_password_invalidates_old_tokens(client):
     old_token = _setup(client).json()["token"]
 
     r = client.post("/api/auth/password",
-                    json={"old_password": PASSWORD, "new_password": "brand-new-pass"},
+                    json={"old_password": PASSWORD, "new_password": NEW_PASSWORD},
                     headers=_bearer(old_token))
     assert r.status_code == 200
     new_token = r.json()["token"]
@@ -182,7 +188,7 @@ def test_change_password_invalidates_old_tokens(client):
     assert client.get("/api/summary", headers=_bearer(old_token)).status_code == 401
     assert client.get("/api/summary", headers=_bearer(new_token)).status_code == 200
     # 新密码可登录、旧密码不可
-    assert _login(client, password="brand-new-pass").status_code == 200
+    assert _login(client, password=NEW_PASSWORD).status_code == 200
     assert _login(client, password=PASSWORD).status_code == 401
 
 
@@ -193,7 +199,7 @@ def test_repeated_failures_are_throttled(client):
     client.cookies.clear()
 
     for _ in range(auth.MAX_FAILURES):
-        assert _login(client, password="wrong-password").status_code == 401
+        assert _login(client, password=WRONG_PASSWORD).status_code == 401
     # 再试就被锁了，即便密码是对的
     r = _login(client)
     assert r.status_code == 429
@@ -205,10 +211,10 @@ def test_successful_login_resets_failure_counter(client):
     client.cookies.clear()
 
     for _ in range(auth.MAX_FAILURES - 1):
-        _login(client, password="wrong-password")
+        _login(client, password=WRONG_PASSWORD)
     assert _login(client).status_code == 200
     # 成功后计数清零，下一次失败只是普通的 401
-    assert _login(client, password="wrong-password").status_code == 401
+    assert _login(client, password=WRONG_PASSWORD).status_code == 401
 
 
 # ---------------------------------------------------------------- 密码哈希

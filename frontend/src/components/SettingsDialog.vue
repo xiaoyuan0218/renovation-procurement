@@ -320,7 +320,7 @@ async function submitPassword() {
               <span class="list-name">{{ row.name }}</span>
               <el-tag v-if="row.id === lists.currentId" size="small" type="primary"
                       effect="plain" class="cur-tag">当前</el-tag>
-              <!-- 编号：改名字、上传时重名加后缀都不变，靠它认出是哪一份 -->
+              <!-- 编号：改名字、重名都不变，靠它认出是哪一份 -->
               <div v-if="row.code" class="list-code">{{ row.code }}</div>
             </template>
           </el-table-column>

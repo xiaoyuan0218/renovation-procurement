@@ -1,7 +1,7 @@
-"""清单编号：改名字、重名加后缀都不影响它，两端靠它对认。
+"""清单编号：改名字、重名都不影响它，两端靠它对认。
 
 手机上传时带着自己的编号上来，服务器沿用它 —— 这样"手机上这份"和"服务器上那份"
-编号相同，用户一眼能确认是哪一份（名字会被加后缀，编号不会）。
+编号相同，用户一眼能确认是哪一份（名字会改、也允许重名，编号不会）。
 """
 
 import pytest
@@ -13,9 +13,7 @@ from app.main import app
 from app.models import (Allocation, Category, ExtraExpense, Item, ItemList,
                         PurchaseRecord, RecordRoom, Room, User)
 from app.seed import init_db
-
-USER = "admin"
-PASSWORD = "s3cret-pass"
+from tests.conftest import TEST_PASSWORD as PASSWORD, TEST_USER as USER
 
 VALID = set("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
 

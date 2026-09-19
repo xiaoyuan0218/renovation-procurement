@@ -11,6 +11,7 @@ import os
 import sqlite3
 import tempfile
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
@@ -26,19 +27,50 @@ MAX_BACKUP_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
+def _temp_path(path: str) -> Path:
+    """把路径收窄成「系统临时目录 + 文件名」，返回 Path。
+
+    本模块的临时文件都是自己用 tempfile.mkstemp 建的，本来就没有外部输入；
+    这里取 basename 重新拼一遍，路径里不可能出现 ../，也不可能指到临时目录
+    之外 —— 纵深防御，顺便让"这个路径从哪来"在代码里一眼可见。
+    """
+    return Path(tempfile.gettempdir()) / os.path.basename(path)
+
+
 def _count(conn: sqlite3.Connection, table: str) -> int:
+    """数一张表的行数。
+
+    表名不能参数化，所以这里按名字取**调用点写死的整句语句**，不做拼接。
+    调用方只会传下面这五个字面量，别的一律抛错。
+    """
+    if table == "items":
+        sql = "SELECT COUNT(*) FROM items"
+    elif table == "rooms":
+        sql = "SELECT COUNT(*) FROM rooms"
+    elif table == "categories":
+        sql = "SELECT COUNT(*) FROM categories"
+    elif table == "lists":
+        sql = "SELECT COUNT(*) FROM lists"
+    elif table == "users":
+        sql = "SELECT COUNT(*) FROM users"
+    else:
+        raise ValueError(f"不支持统计的表：{table}")
     try:
-        return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        return conn.execute(sql).fetchone()[0]
     except sqlite3.Error:
         return 0
 
 
 def _validate(path: str) -> dict:
-    """确认这确实是本工具能用的备份，顺便读出可展示的统计。"""
-    with open(path, "rb") as f:
-        if f.read(16) != SQLITE_MAGIC:
-            raise HTTPException(400, "这不是 SQLite 数据库文件，请选本工具下载的备份（.db）")
-    conn = sqlite3.connect(path)
+    """确认这确实是本工具能用的备份，顺便读出可展示的统计。
+
+    路径先过 _temp_path：本模块只会传自己用 mkstemp 建的文件，这里
+    再收窄一次，保证读的确实是临时目录里的那一个。
+    """
+    safe = _temp_path(path)
+    if safe.read_bytes()[:16] != SQLITE_MAGIC:
+        raise HTTPException(400, "这不是 SQLite 数据库文件，请选本工具下载的备份（.db）")
+    conn = sqlite3.connect(safe)
     try:
         verdict = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if verdict != "ok":
@@ -64,15 +96,15 @@ def download_backup():
     """
     fd, tmp = tempfile.mkstemp(prefix="renovation-backup-", suffix=".db")
     os.close(fd)
+    tmp = _temp_path(tmp)
     os.unlink(tmp)  # VACUUM INTO 要求目标文件不存在
     try:
         conn = sqlite3.connect(DB_PATH, timeout=30)
         try:
-            conn.execute("VACUUM INTO ?", (tmp,))
+            conn.execute("VACUUM INTO ?", (str(tmp),))
         finally:
             conn.close()
-        with open(tmp, "rb") as f:
-            data = f.read()
+        data = tmp.read_bytes()
     finally:
         if os.path.exists(tmp):
             try:
@@ -102,10 +134,10 @@ async def restore_backup(file: UploadFile = File(...)):
 
     fd, tmp = tempfile.mkstemp(prefix="renovation-restore-", suffix=".db")
     os.close(fd)
+    tmp = _temp_path(tmp)
     try:
-        with open(tmp, "wb") as f:
-            f.write(data)
-        incoming = _validate(tmp)
+        tmp.write_bytes(data)
+        incoming = _validate(str(tmp))
         previous = migrations.backup_db_file()
         # 先断开池里的空闲连接，再整个灌进去；backup API 不经过 ORM，
         # 也不触发外键检查，灌完的库由 init_db 再确认一遍结构

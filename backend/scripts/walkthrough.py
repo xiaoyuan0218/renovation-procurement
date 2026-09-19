@@ -19,7 +19,9 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
+from pathlib import Path
 
 BASE = os.environ.get("WALKTHROUGH_BASE", "http://127.0.0.1:8000")
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
@@ -28,6 +30,29 @@ os.makedirs(OUT, exist_ok=True)
 
 FAILED = []
 CONSOLE_ERRORS = []
+
+# 这个脚本是本地走查工具，只会打本机跑着的后端。目标固定成环回地址：
+# WALKTHROUGH_BASE 只用来换端口，主机名一律重写成 127.0.0.1，免得哪天
+# 环境变量指到别处、把走查的写操作发到别人机器上。
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _base_url() -> str:
+    """把 WALKTHROUGH_BASE 收窄成「http://127.0.0.1:<端口>」。"""
+    parsed = urllib.parse.urlsplit(BASE)
+    if parsed.scheme not in ("http", "https"):
+        raise SystemExit(f"WALKTHROUGH_BASE 协议不支持：{BASE}")
+    if parsed.hostname not in LOOPBACK_HOSTS:
+        raise SystemExit(f"WALKTHROUGH_BASE 必须指向本机：{BASE}")
+    port = parsed.port or 8000
+    return f"http://127.0.0.1:{port}"
+
+
+def _url(path: str) -> str:
+    """拼出本机后端的完整 URL。path 只应是脚本里写死的那些接口路径。"""
+    if not path.startswith("/"):
+        raise SystemExit(f"接口路径必须以 / 开头：{path}")
+    return _base_url() + path
 
 
 def check(name, cond, detail=""):
@@ -40,7 +65,7 @@ def check(name, cond, detail=""):
 def api(path, data=None, token=None):
     """打一次后端，返回 (状态码, 解析后的 body)。"""
     body = json.dumps(data).encode() if data is not None else None
-    req = urllib.request.Request(BASE + path, data=body)
+    req = urllib.request.Request(_url(path), data=body)
     if body:
         req.add_header("Content-Type", "application/json")
     if token:
@@ -227,7 +252,7 @@ def run():
               f"{first_item['name']} -> {fresh['name']}")
         if new_rec_id:
             req = urllib.request.Request(
-                f"{BASE}/api/records/{new_rec_id}", method="DELETE")
+                _url(f"/api/records/{new_rec_id}"), method="DELETE")
             req.add_header("Authorization", f"Bearer {token}")
             try:
                 urllib.request.urlopen(req)
@@ -288,11 +313,11 @@ def run():
                   back.strip().startswith(f"{probe['total']:g}"), back[:40])
 
         # ---------- 4. 导出 → 回灌导入（merge，验证 32 条全部匹配） ----------
-        export_path = os.path.join(OUT, "export_roundtrip.xlsx")
-        resp = ctx.request.get(f"{BASE}/api/export")
+        # 文件名写死、目录是本脚本自己算出来的截图目录（不含外部输入）
+        export_path = Path(OUT) / "export_roundtrip.xlsx"
+        resp = ctx.request.get(_url("/api/export"))
         check("导出-HTTP 200", resp.ok)
-        with open(export_path, "wb") as f:
-            f.write(resp.body())
+        export_path.write_bytes(resp.body())
 
         page.click('button:has-text("设置 / 数据")')
         page.wait_for_timeout(500)

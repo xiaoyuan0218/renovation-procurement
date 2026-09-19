@@ -7,7 +7,7 @@ from sqlalchemy import text
 from . import migrations
 from .services import codes
 from .db import Base, SessionLocal, engine
-from .models import Category, Item, ItemList, PurchaseRecord, Room
+from .models import Category, Item, ItemList, PurchaseRecord, Room, utcnow
 from .services.compute import item_status
 
 DEFAULT_LIST_NAME = migrations.DEFAULT_LIST_NAME
@@ -25,11 +25,27 @@ def init_db():
     _add_missing_columns()
     # 老库升级成多清单：单事务、做完自检（详见 migrations 模块）
     migrations.migrate_to_multi_list(backup_path=backup)
+    _ensure_code_unique_index_safe()
     db = SessionLocal()
     try:
         _seed_defaults(db)
     finally:
         db.close()
+
+
+def _ensure_code_unique_index_safe() -> None:
+    """补建编号唯一索引（幂等）。
+
+    放在迁移**之后**：老库里可能本来就存着重复编号，迁移的 `_dedupe_list_codes`
+    会先扫掉它们，这里再建才不会失败。全新库没有迁移过程，就靠这一步补上 ——
+    从前这个索引只在迁移里建，新装的实例反而没有，"编号是清单身份"就只剩
+    应用层查重，并发下能插进两个同号清单。
+    """
+    try:
+        with engine.begin() as conn:
+            _ensure_code_unique_index(conn)
+    except Exception as exc:  # 重复编号等历史脏数据：不拦住启动，但要留下痕迹
+        print(f"[警告] 编号唯一索引未能建立（编号重复？）：{exc}")
 
 
 def _add_missing_columns():
@@ -95,7 +111,7 @@ def _add_missing_columns():
             conn.execute(
                 text(f"UPDATE {table} SET created_at = COALESCE(created_at, :now), "
                      f"updated_at = COALESCE(updated_at, :now)"),
-                {"now": datetime.now()},
+                {"now": utcnow()},
             )
 
 
@@ -111,6 +127,21 @@ def _backfill_list_codes(conn) -> None:
         taken.add(code)
         conn.execute(text("UPDATE lists SET code = :code WHERE id = :id"),
                      {"code": code, "id": list_id})
+
+
+def _ensure_code_unique_index(conn) -> None:
+    """保证 `uq_lists_code` 存在（编号是清单身份，唯一性得由库兜住）。
+
+    从前这个索引只在"老库迁移"那条路上建，**全新安装的实例反而没有** ——
+    编号唯一就只剩应用层"查一次再插入"，并发下能插进两个同号清单，
+    手机端就会认错清单。这里在每次启动时无条件补一次（幂等）。
+
+    必须在 `_backfill_list_codes` 之后调用：先让空编号各归其位，
+    否则多个空值会一起撞上"空值不参与"之外的部分唯一索引。
+    """
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_lists_code "
+        "ON lists (code) WHERE code IS NOT NULL AND code != ''"))
 
 
 def _seed_defaults(db):

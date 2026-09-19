@@ -1,10 +1,21 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
                         String, UniqueConstraint)
 from sqlalchemy.orm import relationship
 
 from .db import Base
+
+
+def utcnow():
+    """当前 UTC 时间（不带时区的 naive datetime，全端统一的时间尺子）。
+
+    时间戳是同步判"谁改得更近"的依据，必须同一把尺：手机存 UTC、服务器存
+    UTC。从前各自用设备/宿主的本地时区，两端时区设置不同时（真实部署里
+    NAS 容器常是 UTC、手机是本地时区），同一时刻写出的时间戳能差出好几个
+    小时，较新的改动反而会被当成旧的覆盖掉。显示时由界面各自转本地时区。
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _first_list_id(context):
@@ -27,8 +38,8 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String(50), unique=True, nullable=False)
     password_hash = Column(String(200), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class ItemList(Base):
@@ -37,20 +48,25 @@ class ItemList(Base):
 
     表名 lists、字段名 list_id 都是外部契约的一部分（老版安卓客户端、导入
     导出的文件格式都按这套叫法），改名词要连着客户端一起改，不要动。
+
+    **清单名允许重复，编号（code）才是身份**：名字是给人看的、随时会改，
+    手机与服务器之间"是不是同一份"一律按编号认（见 services/codes.py）。
+    同名两份清单可以共存，各自独立。旧库的 name 唯一约束由 migrations 重建表去掉。
     """
 
     __tablename__ = "lists"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(50), unique=True, nullable=False)
+    name = Column(String(50), nullable=False)
     note = Column(String(200), default="")
     sort = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
-    # 清单的唯一编号（见 services/codes.py）：改名字、重名加后缀都不影响它。
+    created_at = Column(DateTime, default=utcnow)
+    # 清单的唯一编号（见 services/codes.py）：改名、同名都不影响它，两端靠它对认。
     # 可空是为升级路径服务（SQLite 加列不能 NOT NULL 且无默认值），老库由 seed
-    # 的轻量迁移回填，应用层建清单时必定赋值。
+    # 的轻量迁移回填，应用层建清单时必定赋值。唯一性由迁移里的部分唯一索引
+    # uq_lists_code 保证（空值不参与，老库回填前的空值可以共存）。
     code = Column(String(12), index=True, nullable=True)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     # 删清单就把它名下的东西一起带走；ORM 级联不依赖数据库的外键开关
     items = relationship("Item", back_populates="item_list",
@@ -85,8 +101,8 @@ class ExtraExpense(Base):
     # 这笔费用是为哪条物料的货付的（选填，用来对账）。删物料时置空而不是级联删 ——
     # 钱记录不能因为整理物料就消失。
     item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     item_list = relationship("ItemList", back_populates="expenses")
     item = relationship("Item")
@@ -104,8 +120,8 @@ class Category(Base):
                      nullable=True, index=True, default=_first_list_id)
     name = Column(String(50), nullable=False)
     sort = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     item_list = relationship("ItemList", back_populates="categories")
     items = relationship("Item", back_populates="category")
@@ -119,8 +135,8 @@ class Room(Base):
                      nullable=True, index=True, default=_first_list_id)
     name = Column(String(50), nullable=False)
     sort = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     item_list = relationship("ItemList", back_populates="rooms")
     allocations = relationship("Allocation", back_populates="room",
@@ -154,8 +170,8 @@ class Item(Base):
     # 移进回收站的时间；空 = 正常。删除改成软删是为了"删错了还能捞回来"——
     # 连带清掉的采购记录是历史，删一条物料就永久丢掉那些记录太狠了。
     deleted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     @classmethod
     def alive(cls):
@@ -190,8 +206,8 @@ class PurchaseRecord(Base):
     # 这笔钱是给哪个分组花的（选填）。填了它，"这间买齐了没"就是算出来的而不是猜的；
     # 删分组时置空而不是级联删 —— 付款记录是钱，不能因为整理分组就消失。
     room_id = Column(Integer, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     item = relationship("Item", back_populates="records")
     # 这笔钱涉及的分组（可多选）。一次采购常常同时买几间的东西，

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import category_in_list, current_list, item_in_list
-from ..models import (Allocation, Category, Item, ItemList, PurchaseRecord,
+from ..models import (Allocation, Category, Item, ItemList, PurchaseRecord, utcnow,
                       RecordRoom, Room)
 from ..schemas import ItemIn, ItemOut, ItemPatchIn, RecordIn, RecordPatchIn, BatchDeleteIn
 from ..services import compute
@@ -145,7 +145,7 @@ def delete_item(item_id: int, lst: ItemList = Depends(current_list),
     """软删：移进回收站。它的分配与采购记录都留着 —— 一条物料的付款历史
     常常是几笔真实转账，删错了一次性清光代价太大（要彻底删去回收站里清）。"""
     item = item_in_list(db, item_id, lst)
-    item.deleted_at = datetime.datetime.now()
+    item.deleted_at = utcnow()
     item.touch()
     db.commit()
     return {"ok": True, "trashed": True}
@@ -237,7 +237,7 @@ def batch_delete(data: BatchDeleteIn, lst: ItemList = Depends(current_list),
         # 批量软删：一次 UPDATE 搞定，rev 一起顶上去，让正在编辑这台设备的
         # 其它客户端保存时拿到 409 而不是把删掉的条目又写回来
         db.query(Item).filter(Item.id.in_(ids)).update(
-            {"deleted_at": datetime.datetime.now(), "rev": Item.rev + 1},
+            {"deleted_at": utcnow(), "rev": Item.rev + 1},
             synchronize_session=False)
         db.commit()
     return {"deleted": len(ids), "trashed": True}

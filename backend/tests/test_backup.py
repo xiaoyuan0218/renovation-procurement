@@ -9,6 +9,7 @@ import io
 import os
 import sqlite3
 import tempfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,9 +21,7 @@ from app.main import app
 from app.models import (Allocation, Category, Item, ItemList, PurchaseRecord,
                         Room, User)
 from app.seed import init_db
-
-USER = "admin"
-PASSWORD = "s3cret-pass"
+from tests.conftest import TEST_PASSWORD as PASSWORD, TEST_USER as USER
 
 LEGACY_SCHEMA = """
 CREATE TABLE users (
@@ -114,8 +113,7 @@ def _dump_to_bytes(sql: str, rows=()) -> bytes:
             conn.commit()
         finally:
             conn.close()
-        with open(path, "rb") as f:
-            return f.read()
+        return Path(path).read_bytes()
     finally:
         os.remove(path)
 
@@ -133,8 +131,7 @@ def test_download_is_a_complete_sqlite_db(client):
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     try:
-        with open(path, "wb") as f:
-            f.write(r.content)
+        Path(path).write_bytes(r.content)
         conn = sqlite3.connect(path)
         try:
             assert conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 1

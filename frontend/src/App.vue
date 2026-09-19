@@ -105,7 +105,7 @@ async function onLogout() {
             <el-option v-for="l in lists.all" :key="l.id" :label="l.name" :value="l.id">
               <span class="opt-name">
                 {{ l.name }}
-                <!-- 清单编号：改名字、重名加后缀都不变，手机上传上来的那份靠它对认 -->
+                <!-- 清单编号：改名字、重名都不变，手机上传上来的那份靠它对认 -->
                 <em v-if="l.code" class="opt-code">{{ l.code }}</em>
               </span>
               <span class="opt-count">{{ l.item_count }} 项</span>

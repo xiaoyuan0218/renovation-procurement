@@ -13,9 +13,7 @@ from app.db import SessionLocal, engine
 from app.main import app
 from app.models import Allocation, Category, Item, PurchaseRecord, Room, User
 from app.seed import init_db
-
-USER = "admin"
-PASSWORD = "s3cret-pass"
+from tests.conftest import TEST_PASSWORD as PASSWORD, TEST_USER as USER
 
 
 @pytest.fixture()

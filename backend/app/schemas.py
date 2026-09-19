@@ -328,13 +328,30 @@ class OkOut(BaseModel):
 # ---------------------------------------------------------------- 清单级同步
 # 手机单机版把整份清单搬来搬去时用的请求体，格式与 services/list_transfer.py 一致。
 
-class SyncRoomIn(BaseModel):
+class SyncRowTimestamps(BaseModel):
+    """同步入参里各行的创建/修改时间。
+
+    **必须显式声明**：Pydantic 默认忽略未声明的字段。从前这几个同步模型里
+    没有这两个字段，手机传来的时间戳在进 import_list 之前就被悄悄丢掉了，
+    于是服务器上每一行的 updated_at 都变成"导入时刻"。后果是两端判"谁改得
+    更近"时服务器永远显得更新 —— 手机上较新的改动会被静默覆盖，用户还看到
+    "已同步"。声明它们只是把数据收下来，具体怎么解析见 list_transfer._parse_ts。
+
+    格式以手机 `nowStamp()` 为准（`yyyy-MM-dd HH:mm:ss.SSSSSS`，带微秒）；
+    存进库时统一截断到秒，导出与存储精度一致，来回搬不会累积偏差。
+    """
+
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class SyncRoomIn(SyncRowTimestamps):
     id: Optional[int] = None
     name: str = Field(min_length=1, max_length=50)
     sort: int = 0
 
 
-class SyncCategoryIn(BaseModel):
+class SyncCategoryIn(SyncRowTimestamps):
     id: Optional[int] = None
     name: str = Field(min_length=1, max_length=50)
     sort: int = 0
@@ -348,7 +365,7 @@ class SyncAllocIn(BaseModel):
     note: str = Field(default="", max_length=200)
 
 
-class SyncRecordIn(BaseModel):
+class SyncRecordIn(SyncRowTimestamps):
     id: Optional[int] = None
     qty: float = 0
     amount: float = 0
@@ -366,7 +383,7 @@ class SyncRecordIn(BaseModel):
         return date_utils.for_read(value)
 
 
-class SyncItemIn(BaseModel):
+class SyncItemIn(SyncRowTimestamps):
     id: Optional[int] = None
     name: str = Field(min_length=1, max_length=100)
     category_id: Optional[int] = None
@@ -383,7 +400,7 @@ class SyncItemIn(BaseModel):
     records: list[SyncRecordIn] = []
 
 
-class SyncExpenseIn(BaseModel):
+class SyncExpenseIn(SyncRowTimestamps):
     id: Optional[int] = None
     kind: str = Field(default="运费", max_length=20)
     amount: float = 0
@@ -399,7 +416,7 @@ class SyncExpenseIn(BaseModel):
         return date_utils.for_read(value)
 
 
-class SyncListMeta(BaseModel):
+class SyncListMeta(SyncRowTimestamps):
     name: str = Field(default="未命名清单", max_length=50)
     note: str = Field(default="", max_length=200)
     sort: int = 0

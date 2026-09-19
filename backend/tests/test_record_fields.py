@@ -17,9 +17,7 @@ from app.models import (Allocation, Category, Item, ItemList, PurchaseRecord,
                         Room, User)
 from app.seed import init_db
 from app.services import compute, excel_io
-
-USER = "admin"
-PASSWORD = "s3cret-pass"
+from tests.conftest import TEST_PASSWORD as PASSWORD, TEST_USER as USER
 
 
 @pytest.fixture()

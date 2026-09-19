@@ -142,9 +142,11 @@ def _unique_cols(table):
     conn = sqlite3.connect(DB_PATH)
     try:
         out = []
-        for row in conn.execute(f"PRAGMA index_list({table})"):
+        # 表值函数写法：表名/索引名能当参数绑定，不进 SQL 文本
+        for row in conn.execute("SELECT * FROM pragma_index_list(?)", (table,)):
             if row[2]:
-                out.append([r[2] for r in conn.execute(f"PRAGMA index_info({row[1]})")])
+                out.append([r[2] for r in conn.execute(
+                    "SELECT * FROM pragma_index_info(?)", (row[1],))])
         return out
     finally:
         conn.close()
@@ -153,7 +155,8 @@ def _unique_cols(table):
 def _columns(table):
     conn = sqlite3.connect(DB_PATH)
     try:
-        return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        return {r[1] for r in conn.execute(
+            "SELECT * FROM pragma_table_info(?)", (table,))}
     finally:
         conn.close()
 
@@ -261,3 +264,196 @@ def test_categories_unique_within_list_only(legacy_db):
                                          Category.name == "照明").count() == 1
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------- 清单名放开唯一
+
+MULTI_LIST_SCHEMA = """
+CREATE TABLE lists (
+    id INTEGER NOT NULL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    note VARCHAR(200), sort INTEGER,
+    created_at DATETIME, updated_at DATETIME,
+    code VARCHAR(12)
+);
+CREATE TABLE items (
+    id INTEGER NOT NULL PRIMARY KEY,
+    list_id INTEGER REFERENCES lists (id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    category_id INTEGER,
+    unit VARCHAR(20), qty_total FLOAT, price FLOAT, discount_price FLOAT,
+    paid_amount FLOAT, paid_qty FLOAT, bought_qty FLOAT, bought BOOLEAN,
+    note VARCHAR(500), sort INTEGER, rev INTEGER,
+    brand VARCHAR(50), model VARCHAR(100), deleted_at DATETIME,
+    created_at DATETIME, updated_at DATETIME
+);
+CREATE TABLE rooms (
+    id INTEGER NOT NULL PRIMARY KEY,
+    list_id INTEGER REFERENCES lists (id) ON DELETE CASCADE,
+    name VARCHAR(50) NOT NULL, sort INTEGER,
+    created_at DATETIME, updated_at DATETIME
+);
+CREATE TABLE categories (
+    id INTEGER NOT NULL PRIMARY KEY,
+    list_id INTEGER REFERENCES lists (id) ON DELETE CASCADE,
+    name VARCHAR(50) NOT NULL, sort INTEGER,
+    created_at DATETIME, updated_at DATETIME,
+    CONSTRAINT uq_category_list_name UNIQUE (list_id, name)
+);
+CREATE TABLE allocations (
+    id INTEGER NOT NULL PRIMARY KEY,
+    item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+    room_id INTEGER NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+    qty FLOAT, price_override FLOAT, paid_qty FLOAT, note VARCHAR(200)
+);
+CREATE TABLE purchase_records (
+    id INTEGER NOT NULL PRIMARY KEY,
+    item_id INTEGER NOT NULL REFERENCES items (id) ON DELETE CASCADE,
+    qty FLOAT, amount FLOAT, date VARCHAR(20), note VARCHAR(200),
+    vendor VARCHAR(50), order_no VARCHAR(50),
+    room_id INTEGER REFERENCES rooms (id) ON DELETE SET NULL,
+    created_at DATETIME, updated_at DATETIME
+);
+CREATE TABLE extra_expenses (
+    id INTEGER NOT NULL PRIMARY KEY,
+    list_id INTEGER REFERENCES lists (id) ON DELETE CASCADE,
+    kind VARCHAR(20), amount FLOAT, date VARCHAR(20), vendor VARCHAR(50),
+    order_no VARCHAR(50), note VARCHAR(200),
+    item_id INTEGER REFERENCES items (id) ON DELETE SET NULL,
+    created_at DATETIME, updated_at DATETIME
+);
+CREATE TABLE users (
+    id INTEGER NOT NULL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    password_hash VARCHAR(200) NOT NULL,
+    created_at DATETIME, updated_at DATETIME
+);
+"""
+
+
+@pytest.fixture()
+def multi_list_db():
+    """多清单、但清单名还是全局唯一的库 —— 升级前就是这个样子。"""
+    engine.dispose()
+    _remove_db_files()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.executescript(MULTI_LIST_SCHEMA)
+        conn.executemany(
+            "INSERT INTO lists (id, name, note, sort, code) VALUES (?,?,?,?,?)",
+            [(1, "采购清单", "老备注", 0, "AAAA1111"),
+             (2, "年货清单", "", 1, "BBBB2222")])
+        conn.execute(
+            "INSERT INTO items (id, list_id, name, unit, qty_total, price, sort) "
+            "VALUES (1, 1, '筒灯', '个', 6, 99, 0)")
+        conn.execute(
+            "INSERT INTO rooms (id, list_id, name, sort) VALUES (1, 1, '客厅', 0)")
+        conn.execute(
+            "INSERT INTO categories (id, list_id, name, sort) VALUES (1, 1, '照明', 0)")
+        conn.commit()
+    finally:
+        conn.close()
+    yield
+    engine.dispose()
+    _remove_db_files()
+
+
+def test_migration_drops_name_unique_but_keeps_data(multi_list_db):
+    """重建 lists 去掉 name 唯一：每一份清单（id/名字/备注/编号）原样还在。"""
+    init_db()
+    assert ["name"] not in _unique_cols("lists")
+
+    db = SessionLocal()
+    try:
+        rows = {lst.id: lst for lst in db.query(ItemList).all()}
+        assert set(rows) == {1, 2}
+        assert rows[1].name == "采购清单" and rows[1].note == "老备注"
+        assert rows[1].code == "AAAA1111"
+        assert rows[2].name == "年货清单" and rows[2].code == "BBBB2222"
+        # 挂在清单下的数据也没丢
+        assert db.query(Item).filter(Item.list_id == 1).count() == 1
+        assert db.query(Room).filter(Room.list_id == 1).count() == 1
+        assert db.query(Category).filter(Category.list_id == 1).count() == 1
+    finally:
+        db.close()
+
+
+def test_same_name_lists_can_coexist_after_migration(multi_list_db):
+    """放开唯一之后，同名清单能并存，靠编号区分。"""
+    init_db()
+    db = SessionLocal()
+    try:
+        db.add(ItemList(name="采购清单", sort=2, code="CCCC3333"))
+        db.commit()
+        same = db.query(ItemList).filter(ItemList.name == "采购清单").all()
+        assert len(same) == 2
+        assert len({lst.code for lst in same}) == 2
+    finally:
+        db.close()
+
+
+def test_code_has_unique_index(multi_list_db):
+    """编号唯一索引建起来了（空值不参与，老库回填前可以有多个空）。"""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        names = {row[1] for row in conn.execute("PRAGMA index_list(lists)")}
+        assert "uq_lists_code" in names
+    finally:
+        conn.close()
+
+
+def test_fresh_db_also_has_code_unique_index():
+    """**全新安装**的库也要有编号唯一索引。
+
+    从前这个索引只在"老库迁移"那条路上建，新装的实例反而没有 —— 编号唯一
+    就只剩应用层"查一次再插入"，并发下能插进两个同号清单，手机端会认错清单。
+    """
+    _remove_db_files()
+    init_db()          # 全新库：没有老数据要迁，needs_migration 返回 False
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        names = {row[1] for row in conn.execute("PRAGMA index_list(lists)")}
+        assert "uq_lists_code" in names, f"新库缺少唯一索引：{names}"
+
+        # 真的挡得住重复编号才算数
+        conn.execute("UPDATE lists SET code = 'DUPCODE1' WHERE id = 1")
+        conn.commit()
+        try:
+            conn.execute("INSERT INTO lists (name, note, sort, code) "
+                         "VALUES ('撞号的', '', 9, 'DUPCODE1')")
+            conn.commit()
+            raise AssertionError("重复编号居然插进去了：唯一索引没生效")
+        except sqlite3.IntegrityError:
+            pass
+    finally:
+        conn.close()
+
+
+def test_duplicate_codes_are_reissued(multi_list_db):
+    """老库里万一有两份撞号，迁移时给后来那份重新发码，不会建索引失败。"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("UPDATE lists SET code = 'SAME0001' WHERE id = 2")
+        conn.commit()
+    finally:
+        conn.close()
+
+    init_db()
+    db = SessionLocal()
+    try:
+        codes = [lst.code for lst in db.query(ItemList).order_by(ItemList.id).all()]
+        assert len(codes) == len(set(codes)), f"编号仍重复：{codes}"
+        assert all(c for c in codes), f"有清单没编号：{codes}"
+    finally:
+        db.close()
+
+
+def test_lists_migration_is_idempotent(multi_list_db):
+    """重复启动不会重复重建（第二次没有 name 唯一约束就不再动它）。"""
+    init_db()
+    first = _unique_cols("lists")
+    init_db()
+    assert _unique_cols("lists") == first
+    assert ["name"] not in first

@@ -45,15 +45,26 @@ def replace_one(list_id: int, body: SyncPushIn, db: Session = Depends(get_db)):
     带 `base_fingerprint`：与服务器当前指纹对不上就返回 409，说明两边都改过，
     该由用户决定谁说了算（正常合并由客户端先做完，走这里的是"以我为准"这条路径）。
     带 `force=true` 则跳过检查，并在覆盖前把整库留一份备份。
+
+    **没带 `base_fingerprint` 又没带 `force` 的一律拒掉**：那种请求的意思是
+    "我不知道服务器现在什么样，但我要覆盖它"。从前会静默放行（连备份都不留），
+    服务器上别人刚做的改动就这么没了。想覆盖就明确带 force —— 那样至少还有备份。
     """
     lst = _list_or_404(db, list_id)
     current = list_transfer.fingerprint(list_transfer.export_list(db, lst))
-    if not body.force and body.base_fingerprint and body.base_fingerprint != current:
-        raise HTTPException(409, detail={
-            "message": "服务器上这份清单在你上次同步之后也改过",
-            "current_fingerprint": current,
-        })
-    if body.force:
+    if not body.force:
+        if not body.base_fingerprint:
+            raise HTTPException(409, detail={
+                "message": "这次推送没带上次同步的指纹，无法确认服务器有没有改过；"
+                           "请重新同步一次再试",
+                "current_fingerprint": current,
+            })
+        if body.base_fingerprint != current:
+            raise HTTPException(409, detail={
+                "message": "服务器上这份清单在你上次同步之后也改过",
+                "current_fingerprint": current,
+            })
+    else:
         # 用户明确选了"以我为准"：覆盖前留一份，选错了能救回来
         migrations.backup_db_file()
     list_transfer.import_list(db, body.model_dump(), target=lst)

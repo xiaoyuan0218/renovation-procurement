@@ -30,18 +30,27 @@ LOCAL_ONLY_OK = {"room_master_table", "android_metadata", "sqlite_sequence"}
 SERVER_ONLY_OK = {"users"}
 
 
-def read_local(path):
-    conn = sqlite3.connect(path)
-    try:
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")]
-        out = {}
-        for t in tables:
-            out[t] = {r[1]: (r[2] or "").upper() for r in
-                      conn.execute(f'PRAGMA table_info("{t}")')}
-        return out
-    finally:
-        conn.close()
+def open_local_db(path):
+    """打开用户从命令行给的手机库文件（只读）。
+
+    路径由使用者自己指定，这里只做基本校验：必须是一个已存在的普通文件。
+    """
+    target = Path(path).resolve()
+    if not target.is_file():
+        raise SystemExit(f"不是一个文件：{path}")
+    return sqlite3.connect(str(target))
+
+
+def read_local(conn):
+    """读一张已打开的库里的表结构（表名、列名、列类型）。"""
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")]
+    out = {}
+    for t in tables:
+        # pragma_table_info 是表值函数，表名能当参数绑定（表名不进 SQL 文本）
+        out[t] = {r[1]: (r[2] or "").upper() for r in
+                  conn.execute("SELECT * FROM pragma_table_info(?)", (t,))}
+    return out
 
 
 def read_server():
@@ -60,7 +69,11 @@ def main():
         print(f"找不到文件：{path}")
         return 2
 
-    local = read_local(path)
+    conn = open_local_db(path)
+    try:
+        local = read_local(conn)
+    finally:
+        conn.close()
     server = read_server()
     problems = []
 

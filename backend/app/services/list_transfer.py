@@ -19,7 +19,7 @@ import json
 from sqlalchemy.orm import Session
 
 from ..models import (Allocation, Category, ExtraExpense, Item, ItemList,
-                      PurchaseRecord, RecordRoom, Room)
+                      PurchaseRecord, RecordRoom, Room, utcnow)
 from . import codes
 
 FORMAT_VERSION = 1
@@ -33,20 +33,35 @@ def _ts(value) -> str:
 
 
 def _parse_ts(text) -> datetime.datetime | None:
-    """把 payload 里的时间戳解析回来；看不懂（老客户端没带）就返回 None。"""
+    """把 payload 里的时间戳解析回来；看不懂（老客户端没带）就返回 None。
+
+    手机 `nowStamp()` 写的是带微秒的 `yyyy-MM-dd HH:mm:ss.SSSSSS`，服务器存的是
+    不带微秒的 `%Y-%m-%d %H:%M:%S`。两种都得认 —— 只认后者的话，手机传来的
+    时间戳会被当成"没带"，回退成导入时刻，两端判"谁改得更近"就会永远偏向
+    服务器（手机上较新的改动会被静默覆盖）。解析结果一律截到秒，与库里的
+    精度一致，来回搬不累积偏差。
+    """
     if not text:
         return None
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+    text = str(text).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
-            return datetime.datetime.strptime(str(text), fmt)
+            return datetime.datetime.strptime(text, fmt).replace(microsecond=0)
         except ValueError:
             continue
-    return None
+    # ISO 风格（带 T、可能带时区）也认一下：别家客户端或脚本可能这么发
+    try:
+        return datetime.datetime.fromisoformat(text).replace(microsecond=0)
+    except ValueError:
+        return None
 
 
 def _ts_or_now(text) -> datetime.datetime:
-    """payload 没带时间戳（老客户端）就用当下 —— 总比留空强，后面对得上。"""
-    return _parse_ts(text) or datetime.datetime.now()
+    """payload 没带时间戳（老客户端）就用当下 —— 总比留空强，后面对得上。
+
+    截到秒：库里存的精度与 `_ts()` 导出的格式一致，来回搬不会累积偏差。
+    """
+    return _parse_ts(text) or utcnow()
 
 
 def export_list(db: Session, lst: ItemList) -> dict:
@@ -168,32 +183,69 @@ def _strip_ts(row: dict) -> dict:
 
 
 def _canonical(payload: dict) -> str:
+    """语义内容指纹。
+
+    **剔除 id 与全部引用 id**（`id`、`category_id`、`room_id`、`item_id`，
+    引用改用**被指方的名字**参与指纹）：覆盖时 `_clear` 加重插会让数据库
+    重新分配这些 id —— 从前行 id 有空洞（删过东西）的内容，覆盖一次 id 就
+    重排一次，指纹跟着漂，另一端会误判"服务器又变过了"、其 id 映射也随之
+    失配。名字才是这种清单里的天然身份：分组/分类在本清单内本来按名字唯一，
+    物料重名时两行的分配/记录等其余字段仍参与区分。
+    """
     def key(row) -> str:
         return json.dumps(row, ensure_ascii=False, sort_keys=True,
                           separators=(",", ":"))
 
-    items = []
-    for item in payload.get("items", []):
+    def _name_of(table: str, rows: list) -> dict:
+        return {row.get("id"): row.get("name", "") for row in rows
+                if row.get("id") is not None}
+
+    rooms = payload.get("rooms", [])
+    categories = payload.get("categories", [])
+    items = payload.get("items", [])
+    room_name = _name_of("rooms", rooms)
+    category_name = _name_of("categories", categories)
+    item_name = _name_of("items", items)
+
+    def _ref(table: str, mapping: dict, ref_id):
+        """引用翻译成名字；找不到（悬空引用）用原值占位，别把不同引用混同。"""
+        if ref_id is None:
+            return None
+        return mapping.get(ref_id, f"#unresolved-{table}-{ref_id}")
+
+    canonical_items = []
+    for item in items:
         records = [
-            {**_strip_ts(r), "room_ids": sorted(r.get("room_ids") or [])}
+            {**_strip_ts(r),
+             "room_ids": sorted(_ref("rooms", room_name, rid)
+                                for rid in (r.get("room_ids") or []))}
             for r in item.get("records", [])
         ]
-        items.append({
-            **_strip_ts(item),
+        canonical_items.append({
+            **{k: v for k, v in _strip_ts(item).items()
+               if k not in ("id", "category_id")},
+            "category": _ref("categories", category_name,
+                             item.get("category_id")),
             "allocations": sorted(
-                (_strip_ts(a) for a in item.get("allocations", [])), key=key),
+                ({**_strip_ts(a), "room": _ref("rooms", room_name,
+                                               a.get("room_id"))}
+                 for a in item.get("allocations", [])), key=key),
             "records": sorted(records, key=key),
         })
+
+    canonical_expenses = sorted(
+        ({**_strip_ts(e), "item": _ref("items", item_name, e.get("item_id"))}
+         for e in payload.get("expenses", [])), key=key)
 
     normalized = {
         "version": payload.get("version", FORMAT_VERSION),
         "list": _strip_ts(payload.get("list", {})),
-        "rooms": sorted((_strip_ts(r) for r in payload.get("rooms", [])), key=key),
-        "categories": sorted(
-            (_strip_ts(c) for c in payload.get("categories", [])), key=key),
-        "items": sorted(items, key=key),
-        "expenses": sorted(
-            (_strip_ts(e) for e in payload.get("expenses", [])), key=key),
+        "rooms": sorted(({k: v for k, v in _strip_ts(r).items() if k != "id"}
+                         for r in rooms), key=key),
+        "categories": sorted(({k: v for k, v in _strip_ts(c).items() if k != "id"}
+                              for c in categories), key=key),
+        "items": sorted(canonical_items, key=key),
+        "expenses": canonical_expenses,
     }
     return json.dumps(normalized, ensure_ascii=False, sort_keys=True,
                       separators=(",", ":"))
@@ -205,7 +257,7 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
                 name: str | None = None) -> ItemList:
     """把一份 payload 灌进数据库，返回目标清单。
 
-    - `target=None`：新建一份清单（名字取 payload 里的，重名自动加后缀）
+    - `target=None`：新建一份清单（名字取 payload 里的，重名也照样并存）
     - 给了 `target`：**整份替换**它的内容 —— 手机上没有的东西，服务器上也会
       消失。这正是"以我为准"该有的样子。
 
@@ -214,7 +266,7 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
     incoming_code = payload["list"].get("code")
     if target is None:
         target = ItemList(
-            name=_free_name(db, name or payload["list"].get("name")),
+            name=_clean_name(name or payload["list"].get("name")),
             note=payload["list"].get("note", ""),
             sort=payload["list"].get("sort", 0),
             code=_free_code(db, incoming_code),
@@ -227,8 +279,10 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
         _clear(db, target)
         target.note = payload["list"].get("note", "")
         target.sort = payload["list"].get("sort", 0)
-        # 覆盖的是内容：清单的"创建时间"还是原来那个，修改时间刷新
-        target.updated_at = datetime.datetime.now()
+        # 覆盖的是内容：清单的"创建时间"还是原来那个，修改时间**跟推送方走**。
+        # 从前无条件刷成 now()，等于说"服务器这份永远比手机新" —— 两端判
+        # "谁改得更近"时手机上较新的改动反而会被静默覆盖掉。
+        target.updated_at = _ts_or_now(payload["list"].get("updated_at"))
         # 名字不动：覆盖的是内容，清单还是原来那一份。
         # 编号跟推送方走 —— 手机覆盖之后两边编号要一致，对不上就看不出是同一份了；
         # 该编号已被别的清单占用时保持原样，免得撞号。
@@ -241,22 +295,37 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
             target.code = _free_code(db, None)
 
     room_map: dict = {}
+    room_id_by_name: dict = {}
     for row in payload.get("rooms", []):
-        room = Room(list_id=target.id, name=row["name"], sort=row.get("sort", 0),
+        name = row["name"]
+        # 同名分组/分类在清单内只允许一份（表上有唯一约束）。正常客户端不会
+        # 发来重复的，但一旦发来，整份同步会以 IntegrityError 失败 —— 那等于
+        # 用户的数据完全传不上来。重复的并到先出现的那份上，让数据能传上去。
+        if name in room_id_by_name:
+            room_map[row.get("id")] = room_id_by_name[name]
+            continue
+        room = Room(list_id=target.id, name=name, sort=row.get("sort", 0),
                     created_at=_ts_or_now(row.get("created_at")),
                     updated_at=_ts_or_now(row.get("updated_at")))
         db.add(room)
         db.flush()
+        room_id_by_name[name] = room.id
         room_map[row.get("id")] = room.id
 
     category_map: dict = {}
+    category_id_by_name: dict = {}
     for row in payload.get("categories", []):
-        category = Category(list_id=target.id, name=row["name"],
+        name = row["name"]
+        if name in category_id_by_name:
+            category_map[row.get("id")] = category_id_by_name[name]
+            continue
+        category = Category(list_id=target.id, name=name,
                             sort=row.get("sort", 0),
                             created_at=_ts_or_now(row.get("created_at")),
                             updated_at=_ts_or_now(row.get("updated_at")))
         db.add(category)
         db.flush()
+        category_id_by_name[name] = category.id
         category_map[row.get("id")] = category.id
 
     item_map: dict = {}
@@ -350,17 +419,14 @@ def _clear(db: Session, lst: ItemList) -> None:
     db.flush()
 
 
-def _free_name(db: Session, base: str) -> str:
-    """清单名唯一。重名时加「 2」「 3」—— 这是从手机上搬过来的，
-    不该因为重名就失败（手工新建时才该提示用户换个名字）。"""
-    name = (base or "").strip()[:50] or "未命名清单"
-    if not db.query(ItemList).filter(ItemList.name == name).first():
-        return name
-    for n in range(2, 100):
-        candidate = f"{name[:46]} {n}"
-        if not db.query(ItemList).filter(ItemList.name == candidate).first():
-            return candidate
-    raise ValueError("同名清单太多，请先在服务器上整理一下清单名")
+def _clean_name(base: str) -> str:
+    """清单名只做清理，**不查重、不加后缀**。
+
+    名字允许重复，编号才是身份：从手机搬一份叫「采购清单」的上来的，服务器上
+    本来就有一份同名的，那就并存两份、各自独立 —— 从前会给新的加「 2」后缀，
+    那是把名字当身份用的后遗症，客户端反而认不出哪份是哪份了。
+    """
+    return (base or "").strip()[:50] or "未命名清单"
 
 
 def _free_code(db: Session, raw) -> str:

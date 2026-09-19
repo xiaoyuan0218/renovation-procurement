@@ -61,13 +61,22 @@ const allocationsLocked = computed(() => form.value.allocations.length > 0)
 const maxBoughtQty = computed(() =>
   form.value.allocations.length ? allocQtyTotal.value : Number(form.value.qty_total || 0))
 
-// 服务端盖的时间戳形如 'YYYY-MM-DD HH:MM:SS'；表格里空间紧，掐掉年份
-const shortStamp = (s) => (s && s.length >= 16 ? s.slice(5, 16) : '')
+// 服务端盖的时间戳是 UTC（'YYYY-MM-DD HH:MM:SS'）；转成本地时区再看，
+// 否则时间与用户的钟对不上（服务器容器常是 UTC，浏览器是本地时区）
+const toLocalStamp = (s) => {
+  if (!s) return ''
+  const d = new Date(s.replace(' ', 'T') + 'Z')
+  if (Number.isNaN(d.getTime())) return s
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+// 表格里空间紧，掐掉年份
+const shortStamp = (s) => (s && s.length >= 16 ? toLocalStamp(s).slice(5, 16) : '')
 const stampTitle = (row) => {
   if (!row.created_at) return '升级前的老数据，没有时间戳'
   const updated = row.updated_at && row.updated_at !== row.created_at
-    ? `\n最后修改 ${row.updated_at}` : ''
-  return `记录于 ${row.created_at}${updated}`
+    ? `\n最后修改 ${toLocalStamp(row.updated_at)}` : ''
+  return `记录于 ${toLocalStamp(row.created_at)}${updated}`
 }
 
 const recordsQtySum = computed(() =>
