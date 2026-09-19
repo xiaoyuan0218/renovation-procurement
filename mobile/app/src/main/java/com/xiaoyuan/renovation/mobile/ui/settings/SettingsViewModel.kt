@@ -44,6 +44,10 @@ class SettingsViewModel(private val repo: LocalRepository) : ViewModel() {
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    /** 上一条 [message] 是失败来的吗（决定提示条用红还是薄荷绿）。 */
+    private val _messageIsError = MutableStateFlow(false)
+    val messageIsError: StateFlow<Boolean> = _messageIsError.asStateFlow()
+
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
@@ -147,11 +151,15 @@ class SettingsViewModel(private val repo: LocalRepository) : ViewModel() {
             _busy.value = true
             when (val result = call()) {
                 is ApiResult.Ok -> {
+                    _messageIsError.value = false
                     _message.value = success
                     load()
                 }
 
-                is ApiResult.Err -> _message.value = result.message
+                is ApiResult.Err -> {
+                    _messageIsError.value = true
+                    _message.value = result.message
+                }
             }
             _busy.value = false
         }

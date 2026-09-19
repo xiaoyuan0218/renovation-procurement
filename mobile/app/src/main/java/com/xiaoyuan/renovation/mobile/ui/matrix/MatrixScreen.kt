@@ -69,7 +69,7 @@ import com.xiaoyuan.renovation.mobile.ui.design.GlassBottomSheet
 import com.xiaoyuan.renovation.mobile.ui.design.GlassCard
 import com.xiaoyuan.renovation.mobile.ui.design.GlassIconButton
 import com.xiaoyuan.renovation.mobile.ui.design.HintText
-import com.xiaoyuan.renovation.mobile.ui.design.InlineBanner
+import com.xiaoyuan.renovation.mobile.ui.design.FloatingNotice
 import com.xiaoyuan.renovation.mobile.ui.design.LoadingState
 import com.xiaoyuan.renovation.mobile.ui.design.NeonButton
 import com.xiaoyuan.renovation.mobile.ui.design.SectionTitle
@@ -167,34 +167,44 @@ fun MatrixScreen(
                     }
                     Spacer(Modifier.height(10.dp))
                     LegendRow()
-                    val banner = message
-                    if (banner != null) {
-                        Spacer(Modifier.height(10.dp))
-                        InlineBanner(text = banner, accent = Ink.Mint)
-                    }
                     Spacer(Modifier.height(12.dp))
                 }
 
-                if (items.isEmpty()) {
-                    EmptyState(
-                        title = if (query.isBlank()) "没有可显示的物料" else "没找到「$query」",
-                        hint = if (onlyPending) "取消「只看未买」可以看到全部物料" else null,
-                    )
-                } else if (mode == MatrixMode.Grid) {
-                    GridView(
-                        rooms = data.rooms,
-                        items = items,
-                        onEdit = { item, room -> editing = CellTarget(item, room, item.cellOf(room.id)) },
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    ListView(
-                        items = items,
-                        rooms = data.rooms,
-                        onEdit = { item, room -> editing = CellTarget(item, room, item.cellOf(room.id)) },
-                        onAddRoom = { addingTo = it },
-                        modifier = Modifier.weight(1f),
-                    )
+                // 提示条浮在内容之上，不占布局空间（插进布局流会把列表顶下去）
+                Box(Modifier.weight(1f)) {
+                    if (items.isEmpty()) {
+                        Box(Modifier.fillMaxSize()) {
+                            EmptyState(
+                                title = if (query.isBlank()) "没有可显示的物料" else "没找到「$query」",
+                                hint = if (onlyPending) "取消「只看未买」可以看到全部物料" else null,
+                            )
+                        }
+                    } else if (mode == MatrixMode.Grid) {
+                        GridView(
+                            rooms = data.rooms,
+                            items = items,
+                            onEdit = { item, room -> editing = CellTarget(item, room, item.cellOf(room.id)) },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        ListView(
+                            items = items,
+                            rooms = data.rooms,
+                            onEdit = { item, room -> editing = CellTarget(item, room, item.cellOf(room.id)) },
+                            onAddRoom = { addingTo = it },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
+                    val banner = message
+                    if (banner != null) {
+                        FloatingNotice(
+                            text = banner,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(horizontal = 16.dp),
+                        )
+                    }
                 }
             }
         }

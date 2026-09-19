@@ -46,12 +46,12 @@ import com.xiaoyuan.renovation.mobile.ui.design.AppSelect
 import com.xiaoyuan.renovation.mobile.ui.design.AppTextField
 import com.xiaoyuan.renovation.mobile.ui.design.ConfirmDialog
 import com.xiaoyuan.renovation.mobile.ui.design.ErrorState
+import com.xiaoyuan.renovation.mobile.ui.design.FloatingNotice
 import com.xiaoyuan.renovation.mobile.ui.design.GhostButton
 import com.xiaoyuan.renovation.mobile.ui.design.GlassCard
 import com.xiaoyuan.renovation.mobile.ui.design.GlassDivider
 import com.xiaoyuan.renovation.mobile.ui.design.GlassIconButton
 import com.xiaoyuan.renovation.mobile.ui.design.HintText
-import com.xiaoyuan.renovation.mobile.ui.design.InlineBanner
 import com.xiaoyuan.renovation.mobile.ui.design.KeyValueRow
 import com.xiaoyuan.renovation.mobile.ui.design.LoadingState
 import com.xiaoyuan.renovation.mobile.ui.design.NeonButton
@@ -140,367 +140,378 @@ fun ItemEditScreen(
 
             else -> {
                 val preview = vm.preview(form)
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .imePadding()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                ) {
-                    if (message != null) {
-                        InlineBanner(text = message!!, accent = Ink.DangerSoft)
-                    }
-
-                    /* ---------- 基本信息 ---------- */
-                    Column {
-                        SectionTitle("基本信息")
-                        Spacer(Modifier.height(10.dp))
-                        GlassCard {
-                            AppTextField(
-                                value = form.name,
-                                onValueChange = { v -> vm.edit { it.copy(name = v) } },
-                                label = "名称",
-                                placeholder = "例如：抽纸",
-                                isError = form.name.isBlank() && !form.isNew,
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                AppTextField(
-                                    value = form.brand,
-                                    onValueChange = { v -> vm.edit { it.copy(brand = v) } },
-                                    label = "品牌",
-                                    modifier = Modifier.weight(1f),
-                                )
-                                AppTextField(
-                                    value = form.model,
-                                    onValueChange = { v -> vm.edit { it.copy(model = v) } },
-                                    label = "型号",
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            AppSelect(
-                                label = "分类",
-                                items = categories,
-                                selected = categories.firstOrNull { it.id == form.categoryId },
-                                itemLabel = { it.name },
-                                onSelect = { vm.edit { f -> f.copy(categoryId = it?.id) } },
-                                placeholder = "未分类",
-                                allowClear = true,
-                                clearLabel = "未分类",
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                AppTextField(
-                                    value = form.unit,
-                                    onValueChange = { v -> vm.edit { it.copy(unit = v) } },
-                                    label = "单位",
-                                    placeholder = "个",
-                                    modifier = Modifier.weight(1f),
-                                )
-                                AppNumberField(
-                                    value = form.qtyTotal,
-                                    onValueChange = { v -> vm.edit { it.copy(qtyTotal = v) } },
-                                    label = "数量",
-                                    enabled = !form.hasAllocations,
-                                    supportingText = if (form.hasAllocations) "总量由分配合计决定" else null,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            AppTextField(
-                                value = form.note,
-                                onValueChange = { v -> vm.edit { it.copy(note = v) } },
-                                label = "备注",
-                                placeholder = "选填",
-                                minLines = 2,
-                                singleLine = false,
-                            )
-                        }
-                    }
-
-                    /* ---------- 价格 ---------- */
-                    Column {
-                        SectionTitle("价格", caption = "日常单价留空按原价算")
-                        Spacer(Modifier.height(10.dp))
-                        GlassCard {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                AppNumberField(
-                                    value = form.price,
-                                    onValueChange = { v -> vm.edit { it.copy(price = v) } },
-                                    label = "单价（原价）",
-                                    modifier = Modifier.weight(1f),
-                                )
-                                AppNumberField(
-                                    value = form.discountPrice,
-                                    onValueChange = { v -> vm.edit { it.copy(discountPrice = v) } },
-                                    label = "日常单价",
-                                    accent = Ink.Cyan,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                        }
-                    }
-
-                    /* ---------- 实时汇总 ---------- */
-                    Column {
-                        SectionTitle("汇总", caption = "按当前填写实时计算")
-                        Spacer(Modifier.height(10.dp))
-                        GlassCard(accent = statusColor(preview.status)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "采购状态",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Ink.TextSecondary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                TagPill(
-                                    text = if (preview.status == "partial") {
-                                        "部分已买 ${Fmt.qty(preview.paidQty)}/${Fmt.qty(preview.totalQty)}"
-                                    } else {
-                                        statusLabel(preview.status)
-                                    },
-                                    color = statusColor(preview.status),
-                                )
-                            }
+                // 提示条浮在表单之上（不占布局空间）：插在滚动区里会顶着整张
+                // 表单往下走，出现与消失时都在跳
+                Box(Modifier.weight(1f)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .imePadding()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 6.dp, bottom = 28.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        /* ---------- 基本信息 ---------- */
+                        Column {
+                            SectionTitle("基本信息")
                             Spacer(Modifier.height(10.dp))
-                            KeyValueRow("总数量", Fmt.qtyUnit(preview.totalQty, form.unit))
-                            Spacer(Modifier.height(6.dp))
-                            KeyValueRow("原价小计", Fmt.money(preview.listTotal))
-                            Spacer(Modifier.height(6.dp))
-                            KeyValueRow("日常价小计", Fmt.money(preview.discountTotal), valueColor = Ink.Cyan)
-                            Spacer(Modifier.height(6.dp))
-                            KeyValueRow("已付", Fmt.money(preview.paid), valueColor = Ink.Mint)
-                            Spacer(Modifier.height(6.dp))
-                            KeyValueRow("未付", Fmt.money(preview.unpaid), valueColor = Ink.Amber)
-                            if (preview.paidUnitPrice != null) {
-                                Spacer(Modifier.height(6.dp))
-                                KeyValueRow("实付均价", Fmt.money(preview.paidUnitPrice), valueColor = Ink.Indigo)
+                            GlassCard {
+                                AppTextField(
+                                    value = form.name,
+                                    onValueChange = { v -> vm.edit { it.copy(name = v) } },
+                                    label = "名称",
+                                    placeholder = "例如：抽纸",
+                                    isError = form.name.isBlank() && !form.isNew,
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    AppTextField(
+                                        value = form.brand,
+                                        onValueChange = { v -> vm.edit { it.copy(brand = v) } },
+                                        label = "品牌",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AppTextField(
+                                        value = form.model,
+                                        onValueChange = { v -> vm.edit { it.copy(model = v) } },
+                                        label = "型号",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                AppSelect(
+                                    label = "分类",
+                                    items = categories,
+                                    selected = categories.firstOrNull { it.id == form.categoryId },
+                                    itemLabel = { it.name },
+                                    onSelect = { vm.edit { f -> f.copy(categoryId = it?.id) } },
+                                    placeholder = "未分类",
+                                    allowClear = true,
+                                    clearLabel = "未分类",
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    AppTextField(
+                                        value = form.unit,
+                                        onValueChange = { v -> vm.edit { it.copy(unit = v) } },
+                                        label = "单位",
+                                        placeholder = "个",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AppNumberField(
+                                        value = form.qtyTotal,
+                                        onValueChange = { v -> vm.edit { it.copy(qtyTotal = v) } },
+                                        label = "数量",
+                                        enabled = !form.hasAllocations,
+                                        supportingText = if (form.hasAllocations) "总量由分配合计决定" else null,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                AppTextField(
+                                    value = form.note,
+                                    onValueChange = { v -> vm.edit { it.copy(note = v) } },
+                                    label = "备注",
+                                    placeholder = "选填",
+                                    minLines = 2,
+                                    singleLine = false,
+                                )
                             }
                         }
-                    }
 
-                    /* ---------- 采购记录 ---------- */
-                    Column {
-                        SectionTitle(
-                            title = "采购记录",
-                            caption = "共 ${form.records.size} 笔 · 已付 ${Fmt.money(preview.paid)}",
-                            trailing = {
-                                TagPill(
-                                    text = "添加",
-                                    color = Ink.Mint,
-                                    onClick = vm::addRecordRow,
-                                )
-                            },
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        if (form.records.isEmpty()) {
-                            GlassCard(corner = 16.dp) {
-                                HintText("还没有采购记录。买过一次就记一笔，状态会自动变成「部分已买」或「已买完」。")
+                        /* ---------- 价格 ---------- */
+                        Column {
+                            SectionTitle("价格", caption = "日常单价留空按原价算")
+                            Spacer(Modifier.height(10.dp))
+                            GlassCard {
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    AppNumberField(
+                                        value = form.price,
+                                        onValueChange = { v -> vm.edit { it.copy(price = v) } },
+                                        label = "单价（原价）",
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    AppNumberField(
+                                        value = form.discountPrice,
+                                        onValueChange = { v -> vm.edit { it.copy(discountPrice = v) } },
+                                        label = "日常单价",
+                                        accent = Ink.Cyan,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                             }
                         }
-                        form.records.forEach { row ->
-                            GlassCard(corner = 16.dp, padding = 12.dp) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    AppNumberField(
-                                        value = row.qty,
-                                        onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(qty = v) } },
-                                        label = "实付数量",
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    AppNumberField(
-                                        value = row.amount,
-                                        onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(amount = v) } },
-                                        label = "实付金额",
-                                        accent = Ink.Mint,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                Spacer(Modifier.height(10.dp))
-                                AppDateField(
-                                    value = row.date,
-                                    onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(date = v) } },
-                                    showQuickChips = false,
-                                )
-                                // 什么时候记的：老数据与刚加的行还没有时间戳，就不显示
-                                if (row.createdAt.isNotBlank()) {
-                                    Spacer(Modifier.height(6.dp))
-                                    // 'YYYY-MM-DD HH:MM:SS' 掐掉年份，列表里空间紧
-                                    HintText("记录于 " + row.createdAt.drop(5).take(11))
-                                }
-                                // 这条记录涉及哪几间：只列这条物料分到的分组
-                                val rowRooms = rooms.filter { r ->
-                                    form.allocations.any { it.roomId == r.id }
-                                }
-                                if (rowRooms.isNotEmpty()) {
-                                    Spacer(Modifier.height(10.dp))
-                                    HintText("涉及分组（勾了谁就只往谁身上算）")
-                                    Spacer(Modifier.height(6.dp))
-                                    MultiChoiceChips(
-                                        options = rowRooms.map { it.id to it.name },
-                                        selected = row.roomIds,
-                                        onToggle = { id ->
-                                            vm.updateRecordRow(row.key) {
-                                                it.copy(
-                                                    roomIds = if (id in it.roomIds) {
-                                                        it.roomIds - id
-                                                    } else {
-                                                        it.roomIds + id
-                                                    },
-                                                )
-                                            }
-                                        },
-                                    )
-                                }
-                                Spacer(Modifier.height(10.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    AppTextField(
-                                        value = row.vendor,
-                                        onValueChange = { v ->
-                                            vm.updateRecordRow(row.key) { it.copy(vendor = v) }
-                                        },
-                                        label = "商家",
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    AppTextField(
-                                        value = row.orderNo,
-                                        onValueChange = { v ->
-                                            vm.updateRecordRow(row.key) { it.copy(orderNo = v) }
-                                        },
-                                        label = "订单号",
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                Spacer(Modifier.height(10.dp))
+
+                        /* ---------- 实时汇总 ---------- */
+                        Column {
+                            SectionTitle("汇总", caption = "按当前填写实时计算")
+                            Spacer(Modifier.height(10.dp))
+                            GlassCard(accent = statusColor(preview.status)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    AppTextField(
-                                        value = row.note,
-                                        onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(note = v) } },
-                                        label = "备注",
-                                        accent = Ink.Indigo,
+                                    Text(
+                                        text = "采购状态",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Ink.TextSecondary,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    Spacer(Modifier.width(10.dp))
-                                    GlassIconButton(
-                                        icon = Icons.Filled.Delete,
-                                        onClick = { vm.removeRecordRow(row.key) },
-                                        contentDescription = "删除这条记录",
-                                        tint = Ink.DangerSoft,
+                                    TagPill(
+                                        text = if (preview.status == "partial") {
+                                            "部分已买 ${Fmt.qty(preview.paidQty)}/${Fmt.qty(preview.totalQty)}"
+                                        } else {
+                                            statusLabel(preview.status)
+                                        },
+                                        color = statusColor(preview.status),
                                     )
                                 }
-                                val rowUnitPrice = Fmt.parseNumber(row.amount)?.let { amount ->
-                                    Fmt.parseNumberOrZero(row.qty).takeIf { it > 0 }?.let { q -> amount / q }
-                                }
-                                if (rowUnitPrice != null) {
-                                    Spacer(Modifier.height(8.dp))
-                                    HintText("实付单价 ${Fmt.money(rowUnitPrice)}")
+                                Spacer(Modifier.height(10.dp))
+                                KeyValueRow("总数量", Fmt.qtyUnit(preview.totalQty, form.unit))
+                                Spacer(Modifier.height(6.dp))
+                                KeyValueRow("原价小计", Fmt.money(preview.listTotal))
+                                Spacer(Modifier.height(6.dp))
+                                KeyValueRow("日常价小计", Fmt.money(preview.discountTotal), valueColor = Ink.Cyan)
+                                Spacer(Modifier.height(6.dp))
+                                KeyValueRow("已付", Fmt.money(preview.paid), valueColor = Ink.Mint)
+                                Spacer(Modifier.height(6.dp))
+                                KeyValueRow("未付", Fmt.money(preview.unpaid), valueColor = Ink.Amber)
+                                if (preview.paidUnitPrice != null) {
+                                    Spacer(Modifier.height(6.dp))
+                                    KeyValueRow("实付均价", Fmt.money(preview.paidUnitPrice), valueColor = Ink.Indigo)
                                 }
                             }
-                            Spacer(Modifier.height(10.dp))
                         }
-                    }
 
-                    /* ---------- 分配明细 ---------- */
-                    Column {
-                        SectionTitle(
-                            title = "分配（按分组）",
-                            caption = if (form.allocations.isEmpty()) {
-                                "还没有分配 · 总数量按上面的数量字段走"
-                            } else {
-                                "共 ${Fmt.qtyUnit(preview.totalQty, form.unit)} · 原价小计 ${Fmt.money(preview.listTotal)}"
-                            },
-                            trailing = {
-                                TagPill(
-                                    text = "添加",
-                                    color = Ink.Indigo,
-                                    onClick = vm::addAllocRow,
-                                )
-                            },
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        if (form.allocations.isEmpty()) {
-                            GlassCard(corner = 16.dp) {
-                                HintText("填了分配后，总数量会自动按各分组加起来，数量输入框会锁定。")
+                        /* ---------- 采购记录 ---------- */
+                        Column {
+                            SectionTitle(
+                                title = "采购记录",
+                                caption = "共 ${form.records.size} 笔 · 已付 ${Fmt.money(preview.paid)}",
+                                trailing = {
+                                    TagPill(
+                                        text = "添加",
+                                        color = Ink.Mint,
+                                        onClick = vm::addRecordRow,
+                                    )
+                                },
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            if (form.records.isEmpty()) {
+                                GlassCard(corner = 16.dp) {
+                                    HintText("还没有采购记录。买过一次就记一笔，状态会自动变成「部分已买」或「已买完」。")
+                                }
                             }
-                        }
-                        form.allocations.forEach { row ->
-                            val usedElsewhere = form.allocations
-                                .filter { it.key != row.key }
-                                .mapNotNull { it.roomId }
-                                .toSet()
-                            GlassCard(corner = 16.dp, padding = 12.dp) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Box(Modifier.weight(1.1f)) {
-                                        AppSelect(
-                                            label = "分组",
-                                            items = rooms,
-                                            selected = rooms.firstOrNull { it.id == row.roomId },
-                                            itemLabel = { it.name },
-                                            onSelect = { room ->
-                                                vm.updateAllocRow(row.key) { it.copy(roomId = room?.id) }
-                                            },
-                                            placeholder = "选分组",
-                                            isItemEnabled = { room -> room.id !in usedElsewhere },
+                            form.records.forEach { row ->
+                                GlassCard(corner = 16.dp, padding = 12.dp) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        AppNumberField(
+                                            value = row.qty,
+                                            onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(qty = v) } },
+                                            label = "实付数量",
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        AppNumberField(
+                                            value = row.amount,
+                                            onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(amount = v) } },
+                                            label = "实付金额",
+                                            accent = Ink.Mint,
+                                            modifier = Modifier.weight(1f),
                                         )
                                     }
-                                    AppNumberField(
-                                        value = row.qty,
-                                        onValueChange = { v -> vm.updateAllocRow(row.key) { it.copy(qty = v) } },
-                                        label = "数量",
-                                        modifier = Modifier.weight(0.8f),
+                                    Spacer(Modifier.height(10.dp))
+                                    AppDateField(
+                                        value = row.date,
+                                        onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(date = v) } },
+                                        showQuickChips = false,
                                     )
+                                    // 什么时候记的：老数据与刚加的行还没有时间戳，就不显示
+                                    if (row.createdAt.isNotBlank()) {
+                                        Spacer(Modifier.height(6.dp))
+                                        // 'YYYY-MM-DD HH:MM:SS' 掐掉年份，列表里空间紧
+                                        HintText("记录于 " + row.createdAt.drop(5).take(11))
+                                    }
+                                    // 这条记录涉及哪几间：只列这条物料分到的分组
+                                    val rowRooms = rooms.filter { r ->
+                                        form.allocations.any { it.roomId == r.id }
+                                    }
+                                    if (rowRooms.isNotEmpty()) {
+                                        Spacer(Modifier.height(10.dp))
+                                        HintText("涉及分组（勾了谁就只往谁身上算）")
+                                        Spacer(Modifier.height(6.dp))
+                                        MultiChoiceChips(
+                                            options = rowRooms.map { it.id to it.name },
+                                            selected = row.roomIds,
+                                            onToggle = { id ->
+                                                vm.updateRecordRow(row.key) {
+                                                    it.copy(
+                                                        roomIds = if (id in it.roomIds) {
+                                                            it.roomIds - id
+                                                        } else {
+                                                            it.roomIds + id
+                                                        },
+                                                    )
+                                                }
+                                            },
+                                        )
+                                    }
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        AppTextField(
+                                            value = row.vendor,
+                                            onValueChange = { v ->
+                                                vm.updateRecordRow(row.key) { it.copy(vendor = v) }
+                                            },
+                                            label = "商家",
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        AppTextField(
+                                            value = row.orderNo,
+                                            onValueChange = { v ->
+                                                vm.updateRecordRow(row.key) { it.copy(orderNo = v) }
+                                            },
+                                            label = "订单号",
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        AppTextField(
+                                            value = row.note,
+                                            onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(note = v) } },
+                                            label = "备注",
+                                            accent = Ink.Indigo,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        GlassIconButton(
+                                            icon = Icons.Filled.Delete,
+                                            onClick = { vm.removeRecordRow(row.key) },
+                                            contentDescription = "删除这条记录",
+                                            tint = Ink.DangerSoft,
+                                        )
+                                    }
+                                    val rowUnitPrice = Fmt.parseNumber(row.amount)?.let { amount ->
+                                        Fmt.parseNumberOrZero(row.qty).takeIf { it > 0 }?.let { q -> amount / q }
+                                    }
+                                    if (rowUnitPrice != null) {
+                                        Spacer(Modifier.height(8.dp))
+                                        HintText("实付单价 ${Fmt.money(rowUnitPrice)}")
+                                    }
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    AppNumberField(
-                                        value = row.priceOverride,
-                                        onValueChange = { v ->
-                                            vm.updateAllocRow(row.key) { it.copy(priceOverride = v) }
-                                        },
-                                        label = "覆盖单价",
-                                        placeholder = "留空用物料单价",
-                                        accent = Ink.Indigo,
-                                        modifier = Modifier.weight(1f),
+                            }
+                        }
+
+                        /* ---------- 分配明细 ---------- */
+                        Column {
+                            SectionTitle(
+                                title = "分配（按分组）",
+                                caption = if (form.allocations.isEmpty()) {
+                                    "还没有分配 · 总数量按上面的数量字段走"
+                                } else {
+                                    "共 ${Fmt.qtyUnit(preview.totalQty, form.unit)} · 原价小计 ${Fmt.money(preview.listTotal)}"
+                                },
+                                trailing = {
+                                    TagPill(
+                                        text = "添加",
+                                        color = Ink.Indigo,
+                                        onClick = vm::addAllocRow,
                                     )
-                                    AppTextField(
-                                        value = row.note,
-                                        onValueChange = { v -> vm.updateAllocRow(row.key) { it.copy(note = v) } },
-                                        label = "备注",
-                                        accent = Ink.Indigo,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val unitPrice = Fmt.parseNumber(row.priceOverride)
-                                        ?: Fmt.parseNumber(form.price)
-                                        ?: 0.0
-                                    HintText("该分组小计 ${Fmt.money(unitPrice * Fmt.parseNumberOrZero(row.qty))}")
-                                    Spacer(Modifier.weight(1f))
-                                    GhostButton(
-                                        text = "移除",
-                                        onClick = { vm.removeAllocRow(row.key) },
-                                        contentColor = Ink.DangerSoft,
-                                    )
+                                },
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            if (form.allocations.isEmpty()) {
+                                GlassCard(corner = 16.dp) {
+                                    HintText("填了分配后，总数量会自动按各分组加起来，数量输入框会锁定。")
                                 }
                             }
-                            Spacer(Modifier.height(10.dp))
+                            form.allocations.forEach { row ->
+                                val usedElsewhere = form.allocations
+                                    .filter { it.key != row.key }
+                                    .mapNotNull { it.roomId }
+                                    .toSet()
+                                GlassCard(corner = 16.dp, padding = 12.dp) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Box(Modifier.weight(1.1f)) {
+                                            AppSelect(
+                                                label = "分组",
+                                                items = rooms,
+                                                selected = rooms.firstOrNull { it.id == row.roomId },
+                                                itemLabel = { it.name },
+                                                onSelect = { room ->
+                                                    vm.updateAllocRow(row.key) { it.copy(roomId = room?.id) }
+                                                },
+                                                placeholder = "选分组",
+                                                isItemEnabled = { room -> room.id !in usedElsewhere },
+                                            )
+                                        }
+                                        AppNumberField(
+                                            value = row.qty,
+                                            onValueChange = { v -> vm.updateAllocRow(row.key) { it.copy(qty = v) } },
+                                            label = "数量",
+                                            modifier = Modifier.weight(0.8f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        AppNumberField(
+                                            value = row.priceOverride,
+                                            onValueChange = { v ->
+                                                vm.updateAllocRow(row.key) { it.copy(priceOverride = v) }
+                                            },
+                                            label = "覆盖单价",
+                                            placeholder = "留空用物料单价",
+                                            accent = Ink.Indigo,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        AppTextField(
+                                            value = row.note,
+                                            onValueChange = { v -> vm.updateAllocRow(row.key) { it.copy(note = v) } },
+                                            label = "备注",
+                                            accent = Ink.Indigo,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        val unitPrice = Fmt.parseNumber(row.priceOverride)
+                                            ?: Fmt.parseNumber(form.price)
+                                            ?: 0.0
+                                        HintText("该分组小计 ${Fmt.money(unitPrice * Fmt.parseNumberOrZero(row.qty))}")
+                                        Spacer(Modifier.weight(1f))
+                                        GhostButton(
+                                            text = "移除",
+                                            onClick = { vm.removeAllocRow(row.key) },
+                                            contentColor = Ink.DangerSoft,
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                            }
+                        }
+
+                        /* ---------- 删除 ---------- */
+                        if (!form.isNew) {
+                            GlassDivider()
+                            GhostButton(
+                                text = "删除这个物料",
+                                onClick = { confirmDelete = true },
+                                icon = Icons.Filled.Delete,
+                                contentColor = Ink.DangerSoft,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            HintText("删除后会从清单里移走，它的采购记录与分配也一起收起来。")
                         }
                     }
 
-                    /* ---------- 删除 ---------- */
-                    if (!form.isNew) {
-                        GlassDivider()
-                        GhostButton(
-                            text = "删除这个物料",
-                            onClick = { confirmDelete = true },
-                            icon = Icons.Filled.Delete,
-                            contentColor = Ink.DangerSoft,
-                            modifier = Modifier.fillMaxWidth(),
+                    if (message != null) {
+                        FloatingNotice(
+                            text = message!!,
+                            accent = Ink.DangerSoft,
+                            isError = true,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(horizontal = 16.dp),
                         )
-                        HintText("删除后会从清单里移走，它的采购记录与分配也一起收起来。")
                     }
                 }
             }

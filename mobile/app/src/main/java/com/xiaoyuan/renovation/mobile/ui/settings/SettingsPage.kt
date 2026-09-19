@@ -1,6 +1,7 @@
 package com.xiaoyuan.renovation.mobile.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.xiaoyuan.renovation.mobile.ui.design.FloatingNotice
 import com.xiaoyuan.renovation.mobile.ui.design.GlassIconButton
 import com.xiaoyuan.renovation.mobile.ui.theme.Ink
 
@@ -37,6 +39,13 @@ fun SettingsPage(
     caption: String? = null,
     onBack: () -> Unit,
     listState: LazyListState = rememberLazyListState(),
+    /**
+     * 页内提示条（成功薄荷绿 / 失败红）。写操作的反馈必须让用户看见 ——
+     * 比如"分类下面还挂着物料，删不掉"这类拒绝，从前只在 ViewModel 里
+     * 转一圈就没了，用户只看到点了没反应。
+     */
+    notice: String? = null,
+    noticeIsError: Boolean = false,
     content: LazyListScope.() -> Unit,
 ) {
     // 全屏独立页面（不在 AppShell 的顶栏下面），要自己让开状态栏/刘海，
@@ -76,12 +85,27 @@ fun SettingsPage(
             }
         }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            content = content,
-        )
+        Box(Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = content,
+            )
+
+            // 提示条浮在列表之上：用 Box 叠上去而不是插进列表，出现与消失时
+            // 下面的内容一动不动（插进布局流会把整页往下顶，看着就是抖一下）
+            if (notice != null) {
+                FloatingNotice(
+                    text = notice,
+                    accent = if (noticeIsError) Ink.DangerSoft else Ink.Mint,
+                    isError = noticeIsError,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(start = 16.dp, end = 16.dp, top = 6.dp),
+                )
+            }
+        }
     }
 }

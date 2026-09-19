@@ -78,7 +78,7 @@ class LocalRepository(
         mutate {
             val trimmed = name.trim()
             require(trimmed.isNotEmpty()) { "清单名不能为空" }
-            require(db.lists().byName(trimmed) == null) { "已经有一份叫「$trimmed」的清单了" }
+            // 名字允许重复：编号才是身份（与服务器同口径）。同名两份各自独立
             val id = db.withTransaction {
                 val newId = db.lists().insert(
                     com.xiaoyuan.renovation.mobile.data.db.ItemListEntity(
@@ -111,8 +111,7 @@ class LocalRepository(
         mutate {
             val trimmed = name.trim()
             require(trimmed.isNotEmpty()) { "清单名不能为空" }
-            val dup = db.lists().byName(trimmed)
-            require(dup == null || dup.id == id) { "已经有一份叫「$trimmed」的清单了" }
+            // 改名也不查重：同名可以并存，身份看编号
             val existing = db.lists().byId(id) ?: error("清单不存在")
             db.lists().update(existing.copy(name = trimmed, note = note, sort = sort).stamped())
             listDto(id)

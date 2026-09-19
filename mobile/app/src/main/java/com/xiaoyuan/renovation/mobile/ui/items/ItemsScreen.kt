@@ -65,7 +65,7 @@ import com.xiaoyuan.renovation.mobile.ui.design.EmptyState
 import com.xiaoyuan.renovation.mobile.ui.design.ErrorState
 import com.xiaoyuan.renovation.mobile.ui.design.GlassCard
 import com.xiaoyuan.renovation.mobile.ui.design.GlassIconButton
-import com.xiaoyuan.renovation.mobile.ui.design.InlineBanner
+import com.xiaoyuan.renovation.mobile.ui.design.FloatingNotice
 import com.xiaoyuan.renovation.mobile.ui.design.LoadingState
 import com.xiaoyuan.renovation.mobile.ui.design.NeonButton
 import com.xiaoyuan.renovation.mobile.ui.design.TagPill
@@ -196,37 +196,46 @@ fun ItemsScreen(
                         )
                     }
 
-                    val banner = message
-                    if (banner != null) {
-                        Spacer(Modifier.height(10.dp))
-                        InlineBanner(text = banner, accent = Ink.Mint)
-                    }
                     Spacer(Modifier.height(10.dp))
                 }
 
-                if (filtered.isEmpty()) {
-                    Box(Modifier.weight(1f)) {
-                        EmptyState(
-                            title = if (data.items.isEmpty()) "清单还是空的" else "没有符合条件的物料",
-                            hint = if (data.items.isEmpty()) "点下面的「新增物料」加第一条，分组和分类在「设置」里管" else "换个关键词或筛选条件试试",
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        items(filtered, key = { it.id }) { item ->
-                            ItemCard(
-                                item = item,
-                                selectionMode = selectionMode,
-                                selected = item.id in selected,
-                                onToggleSelect = { vm.toggleSelect(item.id) },
-                                onOpen = { if (selectionMode) vm.toggleSelect(item.id) else onEditItem(item.id) },
-                                onPurchase = { purchaseTarget = item },
+                // 提示条浮在列表之上（叠一层），不占布局空间 —— 插进布局流会把
+                // 列表整体往下顶，消失时又弹回来，看着就是页面抖了一下
+                Box(Modifier.weight(1f)) {
+                    if (filtered.isEmpty()) {
+                        Box(Modifier.fillMaxSize()) {
+                            EmptyState(
+                                title = if (data.items.isEmpty()) "清单还是空的" else "没有符合条件的物料",
+                                hint = if (data.items.isEmpty()) "点下面的「新增物料」加第一条，分组和分类在「设置」里管" else "换个关键词或筛选条件试试",
                             )
                         }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 24.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(filtered, key = { it.id }) { item ->
+                                ItemCard(
+                                    item = item,
+                                    selectionMode = selectionMode,
+                                    selected = item.id in selected,
+                                    onToggleSelect = { vm.toggleSelect(item.id) },
+                                    onOpen = { if (selectionMode) vm.toggleSelect(item.id) else onEditItem(item.id) },
+                                    onPurchase = { purchaseTarget = item },
+                                )
+                            }
+                        }
+                    }
+
+                    val banner = message
+                    if (banner != null) {
+                        FloatingNotice(
+                            text = banner,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(horizontal = 16.dp),
+                        )
                     }
                 }
 

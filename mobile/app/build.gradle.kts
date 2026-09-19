@@ -51,6 +51,13 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    testOptions {
+        unitTests {
+            // 同步的测试要真开一个 Room 库（内存版）跑 SQL，Robolectric 需要能读资源
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 kotlin {
@@ -94,4 +101,10 @@ dependencies {
 
     // 口径一致性测试：拿后端真实实现算出的对照数据比对本地计算
     testImplementation(libs.junit)
+
+    // 同步逻辑要连 Room 与"服务器"一起验：内存库 + 本地假服务器
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.xiaoyuan.renovation.mobile.di.AppContainer
@@ -92,94 +93,125 @@ private enum class ShellTab(val label: String, val icon: ImageVector) {
 @Composable
 fun AppShellHost(container: AppContainer) {
     val navController = rememberNavController()
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    NavHost(
-        navController = navController,
-        startDestination = "main",
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        composable("main") {
-            AppShell(
-                container = container,
-                onEditItem = { id -> navController.navigate("item/$id") },
-                onOpenSettingsPage = { page -> navController.navigate("settings/$page") },
-            )
-        }
-        // 设置里的各个子页面：设置页只做菜单，点开才进整页
-        composable("settings/{page}") { entry ->
-            val page = entry.arguments?.getString("page").orEmpty()
-            val back = { navController.popBackStack(); Unit }
-            when (page) {
-                "lists" -> ListsPage(
-                    listsVm = sharedViewModel(container) {
-                        ListsViewModel(it.repo, it.currentList, it::bumpDataVersion)
-                    },
-                    onBack = back,
-                )
-
-                "rooms" -> RoomsPage(
-                    vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
-                    onBack = back,
-                )
-
-                "expenses" -> ExpensesPage(
-                    vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
-                    onBack = back,
-                )
-
-                "trash" -> TrashPage(
-                    vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
-                    onBack = back,
-                )
-
-                "backup" -> BackupPage(container = container, onBack = back)
-
-                "about" -> AboutPage(onBack = back)
-
-                "server" -> {
-                    val pageListsVm: ListsViewModel = sharedViewModel(container) {
-                        ListsViewModel(it.repo, it.currentList, it::bumpDataVersion)
-                    }
-                    // 拉取/上传/同步会 bumpDataVersion，这里跟着重读 —— 不跟的话
-                    // 新拉下来的清单要退出 App 重进才出现
-                    val refreshKey by container.dataVersion.collectAsStateWithLifecycle()
-                    LaunchedEffect(refreshKey) { pageListsVm.loadIfStale(refreshKey) }
-                    val lists by pageListsVm.lists.collectAsStateWithLifecycle()
-                    val currentId by pageListsVm.currentId.collectAsStateWithLifecycle()
-                    ServerPage(
-                        vm = sharedViewModel(container) {
-                            SyncViewModel(it.sync, it.repo, it.session, it.dataVersion)
-                        },
-                        lists = lists,
-                        currentListId = currentId,
-                        onChanged = container::bumpDataVersion,
-                        onBack = back,
-                    )
-                }
+    // 同步事件提示（主要是"服务器上那份被删了、已自动解绑"）挂在整个导航之上。
+    // 手动点「立即同步」时用户正站在「设置 → 服务器」页，那里主界面没有组合 ——
+    // 挂在主界面里的话，这条提示在最该出现的地方反而看不到。
+    //
+    // 用 LaunchedEffect(Unit) + collect，**不能**写成 LaunchedEffect(syncEvent)：那样
+    // 在 let 里先 consumeEvent() 会把值清成 null，key 一变协程当场被取消，
+    // showSnackbar 还没显示完就没了 —— 提示等于没弹。
+    LaunchedEffect(Unit) {
+        container.sync.events.collect { message ->
+            if (message != null) {
+                snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Long)
+                container.sync.consumeEvent()
             }
         }
-        composable(
-            route = "item/{id}",
-            arguments = listOf(navArgument("id") { type = NavType.IntType }),
-        ) { entry ->
-            ItemEditScreen(
-                container = container,
-                itemId = entry.arguments?.getInt("id") ?: NEW_ITEM_ID,
-                onClose = { navController.popBackStack() },
-            )
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = "main",
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            composable("main") {
+                AppShell(
+                    container = container,
+                    snackbarHostState = snackbarHostState,
+                    onEditItem = { id -> navController.navigate("item/$id") },
+                    onOpenSettingsPage = { page -> navController.navigate("settings/$page") },
+                )
+            }
+            // 设置里的各个子页面：设置页只做菜单，点开才进整页
+            composable("settings/{page}") { entry ->
+                val page = entry.arguments?.getString("page").orEmpty()
+                val back = { navController.popBackStack(); Unit }
+                when (page) {
+                    "lists" -> ListsPage(
+                        listsVm = sharedViewModel(container) {
+                            ListsViewModel(it.repo, it.currentList, it::bumpDataVersion)
+                        },
+                        onBack = back,
+                    )
+
+                    "rooms" -> RoomsPage(
+                        vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
+                        onBack = back,
+                    )
+
+                    "expenses" -> ExpensesPage(
+                        vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
+                        onBack = back,
+                    )
+
+                    "trash" -> TrashPage(
+                        vm = sharedViewModel(container) { SettingsViewModel(it.repo) },
+                        onBack = back,
+                    )
+
+                    "backup" -> BackupPage(container = container, onBack = back)
+
+                    "about" -> AboutPage(onBack = back)
+
+                    "server" -> {
+                        val pageListsVm: ListsViewModel = sharedViewModel(container) {
+                            ListsViewModel(it.repo, it.currentList, it::bumpDataVersion)
+                        }
+                        // 拉取/上传/同步会 bumpDataVersion，这里跟着重读 —— 不跟的话
+                        // 新拉下来的清单要退出 App 重进才出现
+                        val refreshKey by container.dataVersion.collectAsStateWithLifecycle()
+                        LaunchedEffect(refreshKey) { pageListsVm.loadIfStale(refreshKey) }
+                        val lists by pageListsVm.lists.collectAsStateWithLifecycle()
+                        val currentId by pageListsVm.currentId.collectAsStateWithLifecycle()
+                        ServerPage(
+                            vm = sharedViewModel(container) {
+                                SyncViewModel(it.sync, it.repo, it.session, it.dataVersion)
+                            },
+                            lists = lists,
+                            currentListId = currentId,
+                            onChanged = container::bumpDataVersion,
+                            onBack = back,
+                        )
+                    }
+                }
+            }
+            composable(
+                route = "item/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.IntType }),
+            ) { entry ->
+                ItemEditScreen(
+                    container = container,
+                    itemId = entry.arguments?.getInt("id") ?: NEW_ITEM_ID,
+                    onClose = { navController.popBackStack() },
+                )
+            }
         }
+
+        // 提示浮在最下面，任意页面都能看到。主界面底部有导航栏，得让开它的高度；
+        // 设置子页面没有导航栏，直接贴底即可 —— 一律用 96dp 的话在子页面上会浮在半空
+        val route = navController.currentBackStackEntryAsState().value?.destination?.route
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = if (route == "main") 96.dp else 16.dp),
+        )
     }
 }
 
 @Composable
 private fun AppShell(
     container: AppContainer,
+    snackbarHostState: SnackbarHostState,
     onEditItem: (Int) -> Unit,
     onOpenSettingsPage: (String) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(ShellTab.Dashboard) }
     val dataVersion by container.dataVersion.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
 
     // ViewModel 挂在 "main" 这个导航条目上，切 Tab 不会丢筛选条件与已加载数据
     val dashboardVm: DashboardViewModel = containerViewModel(container) { DashboardViewModel(it.repo) }
@@ -196,58 +228,48 @@ private fun AppShell(
         SyncViewModel(it.sync, it.repo, it.session, it.dataVersion)
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            // 跟着 dataVersion 刷新：加了几条物料之后，下拉里的「X 项」也是新的
-            ListSwitcherBar(listsVm, snackbarHostState, dataVersion)
+    Column(Modifier.fillMaxSize()) {
+        // 跟着 dataVersion 刷新：加了几条物料之后，下拉里的「X 项」也是新的
+        ListSwitcherBar(listsVm, snackbarHostState, dataVersion)
 
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .imePadding(),
-            ) {
-                when (tab) {
-                    ShellTab.Dashboard -> DashboardScreen(
-                        vm = dashboardVm,
-                        refreshKey = dataVersion,
-                        onGoItems = {
-                            itemsVm.focusPending()
-                            tab = ShellTab.Items
-                        },
-                    )
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .imePadding(),
+        ) {
+            when (tab) {
+                ShellTab.Dashboard -> DashboardScreen(
+                    vm = dashboardVm,
+                    refreshKey = dataVersion,
+                    onGoItems = {
+                        itemsVm.focusPending()
+                        tab = ShellTab.Items
+                    },
+                )
 
-                    ShellTab.Items -> ItemsScreen(
-                        vm = itemsVm,
-                        refreshKey = dataVersion,
-                        onEditItem = onEditItem,
-                    )
+                ShellTab.Items -> ItemsScreen(
+                    vm = itemsVm,
+                    refreshKey = dataVersion,
+                    onEditItem = onEditItem,
+                )
 
-                    ShellTab.Matrix -> MatrixScreen(
-                        vm = matrixVm,
-                        refreshKey = dataVersion,
-                    )
+                ShellTab.Matrix -> MatrixScreen(
+                    vm = matrixVm,
+                    refreshKey = dataVersion,
+                )
 
-                    ShellTab.Settings -> SettingsScreen(
-                        listsVm = listsVm,
-                        vm = settingsVm,
-                        syncVm = syncVm,
-                        refreshKey = dataVersion,
-                        onOpenPage = onOpenSettingsPage,
-                    )
-                }
+                ShellTab.Settings -> SettingsScreen(
+                    listsVm = listsVm,
+                    vm = settingsVm,
+                    syncVm = syncVm,
+                    refreshKey = dataVersion,
+                    onOpenPage = onOpenSettingsPage,
+                )
             }
-
-            GlassBottomBar(current = tab, onSelect = { tab = it })
         }
 
-        // 提示浮在最下面（底部导航之上），切换清单/新建清单的结果都从这里冒出来
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 96.dp),
-        )
+        GlassBottomBar(current = tab, onSelect = { tab = it })
     }
 }
 

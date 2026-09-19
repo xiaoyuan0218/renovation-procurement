@@ -2,6 +2,7 @@ package com.xiaoyuan.renovation.mobile.ui.sync
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,6 +36,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xiaoyuan.renovation.mobile.data.model.ItemListDto
+import kotlinx.coroutines.delay
+import com.xiaoyuan.renovation.mobile.data.sync.SideSummary
+import com.xiaoyuan.renovation.mobile.data.sync.UploadChoice
+import com.xiaoyuan.renovation.mobile.data.db.toLocalStamp
+import com.xiaoyuan.renovation.mobile.data.sync.UploadDecision
 import com.xiaoyuan.renovation.mobile.ui.design.AppPasswordField
 import com.xiaoyuan.renovation.mobile.ui.design.AppTextField
 import com.xiaoyuan.renovation.mobile.ui.design.ConfirmDialog
@@ -63,9 +69,6 @@ fun ServerPage(
     val state by vm.state.collectAsStateWithLifecycle()
     val busy = state.busy
 
-    // 服务器上已有同名清单时，先问用户是新建还是覆盖
-    var uploadChoice by remember { mutableStateOf<Pair<ItemListDto, ItemListDto>?>(null) }
-
     LaunchedEffect(state.loggedIn) {
         if (state.loggedIn) vm.loadRemoteLists()
     }
@@ -79,19 +82,36 @@ fun ServerPage(
         )
     }
 
-    if (state.remoteMissing && currentListId != null) {
-        val name = lists.firstOrNull { it.id == currentListId }?.name.orEmpty()
-        RemoteGoneDialog(
-            name = name,
-            onReupload = { vm.resolveRemoteMissing(true, currentListId, name); onChanged() },
-            onUnbind = { vm.resolveRemoteMissing(false, currentListId, name) },
+    // 上传撞上服务器上已有的同一份、且两边从没同步过：覆盖还是合并，让用户定
+    state.uploadDecision?.let { decision ->
+        val current = lists.firstOrNull { it.id == currentListId } ?: lists.firstOrNull()
+        UploadDecisionDialog(
+            listName = current?.name.orEmpty(),
+            decision = decision,
+            onChoose = { choice ->
+                val listId = current?.id
+                if (listId != null) {
+                    vm.resolveUpload(listId, choice)
+                    onChanged()
+                }
+            },
+            onDismiss = vm::dismissUploadDecision,
         )
     }
 
     val listState = rememberLazyListState()
-    // 提示一出现就滚回顶部 —— 用户常停在表单或清单列表中间，提示条在屏幕外等于没提示
+    // 提示停留几秒后自动清掉：不清的话"连不上服务器"这类旧提示会一直挂在
+    // 页面顶部，用户早就连上了它还在，反而误导。
+    // 不用再滚回顶部了 —— 提示条是浮在内容上的，用户停在哪一段都看得见。
     LaunchedEffect(state.notice) {
-        if (state.notice != null) listState.animateScrollToItem(0)
+        state.notice?.let { notice ->
+            if (notice.error) {
+                delay(8_000)
+            } else {
+                delay(4_000)
+            }
+            vm.consumeMessage()
+        }
     }
     // 上传/拉取/同步成功 → 通知外层刷新：清单列表、看板、下拉里的条目数都要跟着变，
     // 不通知的话新拉下来的清单要重启 App 才看得见
@@ -108,9 +128,10 @@ fun ServerPage(
         },
         onBack = onBack,
         listState = listState,
+        // 提示条交给外壳做成浮层（叠在内容上），插进列表会把整页顶下去
+        notice = state.notice?.text,
+        noticeIsError = state.notice?.error == true,
     ) {
-        state.notice?.let { notice -> item(key = "notice") { NoticeBar(notice) } }
-
         if (!state.loggedIn) {
             item { LoginForm(busy = busy, initialUrl = state.url, onSubmit = vm::login) }
         } else {
@@ -186,89 +207,24 @@ fun ServerPage(
                                 maxLines = 1,
                             )
                         }
-                        if (busy) {
-                            TagPill("处理中", color = Ink.TextSecondary)
-                        } else {
-                            TextButton(onClick = { vm.pullAsNew(remote.id, remote.name) }) {
-                                Text("拉到本地", color = Ink.Cyan, fontWeight = FontWeight.SemiBold)
-                            }
+                        // 忙碌时不要换成 TagPill：胶囊比 TextButton 矮一大截
+                        // （约 22dp vs Material3 的 40dp 最小高度），卡片会跟着缩水，
+                        // 整屏内容往上跳一下（实测按钮下移 133px、卡片矮 37px）。
+                        // 保持同一个按钮、只换文字与禁用态，高度天然恒定。
+                        TextButton(
+                            onClick = { vm.pullAsNew(remote.id, remote.name) },
+                            enabled = !busy,
+                        ) {
+                            Text(
+                                text = if (busy) "处理中" else "拉到本地",
+                                color = if (busy) Ink.TextSecondary else Ink.Cyan,
+                                fontWeight = FontWeight.SemiBold,
+                            )
                         }
                     }
                 }
             }
         }
-    }
-
-    uploadChoice?.let { (local, remote) ->
-        UploadChoiceDialog(
-            localItems = local.itemCount,
-            localRooms = local.roomCount,
-            remoteName = remote.name,
-            remoteItems = remote.itemCount,
-            remoteRooms = remote.roomCount,
-            onNew = {
-                vm.clearUploadChoice()
-                vm.uploadAsNew(local.id, local.name)
-                uploadChoice = null
-            },
-            onOverwrite = {
-                vm.clearUploadChoice()
-                vm.uploadOverwrite(local.id, remote.id, local.name)
-                uploadChoice = null
-            },
-            onDismiss = {
-                vm.clearUploadChoice()
-                uploadChoice = null
-            },
-        )
-    }
-
-    // 状态里带着待选目标时也把它弹出来（比如同名判断是在 ViewModel 里做的）
-    state.uploadChoice?.takeIf { uploadChoice == null }?.let { (local, remote) ->
-        UploadChoiceDialog(
-            localItems = local.itemCount,
-            localRooms = local.roomCount,
-            remoteName = remote.name,
-            remoteItems = remote.itemCount,
-            remoteRooms = remote.roomCount,
-            onNew = {
-                vm.clearUploadChoice()
-                vm.uploadAsNew(local.id, local.name)
-            },
-            onOverwrite = {
-                vm.clearUploadChoice()
-                vm.uploadOverwrite(local.id, remote.id, local.name)
-            },
-            onDismiss = { vm.clearUploadChoice() },
-        )
-    }
-}
-
-/** 一条提示：失败红底、成功薄荷绿 —— 得让人一眼看到，不能是和说明文字同色的灰字。 */
-@Composable
-private fun NoticeBar(notice: SyncNotice) {
-    val accent = if (notice.error) Ink.Danger else Ink.Mint
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(accent.copy(alpha = 0.12f))
-            .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(
-            imageVector = if (notice.error) Icons.Filled.Warning else Icons.Filled.CheckCircle,
-            contentDescription = null,
-            tint = accent,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = notice.text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (notice.error) Ink.DangerSoft else Ink.TextPrimary,
-        )
     }
 }
 
@@ -328,7 +284,7 @@ private fun SyncListRow(
                 Text(
                     text = list.code.ifBlank { "" }
                         .let { if (it.isEmpty()) "" else "$it · " } + if (bound) {
-                        "已绑定" + lastSyncedAt.take(16).let { if (it.isBlank()) "" else " · 上次 $it" }
+                        "已绑定" + toLocalStamp(lastSyncedAt).take(16).let { if (it.isBlank()) "" else " · 上次 $it" }
                     } else {
                         "纯本地 · 只在手机上"
                     },
@@ -413,88 +369,132 @@ private fun ConflictDialog(
     )
 }
 
-/** 服务器上那份清单没了（多半是在电脑上删的）。 */
+/**
+ * 上传时认出服务器上已有同一份、但两边从没同步过：该覆盖还是合并，得用户定。
+ *
+ * 这种情况没有"正确答案"：两边各自都可能是用户真实的数据，谁覆盖谁都会丢东西。
+ * 所以把两边各有多少内容、最后什么时候动的摆出来，让用户自己看 —— 判不出来
+ * 就不替用户猜（宁可不猜，见项目里一贯的口径）。
+ */
 @Composable
-private fun RemoteGoneDialog(name: String, onReupload: () -> Unit, onUnbind: () -> Unit) {
+private fun UploadDecisionDialog(
+    listName: String,
+    decision: UploadDecision,
+    onChoose: (UploadChoice) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // 内容里最新的那个修改时间更新的一边，标出来 —— 大多数时候用户就是照它选
+    val remoteNewer = decision.remote.lastChangedAt.isNotBlank() &&
+        decision.remote.lastChangedAt > decision.local.lastChangedAt
+
     AlertDialog(
-        onDismissRequest = { },
+        onDismissRequest = onDismiss,
         containerColor = Ink.BgMid,
         shape = RoundedCornerShape(22.dp),
-        title = { Text("服务器上的清单不在了", color = Ink.TextPrimary) },
+        title = { Text("服务器上已有「$listName」", color = Ink.TextPrimary) },
         text = {
             Column {
                 Text(
-                    text = "服务器上那份「$name」已经被删掉了（可能是在电脑上删的）。",
+                    text = "编号相同，说明是同一份清单，但两台设备从没同步过 —— 没法自动判断该留谁的。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Ink.TextPrimary,
                 )
+                Spacer(Modifier.height(12.dp))
+
+                SideRow(
+                    title = "这台手机",
+                    summary = decision.local,
+                    highlight = !remoteNewer && decision.local.lastChangedAt.isNotBlank(),
+                )
                 Spacer(Modifier.height(6.dp))
-                HintText("手机上的这份还在，你想怎么办？")
+                SideRow(
+                    title = "服务器（电脑）",
+                    summary = decision.remote,
+                    highlight = remoteNewer,
+                )
+
+                Spacer(Modifier.height(12.dp))
+                HintText("选一种处理方式：")
+                Spacer(Modifier.height(8.dp))
+
+                ChoiceRow(
+                    title = "两边合并（推荐）",
+                    caption = "都留着：同名的取较新的那份，各自独有的都保留",
+                    onClick = { onChoose(UploadChoice.MergeBoth) },
+                )
+                Spacer(Modifier.height(6.dp))
+                ChoiceRow(
+                    title = "用手机上的覆盖",
+                    caption = "服务器那份换成手机的，电脑上的改动会丢掉",
+                    onClick = { onChoose(UploadChoice.OverwriteRemote) },
+                )
+                Spacer(Modifier.height(6.dp))
+                ChoiceRow(
+                    title = "用电脑上的覆盖",
+                    caption = "手机这份换成服务器的，手机上的改动会丢掉",
+                    onClick = { onChoose(UploadChoice.KeepRemote) },
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = onReupload) {
-                Text("重新传上去", color = Ink.Cyan, fontWeight = FontWeight.SemiBold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onUnbind) {
-                Text("留作纯本地", color = Ink.TextSecondary)
+            TextButton(onClick = onDismiss) {
+                Text("先不处理", color = Ink.TextSecondary)
             }
         },
     )
 }
 
-/**
- * 服务器上已经有同名清单：把两边的规模摆出来，让用户决定是新建一份还是覆盖那一份。
- * 覆盖前服务器会自动留一份整库备份，所以选错了也救得回来。
- */
+/** 一边的规模：多少物料/分组/分类、最后什么时候动的。 */
 @Composable
-private fun UploadChoiceDialog(
-    localItems: Int,
-    localRooms: Int,
-    remoteName: String,
-    remoteItems: Int,
-    remoteRooms: Int,
-    onNew: () -> Unit,
-    onOverwrite: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Ink.BgMid,
-        shape = RoundedCornerShape(22.dp),
-        title = { Text("服务器上已有「$remoteName」", color = Ink.TextPrimary) },
-        text = {
-            Column {
-                Text(
-                    text = "手机这份： $localItems 条物料 · $localRooms 个分组",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Ink.TextPrimary,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "服务器那份：$remoteItems 条物料 · $remoteRooms 个分组",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Ink.TextSecondary,
-                )
-                Spacer(Modifier.height(14.dp))
-                NeonButton(text = "新建一份", modifier = Modifier.fillMaxWidth(), onClick = onNew)
-                Spacer(Modifier.height(8.dp))
-                GhostButton(
-                    text = "覆盖服务器那一份",
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = onOverwrite,
-                )
-                Spacer(Modifier.height(8.dp))
-                HintText("新建不会动服务器上原有的数据；覆盖会丢掉上面列出的服务器数据，但服务器会自动留一份备份。")
+private fun SideRow(title: String, summary: SideSummary, highlight: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Ink.GlassFill)
+            .border(
+                1.dp,
+                if (highlight) Ink.Cyan.copy(alpha = 0.5f) else Ink.Divider,
+                RoundedCornerShape(12.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = Ink.TextPrimary, style = MaterialTheme.typography.bodyMedium)
+                if (highlight) {
+                    Spacer(Modifier.width(8.dp))
+                    TagPill("更新", color = Ink.Cyan)
+                }
             }
-        },
-        confirmButton = { },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消", color = Ink.TextSecondary)
-            }
-        },
-    )
+            Spacer(Modifier.height(3.dp))
+            HintText(
+                buildString {
+                    append("${summary.items} 条物料 · ${summary.rooms} 个分组")
+                    if (summary.lastChangedAt.isNotBlank()) {
+                        append(" · 最后改动 ${toLocalStamp(summary.lastChangedAt).take(16)}")
+                    }
+                },
+            )
+        }
+    }
+}
+
+/** 一个可点的处理方式。 */
+@Composable
+private fun ChoiceRow(title: String, caption: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .border(1.dp, Ink.Blue.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+    ) {
+        Text(title, color = Ink.Cyan, style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(2.dp))
+        HintText(caption)
+    }
 }

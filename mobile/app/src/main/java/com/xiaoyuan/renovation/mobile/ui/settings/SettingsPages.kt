@@ -31,6 +31,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xiaoyuan.renovation.mobile.data.model.ExpenseDto
 import com.xiaoyuan.renovation.mobile.data.model.ItemListDto
 import com.xiaoyuan.renovation.mobile.data.model.TrashItemDto
+import com.xiaoyuan.renovation.mobile.data.db.toLocalStamp
 import com.xiaoyuan.renovation.mobile.ui.common.LoadState
 import com.xiaoyuan.renovation.mobile.ui.common.dataOrNull
 import com.xiaoyuan.renovation.mobile.ui.design.ConfirmDialog
@@ -49,10 +50,28 @@ import com.xiaoyuan.renovation.mobile.ui.lists.NewListDialog
 import com.xiaoyuan.renovation.mobile.ui.theme.Ink
 import com.xiaoyuan.renovation.mobile.util.Fmt
 
+/**
+ * 订阅 [SettingsViewModel] 的写操作提示，自动清除（成功 4 秒 / 失败 8 秒）。
+ *
+ * 设置子页面从前压根没消费 message —— 增删改的成败都只在 ViewModel 里转一圈
+ * 就没了，像"分类下还挂着物料，删不掉"这种拒绝，用户只看到点了没反应。
+ */
+@Composable
+private fun rememberSettingsNotice(vm: SettingsViewModel): Pair<String?, Boolean> {
+    val message by vm.message.collectAsStateWithLifecycle()
+    val isError by vm.messageIsError.collectAsStateWithLifecycle()
+    LaunchedEffect(message) {
+        if (message != null) {
+            kotlinx.coroutines.delay(if (isError) 8000L else 4000L)
+            vm.consumeMessage()
+        }
+    }
+    return message to isError
+}
+
 /* ============================================================
    清单：切换、新建、改名、删除
    ============================================================ */
-
 @Composable
 fun ListsPage(listsVm: ListsViewModel, onBack: () -> Unit) {
     val lists by listsVm.lists.collectAsStateWithLifecycle()
@@ -190,11 +209,14 @@ fun RoomsPage(vm: SettingsViewModel, onBack: () -> Unit) {
     val data = state.dataOrNull
     val rooms = data?.rooms.orEmpty()
     val categories = data?.categories.orEmpty()
+    val (notice, noticeIsError) = rememberSettingsNotice(vm)
 
     SettingsPage(
         title = "分组与分类",
         caption = "分组用于分配数量，分类用于归类物料",
         onBack = onBack,
+        notice = notice,
+        noticeIsError = noticeIsError,
     ) {
         when {
             state is LoadState.Loading -> item { LoadingState(text = "正在读取…") }
@@ -363,11 +385,14 @@ fun ExpensesPage(vm: SettingsViewModel, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<ExpenseDto?>(null) }
 
     val expenses = data?.expenses.orEmpty()
+    val (notice, noticeIsError) = rememberSettingsNotice(vm)
 
     SettingsPage(
         title = "额外费用",
         caption = "运费、安装费这类不进物料单价的支出，总览里单独汇总",
         onBack = onBack,
+        notice = notice,
+        noticeIsError = noticeIsError,
     ) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -465,11 +490,14 @@ fun TrashPage(vm: SettingsViewModel, onBack: () -> Unit) {
 
     var purging by remember { mutableStateOf<TrashItemDto?>(null) }
     var clearing by remember { mutableStateOf(false) }
+    val (notice, noticeIsError) = rememberSettingsNotice(vm)
 
     SettingsPage(
         title = "回收站",
         caption = "删掉的物料先放这里，捞得回来",
         onBack = onBack,
+        notice = notice,
+        noticeIsError = noticeIsError,
     ) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -509,7 +537,7 @@ fun TrashPage(vm: SettingsViewModel, onBack: () -> Unit) {
                         )
                         Spacer(Modifier.height(3.dp))
                         Text(
-                            text = "删除于 ${item.deletedAt.take(16)} · 原价 ${Fmt.money(item.listTotal)}",
+                            text = "删除于 ${toLocalStamp(item.deletedAt).take(16)} · 原价 ${Fmt.money(item.listTotal)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = Ink.TextSecondary,
                             maxLines = 1,

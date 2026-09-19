@@ -21,6 +21,9 @@ __pycache__/
 
 # 本地/编辑器
 .zcode/
+.zcodeignore
+# 安全扫描工具的运行产物（历史、报告、状态，约 9MB）
+.mimosa/
 .idea/
 .vscode/
 *.log

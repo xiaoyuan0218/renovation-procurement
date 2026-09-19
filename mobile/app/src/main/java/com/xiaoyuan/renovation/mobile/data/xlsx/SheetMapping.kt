@@ -232,6 +232,9 @@ object SheetMapping {
         // 物料 ID 列 → 本地 id，供布点与采购记录对上号
         val idMap = mutableMapOf<String, Int>()
 
+        // 已经清过旧分配的物料：布点明细里一条物料占多行，只清第一次
+        val clearedAllocItems = mutableSetOf<Int>()
+
         for (row in itemTable.rows) {
             val name = itemTable.cell(row, "物料名称").trim()
             if (name.isEmpty()) continue
@@ -279,6 +282,10 @@ object SheetMapping {
                 warnings += "布点明细里的物料「$itemName」在表格里找不到，已跳过"
                 continue
             }
+            // 表格是「这份物料分到哪些分组」的完整快照，所以重建前先清掉旧分配 ——
+            // 否则按名称合并时，同一格会被插成两条（旧的一条 + 表格里的一条），
+            // 数量凭空翻倍。replace 模式下物料本身已经重建，这里清不到东西。
+            if (clearedAllocItems.add(itemId)) db.allocations().deleteOfItem(itemId)
             val qty = allocTable.number(row, "数量") ?: 0.0
             val room = roomId(allocTable.cell(row, "房间"))
             if (room == null) {

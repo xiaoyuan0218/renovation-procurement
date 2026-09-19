@@ -31,6 +31,14 @@ interface ListDao {
     @Query("SELECT * FROM lists WHERE name = :name LIMIT 1")
     suspend fun byName(name: String): ItemListEntity?
 
+    /**
+     * 按编号找清单 —— 与服务器对认"是不是同一份"就靠它。
+     *
+     * 空编号不参与匹配：老库回填前可能有多个空值，拿空串去匹配会张冠李戴。
+     */
+    @Query("SELECT * FROM lists WHERE code = :code AND code != '' LIMIT 1")
+    suspend fun byCode(code: String): ItemListEntity?
+
     @Query("SELECT COUNT(*) FROM lists")
     suspend fun count(): Int
 
@@ -53,8 +61,19 @@ interface ListDao {
         deleteItemsOfList(id)
         deleteRoomsOfList(id)
         deleteCategoriesOfList(id)
+        deleteSyncBindingOfList(id)
         deleteByIdDirect(id)
     }
+
+    /**
+     * 同步绑定跟着清单走：清单没了，指向它的绑定就是悬空的。
+     *
+     * 从前漏了这一步，删掉已绑定的清单会留下指向坟墓的绑定行 —— SQLite 复用
+     * 被删清单的自增 id 时，新清单会把旧基线当成自己的，甚至误走"有基线直接
+     * 合并"的路径，把两份不相干的清单混在一起。
+     */
+    @Query("DELETE FROM sync_bindings WHERE list_id = :id")
+    abstract suspend fun deleteSyncBindingOfList(id: Int)
 
     @Query("DELETE FROM record_rooms WHERE record_id IN (SELECT r.id FROM purchase_records r JOIN items i ON i.id = r.item_id WHERE i.list_id = :id)")
     suspend fun deleteRecordRoomsOfList(id: Int)

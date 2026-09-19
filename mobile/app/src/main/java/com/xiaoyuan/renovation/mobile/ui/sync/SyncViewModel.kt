@@ -10,6 +10,8 @@ import com.xiaoyuan.renovation.mobile.data.repo.okData
 import com.xiaoyuan.renovation.mobile.data.sync.MergeConflict
 import com.xiaoyuan.renovation.mobile.data.sync.ServerSession
 import com.xiaoyuan.renovation.mobile.data.sync.SyncEngine
+import com.xiaoyuan.renovation.mobile.data.sync.UploadChoice
+import com.xiaoyuan.renovation.mobile.data.sync.UploadDecision
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,10 +41,11 @@ data class SyncUiState(
     val changed: Int = 0,
     /** 需要用户拍板的冲突 */
     val conflicts: List<MergeConflict> = emptyList(),
-    /** 服务器上那份清单已经不存在了 */
-    val remoteMissing: Boolean = false,
-    /** 服务器上有同名清单，等用户选"新建一份"还是"覆盖那一份" */
-    val uploadChoice: Pair<ItemListDto, ItemListDto>? = null,
+    /**
+     * 上传时认出服务器上已有同一份、但两边从没同步过 —— 该覆盖还是合并
+     * 得用户定，非空时弹选择框。
+     */
+    val uploadDecision: UploadDecision? = null,
 )
 
 /**
@@ -138,53 +141,66 @@ class SyncViewModel(
     /**
      * 用户点了"上传到服务器"。
      *
-     * 先**现拉一次**服务器清单再判断有没有同名的 —— 用登录时缓存的那份会漏：
-     * 用户在电脑上刚改过清单名，这边还以为不重名，就默默新建了一份。
+     * 按**编号**判断服务器上是不是已经有同一份（不再按名字）：名字可以重复、
+     * 也随时会改，编号才是身份。认出同一份时，engine 会看有没有共同基线 ——
+     * 绑过的直接合并，从没同步过的（分不清谁改了什么）把两边情况带回来，
+     * 由用户定覆盖还是合并。
      */
     fun uploadRequested(list: ItemListDto) {
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true)
-            val remote = engine.remoteLists().okData.orEmpty()
-            val same = remote.firstOrNull { it.name == list.name }
-            _state.value = _state.value.copy(
-                busy = false,
-                remoteLists = remote,
-                uploadChoice = if (same == null) null else list to same,
+            val result = engine.upload(list.id, list.name)
+            val decision = (result as? ApiResult.Ok)?.data?.needsUploadDecision
+            if (decision != null) {
+                // 不弹提示，先把选择摆出来 —— 这一步没有"默认答案"
+                _state.value = _state.value.copy(busy = false, uploadDecision = decision)
+                refreshBindings()
+                return@launch
+            }
+            report(
+                result,
+                if (result is ApiResult.Ok && result.data.createdListId == null) {
+                    "服务器上已有这份清单，已对齐两边"
+                } else {
+                    "已上传到服务器，以后可以和这份清单双向同步"
+                },
             )
-            if (same == null) uploadAsNew(list.id, list.name)
-        }
-    }
-
-    fun clearUploadChoice() {
-        _state.value = _state.value.copy(uploadChoice = null)
-    }
-
-    /** 上传成服务器上的一份新清单。 */
-    fun uploadAsNew(listId: Int, name: String) {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true)
-            val result = engine.upload(listId, name, remoteListId = null)
-            report(result, "已上传到服务器，以后可以和这份清单双向同步")
             if (result is ApiResult.Ok) {
                 markChanged()
-                loadRemoteLists() // 服务器上多了一份，「服务器上的清单」要跟着更新
+                loadRemoteLists() // 服务器上可能多了一份，「服务器上的清单」要跟着更新
             }
             refreshBindings()
         }
     }
 
-    /** 覆盖服务器上已有的那一份（调用方要先确认过）。 */
-    fun uploadOverwrite(listId: Int, remoteListId: Int, name: String) {
+    /** 用户在"上传撞上同一份"的弹窗里选了一种处理方式。 */
+    fun resolveUpload(listId: Int, choice: UploadChoice) {
+        val decision = _state.value.uploadDecision ?: return
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true)
-            val result = engine.upload(listId, name, remoteListId = remoteListId, force = true)
-            report(result, "已覆盖服务器上那一份")
-            if (result is ApiResult.Ok) markChanged()
+            _state.value = _state.value.copy(busy = true, uploadDecision = null)
+            val result = engine.resolveUpload(listId, decision.remoteListId, choice)
+            report(
+                result,
+                when (choice) {
+                    UploadChoice.OverwriteRemote -> "已用手机上的内容覆盖服务器"
+                    UploadChoice.MergeBoth -> "两边已合并，各自独有的都留着"
+                    UploadChoice.KeepRemote -> "已改用电脑上的内容"
+                },
+            )
+            if (result is ApiResult.Ok) {
+                markChanged()
+                loadRemoteLists()
+            }
             refreshBindings()
         }
     }
 
-    /** 把服务器上的一份清单拉到本地，成为一份新的本地清单。 */
+    /** 关掉弹窗、什么都不做（用户还没想好）。 */
+    fun dismissUploadDecision() {
+        _state.value = _state.value.copy(uploadDecision = null)
+    }
+
+    /** 把服务器上的一份清单拉到本地；本地已有同一份（编号相同）则直接对齐。 */
     fun pullAsNew(remoteListId: Int, name: String) {
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true)
@@ -200,21 +216,24 @@ class SyncViewModel(
     fun syncNow(listId: Int, preferLocal: Boolean = false) {
         pendingListId = listId
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, conflicts = emptyList(), remoteMissing = false)
+            _state.value = _state.value.copy(busy = true, conflicts = emptyList())
             when (val result = engine.sync(listId, preferLocal)) {
                 is ApiResult.Ok -> {
                     val outcome = result.data
                     _state.value = _state.value.copy(
                         busy = false,
                         conflicts = outcome.conflicts,
-                        remoteMissing = outcome.remoteMissing,
+                        // 服务器那份没了：engine 已经自动解绑，提示走应用级通道
+                        // （AppShellHost 的 Snackbar，挂在导航之上，任何页面都看得到），
+                        // 这里不再单独提示，免得同一件事弹两条
                         notice = when {
                             outcome.hasConflicts -> null
                             outcome.remoteMissing -> null
                             else -> SyncNotice("已同步")
                         },
                     )
-                    if (!outcome.hasConflicts && !outcome.remoteMissing) {
+                    // 解绑也是状态变化，界面要跟着更新
+                    if (!outcome.hasConflicts) {
                         markChanged()
                         refreshBindings()
                     }
@@ -235,22 +254,6 @@ class SyncViewModel(
         val listId = pendingListId ?: return
         _state.value = _state.value.copy(conflicts = emptyList())
         syncNow(listId, preferLocal = preferLocal)
-    }
-
-    /** 服务器上那份清单没了：重新上传成一份新的，或者干脆解除绑定。 */
-    fun resolveRemoteMissing(reuploadAsNew: Boolean, listId: Int, name: String) {
-        _state.value = _state.value.copy(remoteMissing = false)
-        viewModelScope.launch {
-            if (reuploadAsNew) {
-                engine.unbind(listId)
-                uploadAsNew(listId, name)
-            } else {
-                engine.unbind(listId)
-                markChanged()
-                refreshBindings()
-                _state.value = _state.value.copy(notice = SyncNotice("已解除绑定，这份清单继续在本地用"))
-            }
-        }
     }
 
     fun unbind(listId: Int, keepRemote: Boolean = true) {

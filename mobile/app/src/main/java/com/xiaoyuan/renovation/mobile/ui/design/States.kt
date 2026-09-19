@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -189,6 +191,50 @@ fun InlineBanner(
                 .size(6.dp)
                 .clip(CircleShape)
                 .background(accent),
+        )
+        Spacer(Modifier.width(9.dp))
+        Text(
+            text = text,
+            color = Ink.TextPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+/**
+ * 浮在内容之上的提示条：提示出现/消失时**不占布局空间**，所以下面的内容一动不动。
+ *
+ * 与 [InlineBanner] 的区别就在这里 —— 那个是正常布局流里的元素，一出现就把
+ * 下方内容整体往下顶，消失又弹回去，用户看着就是"页面抖了一下"。
+ * 这个用 Box 叠上去，只在屏幕顶部盖一条，底下的列表、表单都不移位。
+ *
+ * 底色不透明（[Ink.BgMid] 打底再叠强调色）：半透明的话会透出下面滚动的文字，
+ * 糊成一团看不清。外框描边与阴影保证它和内容之间有清楚的分界。
+ */
+@Composable
+fun FloatingNotice(
+    text: String,
+    modifier: Modifier = Modifier,
+    accent: Color = Ink.Mint,
+    isError: Boolean = false,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(elevation = 10.dp, shape = shape, clip = false)
+            .clip(shape)
+            .background(Ink.BgMid)
+            .background(accent.copy(alpha = 0.18f))
+            .border(1.dp, accent.copy(alpha = 0.5f), shape)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = if (isError) Icons.Filled.ErrorOutline else Icons.Filled.CheckCircle,
+            contentDescription = null,
+            tint = accent,
+            modifier = Modifier.size(17.dp),
         )
         Spacer(Modifier.width(9.dp))
         Text(

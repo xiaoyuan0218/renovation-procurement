@@ -98,16 +98,18 @@ class SyncApi(
             .build()
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw SyncHttpException(response.code, describe(response.code, text))
-            }
-            // 返回网页而不是数据：旧版后端没有这个接口，被前端兜底路由接住、发回了首页。
-            // 直接抛 JSON 解析错的话，用户看到的是一串 "Unexpected JSON token..."，根本看不出该干嘛
+            // 返回网页而不是数据：旧版后端没有这些接口，被兜底路由接住、发回了首页。
+            // 这个判断要放在状态码检查**之前** —— 有的旧后端对未知路径回的是
+            // 404/501 加一页 HTML，先看状态码的话用户只会看到"请求失败（501）"，
+            // 根本想不到是版本问题。
             if (text.trimStart().startsWith("<")) {
                 throw SyncHttpException(
                     code = 426,
                     message = "服务器上还是旧版，没有同步功能 —— 先把服务器升级到最新版再试",
                 )
+            }
+            if (!response.isSuccessful) {
+                throw SyncHttpException(response.code, describe(response.code, text))
             }
             return text
         }

@@ -29,7 +29,7 @@ data class ItemListEntity(
     val sort: Int = 0,
     @ColumnInfo(name = "created_at") val createdAt: String = "",
     @ColumnInfo(name = "updated_at") val updatedAt: String = "",
-    /** 清单编号（见 ListCodes）：改名字、重名加后缀都不影响它，两端靠它对认 */
+    /** 清单编号（见 ListCodes）：改名字、重名都不影响它，两端靠它对认 */
     val code: String = "",
 )
 
