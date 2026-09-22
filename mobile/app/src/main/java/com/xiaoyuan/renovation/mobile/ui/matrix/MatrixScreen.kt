@@ -153,6 +153,7 @@ fun MatrixScreen(
                         placeholder = "输入名称筛选",
                         leadingIcon = Icons.Filled.Search,
                         imeAction = ImeAction.Search,
+                        onClear = { vm.setQuery("") },
                     )
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {

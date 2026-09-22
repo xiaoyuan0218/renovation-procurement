@@ -106,6 +106,8 @@ fun AppTextField(
     enabled: Boolean = true,
     leadingIcon: ImageVector? = null,
     trailing: (@Composable () -> Unit)? = null,
+    /** 传了就在有内容时于尾部显示一个 ×，点它清空 —— 搜索框重来一次的出口。 */
+    onClear: (() -> Unit)? = null,
     supportingText: String? = null,
     accent: Color = Ink.Blue,
     onDone: (() -> Unit)? = null,
@@ -126,7 +128,24 @@ fun AppTextField(
         leadingIcon = leadingIcon?.let { icon ->
             { Icon(icon, contentDescription = null, tint = Ink.TextSecondary, modifier = Modifier.size(18.dp)) }
         },
-        trailingIcon = trailing,
+        trailingIcon = when {
+            // 自己带了尾部内容的，别去抢它的位置
+            trailing != null -> trailing
+            // 空着的时候不显示：没有内容可清，摆个灰 × 只是噪声
+            onClear != null && value.isNotEmpty() -> {
+                {
+                    Icon(
+                        imageVector = Icons.Filled.Clear,
+                        contentDescription = "清空",
+                        tint = Ink.TextMuted,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { onClear?.invoke() },
+                    )
+                }
+            }
+            else -> null
+        },
         visualTransformation = visualTransformation,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
         keyboardActions = KeyboardActions(
@@ -296,6 +315,7 @@ fun <T> AppSelect(
                             onValueChange = { keyword = it },
                             label = "搜索",
                             imeAction = ImeAction.Done,
+                            onClear = { keyword = "" },
                         )
                     }
                     GlassDivider()

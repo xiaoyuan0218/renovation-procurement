@@ -160,6 +160,7 @@ fun ItemsScreen(
                             placeholder = "名称关键词",
                             leadingIcon = Icons.Filled.Search,
                             imeAction = ImeAction.Search,
+                            onClear = { vm.setQuery("") },
                             modifier = Modifier
                                 .weight(1f)
                                 .height(cellHeight),
