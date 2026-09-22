@@ -115,6 +115,18 @@ object Snapshot {
         listId: Int,
         payload: SyncPayload,
     ): Map<String, Int> = db.withTransaction {
+        // 重建之前，先把本地现有行的主键按名字收起来。
+        //
+        // 落地是「整份清掉再插」：每行都拿新主键的话，界面里缓存的旧 id 会当场
+        // 失效 —— 同步刚跑完，列表点开物料就是「物料不存在」。所以同名行按出现
+        // 顺序沿用原 id，只有服务器新带来的行才用自增主键。
+        val spareRooms = spareIds(db.rooms().byList(listId)) { it.name to it.id }
+        val spareCategories = spareIds(db.categories().byList(listId)) { it.name to it.id }
+        val spareItems = spareIds(db.items().all(listId)) { it.name to it.id }
+        val spareExpenses = spareIds(db.expenses().byList(listId)) {
+            "${it.kind}|${it.amount}|${it.date}|${it.vendor}|${it.orderNo}" to it.id
+        }
+
         clear(db, listId)
 
         // 编号跟着服务器那份走，两边显示同一个码，用户才对得上是同一份清单
@@ -129,6 +141,7 @@ object Snapshot {
         payload.rooms.forEach { room ->
             val newId = db.rooms().insert(
                 RoomEntity(
+                    id = spareRooms[room.name]?.removeFirstOrNull() ?: 0,
                     listId = listId, name = room.name, sort = room.sort,
                     createdAt = room.createdAt, updatedAt = room.updatedAt,
                 ).adopted(),
@@ -143,6 +156,7 @@ object Snapshot {
         payload.categories.forEach { category ->
             val newId = db.categories().insert(
                 CategoryEntity(
+                    id = spareCategories[category.name]?.removeFirstOrNull() ?: 0,
                     listId = listId, name = category.name, sort = category.sort,
                     createdAt = category.createdAt, updatedAt = category.updatedAt,
                 ).adopted(),
@@ -157,6 +171,7 @@ object Snapshot {
         payload.items.forEach { item ->
             val newId = db.items().insert(
                 ItemEntity(
+                    id = spareItems[item.name]?.removeFirstOrNull() ?: 0,
                     listId = listId,
                     name = item.name,
                     categoryId = item.categoryId?.let { categoryIds[it] },
@@ -217,8 +232,10 @@ object Snapshot {
         }
 
         payload.expenses.forEach { expense ->
+            val key = "${expense.kind}|${expense.amount}|${expense.date}|${expense.vendor}|${expense.orderNo}"
             db.expenses().insert(
                 ExtraExpenseEntity(
+                    id = spareExpenses[key]?.removeFirstOrNull() ?: 0,
                     listId = listId,
                     kind = expense.kind,
                     amount = expense.amount,
@@ -234,6 +251,24 @@ object Snapshot {
         }
 
         map
+    }
+
+    /**
+     * 把现有行按配对键排成「主键队列」，供重建时按序沿用。
+     *
+     * 同键的多行必须各排各的：只认第一个的话，第二条仍会另拿新主键，界面里
+     * 那一条的 id 照样失效。
+     */
+    private fun <T> spareIds(
+        rows: List<T>,
+        key: (T) -> Pair<String, Int>,
+    ): Map<String, ArrayDeque<Int>> {
+        val out = mutableMapOf<String, ArrayDeque<Int>>()
+        rows.forEach { row ->
+            val (name, id) = key(row)
+            out.getOrPut(name) { ArrayDeque() }.addLast(id)
+        }
+        return out
     }
 
     /** 在本地新建一份清单并灌入内容，返回新清单 id。 */

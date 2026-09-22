@@ -539,6 +539,74 @@ class SyncEngineTest {
         assertEquals("物料要落到本地", 1, db.items().all(listId).size)
     }
 
+    /* ---------------- 落地重建：本地行的 id 必须稳住 ---------------- */
+
+    @Test
+    fun `自动同步落地后本地物料 id 不变——列表点开才不会报物料不存在`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("装修采购", code)
+        // 服务器没动过（指纹与绑定一致），本地新增了一条 → 该推上去
+        db.sync().upsert(
+            binding(listId, remoteListId = 5).copy(
+                fingerprint = "fp-server",
+                baseline = emptyBaselineJson(code),
+            ),
+        )
+        val localId = db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "筒灯", price = 10.0,
+            ),
+        ).toInt()
+        currentList.set(listId)
+        awaitUntil("当前清单就位") { currentList.flow.value == listId }
+        // 服务器落库后回一份内容相同、但 id 由它分配的 payload
+        server.enqueue(response(200, snapshotJson("fp-server", code)))
+        server.enqueue(response(200, snapshotWithItem("fp-after", code, price = 10.0)))
+
+        engine.autoSyncCurrent()
+
+        assertEquals("本地只能有这一条", 1, db.items().all(listId).size)
+        assertNotNull(
+            "落地后原来那个 id 还得能查到 —— 它一失效，界面里缓存的 id 点开就是「物料不存在」",
+            db.items().byId(localId),
+        )
+    }
+
+    @Test
+    fun `落地重建时同名行各沿用各自的 id，不会串位`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("装修采购", code)
+        db.sync().upsert(
+            binding(listId, remoteListId = 5).copy(
+                fingerprint = "fp-server",
+                baseline = emptyBaselineJson(code),
+            ),
+        )
+        val first = db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "筒灯", price = 10.0,
+            ),
+        ).toInt()
+        val second = db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "筒灯", price = 20.0,
+            ),
+        ).toInt()
+        currentList.set(listId)
+        awaitUntil("当前清单就位") { currentList.flow.value == listId }
+        server.enqueue(response(200, snapshotJson("fp-server", code)))
+        server.enqueue(response(200, twoLampsJson("fp-after", code)))
+
+        engine.autoSyncCurrent()
+
+        val rows = db.items().all(listId).sortedBy { it.id }
+        assertEquals("两条同名物料都要在", 2, rows.size)
+        assertEquals("第一条沿用原 id", first, rows[0].id)
+        assertEquals("价格跟着各自那条走，没串位", 10.0, rows[0].price, 0.0)
+        assertEquals("第二条沿用原 id", second, rows[1].id)
+        assertEquals("价格跟着各自那条走，没串位", 20.0, rows[1].price, 0.0)
+    }
+
     /* ---------------- 拉取：本地没有同一份时真的新建 ---------------- */
 
     @Test
@@ -705,6 +773,22 @@ class SyncEngineTest {
            "rooms":[],"categories":[],
            "items":[{"id":101,"name":"筒灯","price":$price,"qty_total":1.0,
                      "created_at":"2026-09-01 10:00:00","updated_at":"$updated",
+                     "allocations":[],"records":[]}],
+           "expenses":[]}}
+    """.trimIndent()
+
+    /** 服务器那份带两条**同名**物料，价格不同 —— 用来验落地重建时 id 不会串位。 */
+    private fun twoLampsJson(fingerprint: String, code: String) = """
+        {"fingerprint":"$fingerprint",
+         "payload":{"version":1,
+           "list":{"name":"装修采购","note":"","sort":0,"code":"$code",
+                   "created_at":"2026-09-01 10:00:00","updated_at":"2026-09-01 10:00:00"},
+           "rooms":[],"categories":[],
+           "items":[{"id":101,"name":"筒灯","price":10.0,"qty_total":1.0,
+                     "created_at":"2026-09-01 10:00:00","updated_at":"2026-09-01 10:00:00",
+                     "allocations":[],"records":[]},
+                    {"id":102,"name":"筒灯","price":20.0,"qty_total":1.0,
+                     "created_at":"2026-09-01 10:00:00","updated_at":"2026-09-01 10:00:00",
                      "allocations":[],"records":[]}],
            "expenses":[]}}
     """.trimIndent()
