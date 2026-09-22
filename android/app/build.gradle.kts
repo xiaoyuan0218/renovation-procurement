@@ -15,18 +15,33 @@ android {
         applicationId = "com.xiaoyuan.renovation"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
+    }
+
+    signingConfigs {
+        // 固定一把自签名密钥，随仓库走。
+        //
+        // 原来用的是默认 debug 签名 —— 那把密钥由构建机现场生成：CI 的 runner
+        // 每次都是全新的，于是每次构建出来的签名都不一样，手机上装不上（提示
+        // 签名不一致）。换成这把固定的之后本地与 CI 一致，新包能覆盖旧包。
+        create("shared") {
+            storeFile = file("../../keystore/caizhidao.jks")
+            storePassword = "caizhidao"
+            keyAlias = "caizhidao"
+            keyPassword = "caizhidao"
+        }
     }
 
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("shared")
         }
         release {
-            // 个人自用：用 debug 签名，产出可直接安装的 APK
-            signingConfig = signingConfigs.getByName("debug")
+            // 个人自用：自签名，产出可直接安装的 APK
+            signingConfig = signingConfigs.getByName("shared")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
