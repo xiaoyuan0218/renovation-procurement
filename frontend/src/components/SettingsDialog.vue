@@ -385,12 +385,41 @@ const logs = ref([])
 const logsTotal = ref(0)
 const logsLoading = ref(false)
 const logPage = ref(1)
+// 筛选：来源 / 类别 / 结果 / 关键词。类别值与接口前缀的对应关系在后端
+// audit.CATEGORY_PREFIXES，这里只传值
+const logSource = ref('all')
+const logCategory = ref('all')
+const logFailed = ref('all')
+const logQuery = ref('')
+// 服务端分页：每页条数记在 localStorage，跟物料清单同一套交互
+const LOG_SIZE_OPTIONS = [20, 50, 100, 200]
+const logPageSize = ref(Number(localStorage.getItem('logs.pageSize')) || 50)
 
-async function loadLogs() {
+const LOG_CATEGORIES = [
+  { value: 'all', label: '全部类别' },
+  { value: 'item', label: '物料与采购' },
+  { value: 'expense', label: '额外费用' },
+  { value: 'roomcat', label: '分组与分类' },
+  { value: 'list', label: '清单' },
+  { value: 'key', label: 'API 密钥' },
+  { value: 'auth', label: '账号' },
+  { value: 'log', label: '日志' },
+]
+
+function logsUrl(pageNum) {
+  const size = Math.max(1, Math.floor(Number(logPageSize.value) || 50))
+  const p = new URLSearchParams({ page: String(pageNum), page_size: String(size) })
+  if (logSource.value !== 'all') p.set('source', logSource.value)
+  if (logCategory.value !== 'all') p.set('category', logCategory.value)
+  if (logFailed.value === 'failed') p.set('failed', '1')
+  if (logQuery.value.trim()) p.set('q', logQuery.value.trim())
+  return `/api/logs?${p}`
+}
+
+async function fetchLogs(pageNum) {
   logsLoading.value = true
   try {
-    logPage.value = 1
-    const d = await api.get('/api/logs?page=1&page_size=50')
+    const d = await api.get(logsUrl(pageNum))
     logs.value = d.items
     logsTotal.value = d.total
   } catch (e) {
@@ -400,15 +429,29 @@ async function loadLogs() {
   }
 }
 
-async function moreLogs() {
-  const next = logPage.value + 1
-  try {
-    const d = await api.get(`/api/logs?page=${next}&page_size=50`)
-    logPage.value = next
-    logs.value.push(...d.items)
-  } catch (e) {
-    ElMessage.error(e.message)
-  }
+// 筛选一变就回到第一页重查
+async function loadLogs() {
+  logPage.value = 1
+  await fetchLogs(1)
+}
+
+// 下拉的筛选一改就查；关键词等回车或查询按钮，免得打一半就发请求
+watch([logSource, logCategory, logFailed], () => {
+  logPage.value = 1
+  fetchLogs(1)
+})
+
+function onLogPageChange(p) {
+  logPage.value = p
+  fetchLogs(p)
+}
+
+function onLogSizeChange(v) {
+  const n = Math.floor(Number(v))
+  logPageSize.value = Number.isFinite(n) && n >= 1 ? Math.min(n, 10000) : 50
+  try { localStorage.setItem('logs.pageSize', String(logPageSize.value)) } catch { /* 隐私模式禁写 */ }
+  logPage.value = 1
+  fetchLogs(1)
 }
 
 async function undoLog(row) {
@@ -504,7 +547,7 @@ async function undoLog(row) {
         </el-table>
       </el-tab-pane>
 
-      <el-tab-pane label="数据备份">
+      <el-tab-pane label="备份">
         <div class="data-cards">
           <a class="data-card" :href="exportUrl">
             <span class="dc-icon dc-blue">
@@ -657,12 +700,27 @@ async function undoLog(row) {
                   title="密钥等同管理员权限：拿着它就能读写全部清单。只存在你要用的那台设备上；怀疑泄漏就立刻撤销。" />
       </el-tab-pane>
 
-      <el-tab-pane label="操作日志">
+      <el-tab-pane label="日志">
         <div class="add-row">
-          <span class="add-hint">网页与 API 密钥的每次改动都在这里；只有最新一条能回退</span>
-          <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
+          <el-select v-model="logSource" size="small" class="log-filter">
+            <el-option label="全部来源" value="all" />
+            <el-option label="本人" value="human" />
+            <el-option label="API 密钥" value="api" />
+          </el-select>
+          <el-select v-model="logCategory" size="small" class="log-filter">
+            <el-option v-for="cat in LOG_CATEGORIES" :key="cat.value"
+                       :label="cat.label" :value="cat.value" />
+          </el-select>
+          <el-select v-model="logFailed" size="small" class="log-filter">
+            <el-option label="全部结果" value="all" />
+            <el-option label="仅未成功" value="failed" />
+          </el-select>
+          <el-input v-model="logQuery" size="small" clearable
+                    placeholder="搜动作，如物料名" class="log-search"
+                    @keyup.enter="loadLogs" @clear="loadLogs" />
+          <el-button size="small" :loading="logsLoading" @click="loadLogs">查询</el-button>
         </div>
-        <el-table :data="logs" size="small" max-height="340" v-loading="logsLoading">
+        <el-table :data="logs" size="small" max-height="300" v-loading="logsLoading">
           <el-table-column prop="at" label="时间" width="138" />
           <el-table-column label="来源" width="126" show-overflow-tooltip>
             <template #default="{ row }">{{ row.actor_name }}</template>
@@ -685,10 +743,20 @@ async function undoLog(row) {
             <el-empty description="还没有操作记录" :image-size="70" />
           </template>
         </el-table>
-        <div class="log-foot">
-          <el-button link size="small" :disabled="logs.length >= logsTotal"
-                     @click="moreLogs">加载更早的</el-button>
-          <span class="hint">共 {{ logsTotal }} 条 · 只保留最近 2000 条 · 回退仅限最近一次操作</span>
+        <div v-if="logs.length" class="log-foot">
+          <span class="pager-total">共 {{ logsTotal }} 条</span>
+          <el-select v-model="logPageSize" class="pager-size" size="small"
+                     filterable allow-create default-first-option
+                     @change="onLogSizeChange">
+            <el-option v-for="n in LOG_SIZE_OPTIONS" :key="n"
+                       :label="`${n} 条/页`" :value="String(n)" />
+          </el-select>
+          <el-pagination :current-page="logPage"
+                         :page-size="Math.max(1, Math.floor(Number(logPageSize) || 50))"
+                         :total="logsTotal"
+                         layout="prev, pager, next, jumper" background
+                         @current-change="onLogPageChange" />
+          <span class="hint">回退仅限最近一次操作</span>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -710,8 +778,8 @@ async function undoLog(row) {
 </template>
 
 <style scoped>
-/* 七个页签均分面板宽度：中文标签都很短，一行放得下，左右滚动箭头是多余的
-   （Element Plus 仍按它自己算出的内容宽度显示箭头，这里直接盖掉） */
+/* 七个页签均分面板宽度。名字必须短：nav 稍微宽过容器哪怕几像素，
+   Element Plus 就会切到滚动模式把两端裁掉（is-scrollable + 位移） */
 .settings-tabs :deep(.el-tabs__nav) {
   display: flex;
   width: 100%;
@@ -727,6 +795,18 @@ async function undoLog(row) {
 .settings-tabs :deep(.el-tabs__nav-prev),
 .settings-tabs :deep(.el-tabs__nav-next) {
   display: none;
+}
+/* EP 对「放不放得下」的测量总比 flex 均分宽几个像素，七个页签必进滚动
+   模式并给 nav 一个位移，把第一列裁掉一截。箭头已隐藏、内边距已归零，
+   这里再把位移禁掉 —— 七个页签本来就都看得见，不需要它滚 */
+.settings-tabs :deep(.el-tabs__nav) {
+  transform: none !important;
+}
+/* 内容区高度固定：各页签长短不一，跟着内容伸缩的话弹窗会一跳一跳的。
+   矮的页签留白，高的（账号、备份）在内部滚 */
+.settings-tabs :deep(.el-tabs__content) {
+  height: min(560px, 62vh);
+  overflow-y: auto;
 }
 
 .add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
@@ -785,7 +865,17 @@ async function undoLog(row) {
 .doc-link { text-decoration: none; }
 .doc-link:hover { color: var(--ios-blue); }
 .fail-tag { margin-left: 6px; }
-.log-foot { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.log-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.pager-total { font-size: 13px; color: var(--ios-label-2); margin-right: auto; }
+.pager-size { width: 112px; }
+.log-filter { width: 116px; }
+.log-search { width: 150px; }
 .key-tip { margin: 0 0 10px; font-size: 13px; color: var(--ios-label-2); }
 /* 密钥是一长串大写字母数字，等宽字体才好逐段核对 */
 .key-value :deep(.el-input__inner) {

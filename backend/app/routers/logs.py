@@ -5,6 +5,7 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .. import audit
@@ -32,14 +33,34 @@ def _view(row: OperationLog, undoable_id: int | None) -> dict:
 
 
 @router.get("")
-def list_logs(page: int = 1, page_size: int = 50,
+def list_logs(page: int = 1, page_size: int = 50, q: str | None = None,
+              source: str = "all", category: str = "all", failed: bool = False,
               user=Depends(require_user), db: Session = Depends(get_db)):
-    """操作日志，最新在前。can_undo 为 true 的那条是当前能一键回退的。"""
+    """操作日志，最新在前，支持筛选。
+
+    q 按动作描述模糊搜（动作里带着物料名，搜物料名就能翻出它的全部操作）；
+    source 选 human / api；category 按接口前缀归类；failed 只看没成功的。
+    can_undo 为 true 的那条是当前能一键回退的（与筛选无关，永远指向最新）。
+    """
     page = max(1, page)
     page_size = min(max(1, page_size), 200)
+    query = db.query(OperationLog)
+    if q:
+        query = query.filter(OperationLog.action.contains(q))
+    if source in ("human", "api"):
+        query = query.filter(OperationLog.actor_kind == source)
+    if category != "all":
+        prefixes = audit.CATEGORY_PREFIXES.get(category)
+        if prefixes:
+            query = query.filter(or_(*[
+                OperationLog.path.like(f"{p}%") for p in prefixes]))
+        else:
+            return {"total": 0, "undoable_id": audit.undoable_id(db), "items": []}
+    if failed:
+        query = query.filter(OperationLog.status_code >= 400)
+    total = query.count()
     undoable = audit.undoable_id(db)
-    total = db.query(OperationLog.id).count()
-    rows = (db.query(OperationLog).order_by(OperationLog.id.desc())
+    rows = (query.order_by(OperationLog.id.desc())
             .offset((page - 1) * page_size).limit(page_size).all())
     return {
         "total": total,

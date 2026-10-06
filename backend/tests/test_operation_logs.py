@@ -205,6 +205,47 @@ def test_undo_expense_create_and_update(client):
     assert rows[0]["amount"] == 45
 
 
+# ---------------------------------------------------------------- 筛选
+
+def test_filters(client):
+    _create_item(client, "筒灯")
+    client.post("/api/keys", json={"name": "快捷指令"})
+    key = client.post("/api/keys", json={"name": "脚本"}).json()["key"]
+    client.cookies.clear()
+    client.post("/api/items", headers={"X-API-Key": key},
+                json={"name": "程序件", "qty_total": 1, "price": 1})
+
+    def actions(**params):
+        rows = client.get("/api/logs", params=params,
+                          headers={"X-API-Key": key}).json()["items"]
+        return [x["action"] for x in rows]
+
+    # 关键词：动作描述里带着物料名，搜名字就能翻出它的全部操作
+    lamp = actions(q="筒灯")
+    assert lamp and all("筒灯" in a for a in lamp)
+
+    # 来源
+    api_rows = client.get("/api/logs", params={"source": "api"},
+                          headers={"X-API-Key": key}).json()["items"]
+    assert api_rows and all(x["actor_kind"] == "api" for x in api_rows)
+    human_rows = client.get("/api/logs", params={"source": "human"},
+                            headers={"X-API-Key": key}).json()["items"]
+    assert human_rows and all(x["actor_kind"] == "human" for x in human_rows)
+
+    # 类别：密钥相关的只有两条生成日志
+    key_rows = client.get("/api/logs", params={"category": "key"},
+                          headers={"X-API-Key": key}).json()["items"]
+    assert key_rows and all("API 密钥" in x["action"] for x in key_rows)
+
+    # 失败：伪造一次 404 后只看未成功的；不带 failed 时全部都返回
+    client.patch("/api/items/999", json={"price": 1}, headers={"X-API-Key": key})
+    failed_rows = client.get("/api/logs", params={"failed": "true"},
+                             headers={"X-API-Key": key}).json()["items"]
+    assert failed_rows and all(x["status_code"] >= 400 for x in failed_rows)
+    all_rows = client.get("/api/logs", headers={"X-API-Key": key}).json()["items"]
+    assert any(x["status_code"] >= 400 for x in all_rows)
+
+
 # ---------------------------------------------------------------- 保留上限
 
 def test_trim_keeps_recent_logs(client):

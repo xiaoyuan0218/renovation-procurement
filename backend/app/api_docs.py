@@ -266,7 +266,10 @@ DOCS = {
     ("GET", "/api/logs"): (
         "查操作日志",
         "谁在什么时候动了数据，人在网页 / App 上的改动与程序拿 API 密钥做的改动"
-        "都在里面，动作是中文描述。最新的一条若支持回退，会带 can_undo 标志。",
+        "都在里面，动作是中文描述。支持筛选：q 按动作内容模糊搜（动作里带着"
+        "物料名，搜物料名就能翻出它的全部操作）、source=human/api 按来源、"
+        "category=item/expense/roomcat/list/key/auth/log 按类别、failed=true "
+        "只看没成功的。最新的一条若支持回退，会带 can_undo 标志。",
     ),
     ("POST", "/api/logs/{id}/undo"): (
         "回退操作",

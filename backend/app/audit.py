@@ -93,6 +93,19 @@ def action_name(method: str, path: str) -> str | None:
     return ACTIONS.get((method, normalize_path(path)))
 
 
+# 日志按接口前缀归类，供「按类别筛选」用。放查询侧而不是落库：
+# operation_logs 的表结构已经定型，按 path 前缀推导同样能筛，省一次迁移
+CATEGORY_PREFIXES = {
+    "item": ("/api/items", "/api/records", "/api/trash", "/api/matrix"),
+    "expense": ("/api/expenses",),
+    "roomcat": ("/api/rooms", "/api/categories"),
+    "list": ("/api/lists",),
+    "key": ("/api/keys",),
+    "auth": ("/api/auth",),
+    "log": ("/api/logs",),
+}
+
+
 def actor_of(request, db: Session) -> tuple[str, str]:
     """这次请求是谁发起的：API 密钥认到具体的钥匙，网页/App 认到账号。"""
     key = auth._extract_api_key(request)
