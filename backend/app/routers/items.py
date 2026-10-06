@@ -1,8 +1,9 @@
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from .. import audit
 from ..db import get_db
 from ..deps import category_in_list, current_list, item_in_list
 from ..models import (Allocation, Category, Item, ItemList, PurchaseRecord, utcnow,
@@ -69,7 +70,8 @@ def list_items(category_id: int | None = None, q: str | None = None,
 
 
 @router.post("", response_model=ItemOut)
-def create_item(data: ItemIn, lst: ItemList = Depends(current_list),
+def create_item(data: ItemIn, request: Request,
+                lst: ItemList = Depends(current_list),
                 db: Session = Depends(get_db)):
     item = Item(list_id=lst.id, name=data.name,
                 category_id=category_in_list(db, data.category_id, lst),
@@ -84,6 +86,9 @@ def create_item(data: ItemIn, lst: ItemList = Depends(current_list),
     db.add(item)
     db.commit()
     db.refresh(item)
+    request.state.audit_subject = f"物料「{item.name}」"
+    # 新增的回退 = 把它删掉；创建之前它不存在，所以不需要快照
+    request.state.audit_undo = {"kind": "item_delete", "data": {"item_id": item.id}}
     return compute.item_dict(item)
 
 
@@ -94,7 +99,8 @@ def get_item(item_id: int, lst: ItemList = Depends(current_list),
 
 
 @router.put("/{item_id}", response_model=ItemOut)
-def update_item(item_id: int, data: ItemIn, lst: ItemList = Depends(current_list),
+def update_item(item_id: int, data: ItemIn, request: Request,
+                lst: ItemList = Depends(current_list),
                 db: Session = Depends(get_db)):
     item = item_in_list(db, item_id, lst)
     # 整条替换（含采购记录与分配）会覆盖掉这期间别处写进去的内容，
@@ -103,6 +109,8 @@ def update_item(item_id: int, data: ItemIn, lst: ItemList = Depends(current_list
         raise HTTPException(
             409, "这条物料在别处已经被修改过了（可能是另一台设备记了一笔采购），"
                  "请刷新后重新编辑，以免覆盖掉那边的改动")
+    request.state.audit_undo = {"kind": "item_restore",
+                                "data": audit.snapshot_item(db, item_id)}
     item.name = data.name
     item.category_id = category_in_list(db, data.category_id, lst)
     item.brand = data.brand or ""
@@ -120,13 +128,17 @@ def update_item(item_id: int, data: ItemIn, lst: ItemList = Depends(current_list
     item.touch()
     db.commit()
     db.refresh(item)
+    request.state.audit_subject = f"物料「{item.name}」"
     return compute.item_dict(item)
 
 
 @router.patch("/{item_id}", response_model=ItemOut)
-def patch_item(item_id: int, data: ItemPatchIn, lst: ItemList = Depends(current_list),
+def patch_item(item_id: int, data: ItemPatchIn, request: Request,
+               lst: ItemList = Depends(current_list),
                db: Session = Depends(get_db)):
     item = item_in_list(db, item_id, lst)
+    request.state.audit_undo = {"kind": "item_restore",
+                                "data": audit.snapshot_item(db, item_id)}
     fields = data.model_dump(exclude_unset=True)
     if fields.get("category_id") is not None:
         category_in_list(db, fields["category_id"], lst)
@@ -136,27 +148,35 @@ def patch_item(item_id: int, data: ItemPatchIn, lst: ItemList = Depends(current_
     item.touch()
     db.commit()
     db.refresh(item)
+    request.state.audit_subject = f"物料「{item.name}」"
     return compute.item_dict(item)
 
 
 @router.delete("/{item_id}")
-def delete_item(item_id: int, lst: ItemList = Depends(current_list),
+def delete_item(item_id: int, request: Request,
+                lst: ItemList = Depends(current_list),
                 db: Session = Depends(get_db)):
     """软删：移进回收站。它的分配与采购记录都留着 —— 一条物料的付款历史
     常常是几笔真实转账，删错了一次性清光代价太大（要彻底删去回收站里清）。"""
     item = item_in_list(db, item_id, lst)
+    request.state.audit_undo = {"kind": "item_restore",
+                                "data": audit.snapshot_item(db, item_id)}
     item.deleted_at = utcnow()
     item.touch()
     db.commit()
+    request.state.audit_subject = f"物料「{item.name}」"
     return {"ok": True, "trashed": True}
 
 
 # ---------- 采购记录 ----------
 
 @router.post("/{item_id}/records", response_model=ItemOut)
-def add_record(item_id: int, data: RecordIn, lst: ItemList = Depends(current_list),
+def add_record(item_id: int, data: RecordIn, request: Request,
+               lst: ItemList = Depends(current_list),
                db: Session = Depends(get_db)):
     item = item_in_list(db, item_id, lst)
+    request.state.audit_undo = {"kind": "item_restore",
+                                "data": audit.snapshot_item(db, item_id)}
     item.records.append(PurchaseRecord(
         qty=data.qty or 0, amount=data.amount or 0,
         date=data.date or datetime.date.today().isoformat(),
@@ -166,18 +186,25 @@ def add_record(item_id: int, data: RecordIn, lst: ItemList = Depends(current_lis
     item.touch()
     db.commit()
     db.refresh(item)
+    qty_s = f"{data.qty:g}" if data.qty else "0"
+    amount_s = f"{data.amount:g}" if data.amount else "0"
+    request.state.audit_subject = f"物料「{item.name}」买 {qty_s} {item.unit} 花 {amount_s} 元"
     return compute.item_dict(item)
 
 
 @router.delete("/{item_id}/records", response_model=ItemOut)
-def clear_records(item_id: int, lst: ItemList = Depends(current_list),
+def clear_records(item_id: int, request: Request,
+                  lst: ItemList = Depends(current_list),
                   db: Session = Depends(get_db)):
     item = item_in_list(db, item_id, lst)
+    request.state.audit_undo = {"kind": "item_restore",
+                                "data": audit.snapshot_item(db, item_id)}
     item.records.clear()
     item.bought = compute.item_status(item) == "done"
     item.touch()
     db.commit()
     db.refresh(item)
+    request.state.audit_subject = f"物料「{item.name}」"
     return compute.item_dict(item)
 
 
@@ -189,10 +216,12 @@ def _record_in_list(db: Session, record_id: int, lst: ItemList) -> PurchaseRecor
 
 
 @records_router.put("/{record_id}", response_model=ItemOut)
-def update_record(record_id: int, data: RecordPatchIn,
+def update_record(record_id: int, data: RecordPatchIn, request: Request,
                   lst: ItemList = Depends(current_list),
                   db: Session = Depends(get_db)):
     rec = _record_in_list(db, record_id, lst)
+    request.state.audit_undo = {"kind": "item_restore",
+                                "data": audit.snapshot_item(db, rec.item_id)}
     fields = data.model_dump(exclude_unset=True)
     # 涉及的分组单独处理（涉及另一张表）：
     #   传了 room_ids（哪怕空列表）→ 按它整体替换；
@@ -221,11 +250,13 @@ def update_record(record_id: int, data: RecordPatchIn,
     item.touch()
     db.commit()
     db.refresh(item)
+    request.state.audit_subject = f"物料「{item.name}」的采购记录"
     return compute.item_dict(item)
 
 
 @router.post("/batch/delete")
-def batch_delete(data: BatchDeleteIn, lst: ItemList = Depends(current_list),
+def batch_delete(data: BatchDeleteIn, request: Request,
+                 lst: ItemList = Depends(current_list),
                  db: Session = Depends(get_db)):
     if not data.ids:
         raise HTTPException(400, "未选择任何物料")
@@ -234,6 +265,7 @@ def batch_delete(data: BatchDeleteIn, lst: ItemList = Depends(current_list),
            .filter(Item.id.in_(data.ids), Item.list_id == lst.id,
                    Item.alive()).all()]
     if ids:
+        request.state.audit_subject = f"{len(ids)} 条物料"
         # 批量软删：一次 UPDATE 搞定，rev 一起顶上去，让正在编辑这台设备的
         # 其它客户端保存时拿到 409 而不是把删掉的条目又写回来
         db.query(Item).filter(Item.id.in_(ids)).update(
@@ -244,13 +276,17 @@ def batch_delete(data: BatchDeleteIn, lst: ItemList = Depends(current_list),
 
 
 @records_router.delete("/{record_id}", response_model=ItemOut)
-def delete_record(record_id: int, lst: ItemList = Depends(current_list),
+def delete_record(record_id: int, request: Request,
+                  lst: ItemList = Depends(current_list),
                   db: Session = Depends(get_db)):
     rec = _record_in_list(db, record_id, lst)
+    request.state.audit_undo = {"kind": "item_restore",
+                                "data": audit.snapshot_item(db, rec.item_id)}
     item = rec.item
     db.delete(rec)
     item.bought = compute.item_status(item) == "done"
     item.touch()
     db.commit()
     db.refresh(item)
+    request.state.audit_subject = f"物料「{item.name}」的一笔采购记录"
     return compute.item_dict(item)

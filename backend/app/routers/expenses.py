@@ -5,9 +5,10 @@
 "实际优惠"也不会因为摊了钱而变成负数。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from .. import audit
 from ..db import get_db
 from ..deps import current_list
 from ..models import ExtraExpense, Item, ItemList
@@ -50,7 +51,8 @@ def list_expenses(lst: ItemList = Depends(current_list),
 
 
 @router.post("", response_model=ExpenseOut)
-def create_expense(data: ExpenseIn, lst: ItemList = Depends(current_list),
+def create_expense(data: ExpenseIn, request: Request,
+                   lst: ItemList = Depends(current_list),
                    db: Session = Depends(get_db)):
     row = ExtraExpense(list_id=lst.id, kind=(data.kind or "运费").strip() or "运费",
                        amount=data.amount or 0, date=data.date,
@@ -60,14 +62,20 @@ def create_expense(data: ExpenseIn, lst: ItemList = Depends(current_list),
     db.add(row)
     db.commit()
     db.refresh(row)
+    request.state.audit_subject = f"「{row.kind}」{row.amount:g} 元"
+    # 新增的回退 = 删掉它；创建之前它不存在，所以不需要快照
+    request.state.audit_undo = {"kind": "expense_delete",
+                                "data": {"expense_id": row.id}}
     return _view(row)
 
 
 @router.put("/{expense_id}", response_model=ExpenseOut)
-def update_expense(expense_id: int, data: ExpenseIn,
+def update_expense(expense_id: int, data: ExpenseIn, request: Request,
                    lst: ItemList = Depends(current_list),
                    db: Session = Depends(get_db)):
     row = _in_list(db, expense_id, lst)
+    request.state.audit_undo = {"kind": "expense_restore",
+                                "data": audit.snapshot_expense(db, expense_id)}
     row.kind = (data.kind or "运费").strip() or "运费"
     row.amount = data.amount or 0
     row.date = data.date
@@ -77,13 +85,18 @@ def update_expense(expense_id: int, data: ExpenseIn,
     row.item_id = _check_item(db, data.item_id, lst)
     db.commit()
     db.refresh(row)
+    request.state.audit_subject = f"「{row.kind}」{row.amount:g} 元"
     return _view(row)
 
 
 @router.delete("/{expense_id}")
-def delete_expense(expense_id: int, lst: ItemList = Depends(current_list),
+def delete_expense(expense_id: int, request: Request,
+                   lst: ItemList = Depends(current_list),
                    db: Session = Depends(get_db)):
     row = _in_list(db, expense_id, lst)
+    request.state.audit_undo = {"kind": "expense_restore",
+                                "data": audit.snapshot_expense(db, expense_id)}
     db.delete(row)
     db.commit()
+    request.state.audit_subject = f"「{row.kind}」{row.amount:g} 元"
     return {"ok": True}

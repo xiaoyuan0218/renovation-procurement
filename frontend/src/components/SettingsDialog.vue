@@ -36,6 +36,7 @@ watch(visible, (open) => {
     loadRoomsAndCategories()
     loadTrash()
     loadApiKeys()
+    loadLogs()
   }
 })
 
@@ -374,6 +375,57 @@ async function copyKey() {
     ElMessage.warning('这个浏览器不让自动复制，请手动选中上面的密钥复制')
   }
 }
+
+// ---------- 操作日志 ----------
+//
+// 只读展示 + 对最新一条可回退的操作提供一键回退。回退在服务端受「只撤
+// 最近一条」约束，这里不用自己判，按钮该不该出现由接口的 can_undo 给出。
+
+const logs = ref([])
+const logsTotal = ref(0)
+const logsLoading = ref(false)
+const logPage = ref(1)
+
+async function loadLogs() {
+  logsLoading.value = true
+  try {
+    logPage.value = 1
+    const d = await api.get('/api/logs?page=1&page_size=50')
+    logs.value = d.items
+    logsTotal.value = d.total
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+async function moreLogs() {
+  const next = logPage.value + 1
+  try {
+    const d = await api.get(`/api/logs?page=${next}&page_size=50`)
+    logPage.value = next
+    logs.value.push(...d.items)
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function undoLog(row) {
+  try {
+    await ElMessageBox.confirm(
+      `回退「${row.action}」？数据会恢复到这次操作之前，布点与采购记录一起还原。`,
+      '回退操作', { type: 'warning', confirmButtonText: '回退', cancelButtonText: '取消' })
+  } catch { return }
+  try {
+    const r = await api.post(`/api/logs/${row.id}/undo`)
+    ElMessage.success(r.message || '已回退', { duration: 6000 })
+    await loadLogs()
+    emit('imported')   // 数据变了，各页跟着重读
+  } catch (e) {
+    ElMessage.error(e.message, { duration: 8000 })
+  }
+}
 </script>
 
 <template>
@@ -604,6 +656,41 @@ async function copyKey() {
         <el-alert type="info" :closable="false" class="mt12"
                   title="密钥等同管理员权限：拿着它就能读写全部清单。只存在你要用的那台设备上；怀疑泄漏就立刻撤销。" />
       </el-tab-pane>
+
+      <el-tab-pane label="操作日志">
+        <div class="add-row">
+          <span class="add-hint">网页与 API 密钥的每次改动都在这里；只有最新一条能回退</span>
+          <el-button size="small" :loading="logsLoading" @click="loadLogs">刷新</el-button>
+        </div>
+        <el-table :data="logs" size="small" max-height="340" v-loading="logsLoading">
+          <el-table-column prop="at" label="时间" width="138" />
+          <el-table-column label="来源" width="126" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.actor_name }}</template>
+          </el-table-column>
+          <el-table-column label="动作" min-width="210">
+            <template #default="{ row }">
+              {{ row.action }}
+              <el-tag v-if="row.status_code >= 400" size="small" type="danger"
+                      effect="plain" class="fail-tag">未成功</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="88">
+            <template #default="{ row }">
+              <el-button v-if="row.can_undo" link type="warning" size="small"
+                         @click="undoLog(row)">回退</el-button>
+              <span v-else-if="row.undone" class="hint">已回退</span>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="还没有操作记录" :image-size="70" />
+          </template>
+        </el-table>
+        <div class="log-foot">
+          <el-button link size="small" :disabled="logs.length >= logsTotal"
+                     @click="moreLogs">加载更早的</el-button>
+          <span class="hint">共 {{ logsTotal }} 条 · 只保留最近 2000 条 · 回退仅限最近一次操作</span>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="showKeyVisible" title="密钥已生成" width="520px"
@@ -623,7 +710,7 @@ async function copyKey() {
 </template>
 
 <style scoped>
-/* 五个页签均分面板宽度：窄一点也放得下，所以左右滚动箭头是多余的
+/* 七个页签均分面板宽度：中文标签都很短，一行放得下，左右滚动箭头是多余的
    （Element Plus 仍按它自己算出的内容宽度显示箭头，这里直接盖掉） */
 .settings-tabs :deep(.el-tabs__nav) {
   display: flex;
@@ -697,6 +784,8 @@ async function copyKey() {
 .pwd-input { width: 220px; }
 .doc-link { text-decoration: none; }
 .doc-link:hover { color: var(--ios-blue); }
+.fail-tag { margin-left: 6px; }
+.log-foot { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .key-tip { margin: 0 0 10px; font-size: 13px; color: var(--ios-label-2); }
 /* 密钥是一长串大写字母数字，等宽字体才好逐段核对 */
 .key-value :deep(.el-input__inner) {

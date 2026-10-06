@@ -9,10 +9,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from . import api_docs
+from . import audit
 from .auth import require_user
-from .db import get_db
+from .db import SessionLocal, get_db
 from .routers import (auth, base_data, backup, expenses, items, keys, lists,
-                      matrix, sync,
+                      logs, matrix, sync,
                       summary, transfer, trash)
 from .routers.items import records_router
 from .seed import init_db
@@ -45,6 +46,24 @@ app.add_middleware(
 init_db()
 
 
+# 操作审计：所有写请求在响应完成后落一条日志（谁、干了什么、结果如何）。
+# 路由可以在执行过程中往 request.state 塞 audit_subject（对象叫什么）与
+# audit_undo（操作前快照），这里统一收口写库 —— 好处是任何写接口都不会漏记。
+# 日志写失败只静默放弃：审计是锦上添花，不能反过来挡住用户的保存。
+@app.middleware("http")
+async def audit_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.method != "GET" and request.url.path.startswith("/api/"):
+        db = SessionLocal()
+        try:
+            audit.write_log(db, request, response.status_code)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        finally:
+            db.close()
+    return response
+
+
 @app.get("/api/health", include_in_schema=False)
 def health():
     """公开的存活探针，给容器健康检查和客户端的「测试连接」用。
@@ -69,6 +88,7 @@ app.include_router(trash.router, dependencies=_guard)
 app.include_router(backup.router, dependencies=_guard)
 app.include_router(sync.router, dependencies=_guard)
 app.include_router(keys.router, dependencies=_guard)
+app.include_router(logs.router, dependencies=_guard)
 
 
 # 前端构建产物目录可用环境变量覆盖（本地开发走 vite:5173，不经过这里）

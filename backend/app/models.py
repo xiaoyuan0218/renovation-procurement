@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
-                        String, UniqueConstraint)
+                        String, Text, UniqueConstraint)
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -60,6 +60,32 @@ class ApiKey(Base):
     key_hash = Column(String(64), nullable=False, index=True)
     created_at = Column(DateTime, default=utcnow)
     last_used_at = Column(DateTime, nullable=True)
+
+
+class OperationLog(Base):
+    """操作日志：人在网页/App 上的改动、程序拿 API 密钥做的改动，都记一条。
+
+    动作描述是给用户看的中文人话（「新增物料 · 物料「筒灯」」），生成规则在
+    app/audit.py。undo_* 两列只在「可回退」的操作上有值 —— 存的是操作前的
+    数据快照，回退就是按它把数据放回去。
+
+    只保留最近 LIMIT 条（写入时裁剪），日志是给翻最近发生的事用的，不是审计归档。
+    """
+
+    __tablename__ = "operation_logs"
+
+    id = Column(Integer, primary_key=True)
+    at = Column(DateTime, default=utcnow, index=True)
+    actor_kind = Column(String(10), nullable=False)   # human / api
+    actor_name = Column(String(80), nullable=False)
+    action = Column(String(150), nullable=False)
+    method = Column(String(10), nullable=False)
+    path = Column(String(200), nullable=False)
+    status_code = Column(Integer, nullable=False)
+    undo_kind = Column(String(30), nullable=True)
+    undo_data = Column(Text, nullable=True)
+    # 回退发生的时刻。有值的日志说明快照已经被消费过，不能再回退第二次
+    undone_at = Column(DateTime, nullable=True)
 
 
 class ItemList(Base):
