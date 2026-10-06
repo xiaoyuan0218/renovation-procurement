@@ -35,6 +35,7 @@ watch(visible, (open) => {
   if (open) {
     loadRoomsAndCategories()
     loadTrash()
+    loadApiKeys()
   }
 })
 
@@ -296,6 +297,83 @@ async function submitPassword() {
     changing.value = false
   }
 }
+
+// ---------- API 密钥 ----------
+//
+// 给脚本、手机快捷指令这类不方便走登录流程的调用方用。完整密钥只在下发
+// 那一刻返回一次（库里只留 sha256），所以这里没有「查看」，只有生成和撤销。
+
+const apiKeys = ref([])
+const newKeyName = ref('')
+const creatingKey = ref(false)
+const createdKey = ref('')
+const showKeyVisible = ref(false)
+const keyInputRef = ref(null)
+
+async function loadApiKeys() {
+  try {
+    apiKeys.value = await api.get('/api/keys')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function createApiKey() {
+  const name = newKeyName.value.trim()
+  if (!name) {
+    ElMessage.warning('先给它起个名字，方便以后认出是给谁用的')
+    return
+  }
+  creatingKey.value = true
+  try {
+    const res = await api.post('/api/keys', { name })
+    createdKey.value = res.key
+    showKeyVisible.value = true
+    newKeyName.value = ''
+    await loadApiKeys()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    creatingKey.value = false
+  }
+}
+
+async function revokeApiKey(row) {
+  try {
+    await ElMessageBox.confirm(
+      `撤销「${row.name}」？正在用它的一方会立刻连不上，而且找不回来 —— ` +
+      '库里只存了哈希，就算你后悔也发不出同一把。确定？',
+      '撤销密钥', { type: 'warning', confirmButtonText: '撤销', cancelButtonText: '取消' })
+  } catch { return }
+  try {
+    await api.del(`/api/keys/${row.id}`)
+    apiKeys.value = apiKeys.value.filter((k) => k.id !== row.id)
+    ElMessage.success('已撤销')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function copyKey() {
+  const text = createdKey.value
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('no clipboard api')
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  } catch {
+    // 局域网是明文 HTTP，浏览器在这种页面里不给 clipboard API，
+    // 退回老办法：选中输入框里的文字再发复制命令
+    const el = keyInputRef.value?.input || keyInputRef.value?.$el?.querySelector('input')
+    if (el) {
+      el.select()
+      if (document.execCommand('copy')) {
+        ElMessage.success('已复制')
+        return
+      }
+    }
+    ElMessage.warning('这个浏览器不让自动复制，请手动选中上面的密钥复制')
+  }
+}
 </script>
 
 <template>
@@ -487,8 +565,58 @@ async function submitPassword() {
         </el-form>
         <el-alert type="info" :closable="false"
                   title="修改后，其它设备上已登录的会话会自动失效；当前这个会保持登录。" />
+
+        <el-divider />
+
+        <div class="add-row">
+          <el-input v-model="newKeyName" placeholder="这把钥匙给谁用，如：手机快捷指令"
+                    class="add-input" @keyup.enter="createApiKey" />
+          <el-button type="primary" plain :loading="creatingKey" @click="createApiKey">
+            生成密钥
+          </el-button>
+          <!-- 文档页要登录才开得动，同源导航会自动带上会话 Cookie -->
+          <a class="add-hint doc-link" href="/api/docs" target="_blank" rel="noopener">
+            打开接口文档 →
+          </a>
+        </div>
+        <el-table :data="apiKeys" size="small" max-height="240">
+          <el-table-column prop="name" label="用途" min-width="110" />
+          <el-table-column label="密钥" width="126">
+            <template #default="{ row }">
+              <span class="list-code">{{ row.prefix }}…</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="生成时间" width="142" />
+          <el-table-column label="最后使用" width="142">
+            <template #default="{ row }">
+              {{ row.last_used_at || '还没用过' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="72">
+            <template #default="{ row }">
+              <el-button link size="small" type="danger" @click="revokeApiKey(row)">撤销</el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="还没有密钥" :image-size="70" />
+          </template>
+        </el-table>
+        <el-alert type="info" :closable="false" class="mt12"
+                  title="密钥等同管理员权限：拿着它就能读写全部清单。只存在你要用的那台设备上；怀疑泄漏就立刻撤销。" />
       </el-tab-pane>
     </el-tabs>
+
+    <el-dialog v-model="showKeyVisible" title="密钥已生成" width="520px"
+               append-to-body :close-on-click-modal="false">
+      <p class="key-tip">它只露面这一次，关掉之后就只剩前缀了。现在复制走，存到要用它的地方。</p>
+      <el-input ref="keyInputRef" :model-value="createdKey" readonly class="key-value">
+        <template #append>
+          <el-button @click="copyKey">复制</el-button>
+        </template>
+      </el-input>
+      <el-alert type="warning" :closable="false" class="mt12"
+                title="调用时放在请求头里：X-API-Key: 密钥，或 Authorization: Bearer 密钥。" />
+    </el-dialog>
 
     <NewListDialog v-model="newListVisible" @created="onListCreated" />
   </el-dialog>
@@ -567,4 +695,12 @@ async function submitPassword() {
 }
 .account-name { font-weight: 600; }
 .pwd-input { width: 220px; }
+.doc-link { text-decoration: none; }
+.doc-link:hover { color: var(--ios-blue); }
+.key-tip { margin: 0 0 10px; font-size: 13px; color: var(--ios-label-2); }
+/* 密钥是一长串大写字母数字，等宽字体才好逐段核对 */
+.key-value :deep(.el-input__inner) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
 </style>

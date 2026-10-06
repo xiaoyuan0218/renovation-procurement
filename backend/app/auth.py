@@ -21,7 +21,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from .db import DATA_DIR, get_db
-from .models import User
+from .models import ApiKey, User, utcnow
 
 PBKDF2_ITERATIONS = 200_000
 COOKIE_NAME = "renovation_session"
@@ -148,6 +148,60 @@ def verify_token(token: str, db: Session):
     return user
 
 
+# ---------------------------------------------------------------- API 密钥
+#
+# 给脚本、手机快捷指令、别的服务用的长期凭据，权限与管理员等同。与登录
+# token 的区别：不绑用户、不设有效期，只能靠「撤销」作废。
+#
+# 校验用 sha256，**刻意不复用 hash_password**：后者是 PBKDF2 二十万次迭代，
+# 为的是拖慢弱密码的暴力破解；而密钥本身是 32 字节随机串，猜不出来，用慢
+# 哈希只会让每个 API 请求白花几十毫秒。
+
+API_KEY_PREFIX = "xk_"
+
+# 最后使用时间的落库节流：每个请求都写一次库没必要，隔一分钟记一次，
+# 足够看出「这把钥匙还在不在用」。
+_LAST_USED_THROTTLE_SECONDS = 60
+
+
+def generate_api_key() -> str:
+    return API_KEY_PREFIX + secrets.token_urlsafe(32)
+
+
+def hash_api_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def verify_api_key(raw: str, db: Session):
+    """校验密钥，通过则返回管理员用户（权限等同登录），否则 None。"""
+    row = db.query(ApiKey).filter(ApiKey.key_hash == hash_api_key(raw)).first()
+    if row is None:
+        return None
+    now = utcnow()
+    last = row.last_used_at
+    if last is None or (now - last).total_seconds() >= _LAST_USED_THROTTLE_SECONDS:
+        row.last_used_at = now
+        db.commit()
+    return db.query(User).first()
+
+
+def _extract_api_key(request: Request):
+    """取请求里的 API 密钥：优先专用头，其次 Bearer 里带 xk_ 前缀的。
+
+    认两种传法是因为不同工具的习惯不同：curl 和快捷指令常用
+    Authorization，一些集成面板只给填自定义头。
+    """
+    raw = (request.headers.get("x-api-key") or "").strip()
+    if raw:
+        return raw
+    header = request.headers.get("authorization", "")
+    if header[:7].lower() == "bearer ":
+        token = header[7:].strip()
+        if token.startswith(API_KEY_PREFIX):
+            return token
+    return None
+
+
 # ---------------------------------------------------------------- Cookie
 
 def set_session_cookie(response: Response, token: str) -> None:
@@ -178,7 +232,15 @@ def _extract_token(request: Request):
 
 
 def current_user_or_none(request: Request, db: Session):
-    """不抛异常的版本，给「查询登录态」这类端点用。"""
+    """不抛异常的版本，给「查询登录态」这类端点用。
+
+    两种凭据都认：API 密钥（给外部程序，长期有效）和登录 token（Cookie 或
+    Bearer，给网页与安卓）。密钥先看 —— 它自带 xk_ 前缀，与登录 token 一眼
+    可分，不会互相误判。
+    """
+    key = _extract_api_key(request)
+    if key is not None:
+        return verify_api_key(key, db)
     token = _extract_token(request)
     return verify_token(token, db) if token else None
 

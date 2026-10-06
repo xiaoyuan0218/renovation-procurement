@@ -42,6 +42,26 @@ class User(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class ApiKey(Base):
+    """外部程序用的长期凭据。
+
+    给脚本、手机快捷指令这类不方便走登录流程的调用方用：带上它就能调全部
+    业务接口，权限与管理员等同。
+
+    只存哈希不存明文 —— 这个应用有整库备份下载，明文躺在库里等于每份备份
+    都成了凭据文件。完整密钥只在创建那一刻返回一次，之后只看得到前缀。
+    """
+
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), nullable=False)
+    prefix = Column(String(20), nullable=False)
+    key_hash = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime, default=utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+
 class ItemList(Base):
     """一份清单。原来整个库只有装修采购这一份，现在可以建多份、
     彼此的口分组/分类/条目完全隔离（例如「装修采购」和「年货清单」）。

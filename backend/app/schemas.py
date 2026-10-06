@@ -325,6 +325,32 @@ class LoginOut(BaseModel):
 class OkOut(BaseModel):
     ok: bool = True
 
+
+# ---------------------------------------------------------------- API 密钥
+
+class ApiKeyIn(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+
+
+class ApiKeyOut(BaseModel):
+    """列表里的一条密钥。只有前缀没有明文 —— 明文只在创建那一刻返回一次。"""
+
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    prefix: str
+    created_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+
+    @field_serializer("created_at", "last_used_at")
+    def _fmt_time(self, value):
+        return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
+
+
+class ApiKeyCreatedOut(ApiKeyOut):
+    # 完整密钥，只此一次：关掉之后列表里就只剩前缀了
+    key: str
+
 # ---------------------------------------------------------------- 清单级同步
 # 手机单机版把整份清单搬来搬去时用的请求体，格式与 services/list_transfer.py 一致。
 
