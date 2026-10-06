@@ -58,7 +58,9 @@ function calcTableHeight() {
 const page = ref(1)
 const SIZE_OPTIONS = [10, 20, 50, 100, 200]
 const pageSize = ref(Number(localStorage.getItem('items.pageSize')) || 20)
-const sortState = ref({ prop: 'discount_total', order: 'descending' })
+// 默认按添加时间倒序：新加的排在前面，一眼看到刚录进去的那几条。
+// 时间戳是等宽格式，字典序就是时间序，降序即最新在前
+const sortState = ref({ prop: 'created_at', order: 'descending' })
 
 watch(pageSize, (v) => {
   page.value = 1
@@ -337,11 +339,12 @@ function onSaved() {
       <el-empty v-show="!loading && !filtered.length" :description="emptyText" :image-size="80" />
       <div v-show="filtered.length" ref="tableBoxRef" class="table-box">
       <el-table :data="paged" size="default" row-key="id" :height="tableHeight"
-                :default-sort="{ prop: 'discount_total', order: 'descending' }"
+                border
+                :default-sort="{ prop: 'created_at', order: 'descending' }"
                 @sort-change="onSortChange"
                 @selection-change="onSelectionChange">
         <!-- reserve-selection：翻页勾选的也留着，不然跨页批量删会漏 -->
-        <el-table-column type="selection" width="36" reserve-selection />
+        <el-table-column type="selection" width="36" :resizable="false" reserve-selection />
         <el-table-column prop="name" label="物料" min-width="150" sortable="custom" />
         <el-table-column prop="brand" label="品牌" width="80" sortable="custom"
                          show-overflow-tooltip>
@@ -521,6 +524,17 @@ function onSaved() {
 }
 .fill-panel > .el-empty { flex: 1 1 auto; min-height: 0; }
 .table-box { flex: 1 1 auto; min-height: 0; }
+/* 列宽要能拖，而 Element Plus 只在 border 模式下渲染拖拽手柄；默认的网格
+   线会把这套玻璃风格割成小块，所以把线调到几乎看不见 —— 手柄还在，看起来
+   还是原来那张表。外框线直接去掉，只留行与列的分隔 */
+.table-box :deep(.el-table--border) {
+  --el-table-border-color: rgba(120, 130, 150, 0.12);
+}
+.table-box :deep(.el-table--border)::before,
+.table-box :deep(.el-table--border)::after,
+.table-box :deep(.el-table--border .el-table__inner-wrapper)::after {
+  display: none;
+}
 .pager {
   flex: none;
   display: flex;
