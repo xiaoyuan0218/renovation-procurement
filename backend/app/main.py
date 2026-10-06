@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from . import api_docs
 from .auth import require_user
 from .db import get_db
 from .routers import (auth, base_data, backup, expenses, items, keys, lists,
@@ -18,8 +19,18 @@ from .seed import init_db
 
 # docs / redoc / openapi 都关掉自带的，文件末尾自己注册 —— 自带的那几个没
 # 法挂鉴权，而接口清单本身就是一张系统结构图，不该让局域网里谁都能翻。
-app = FastAPI(title="采知道 服务端", docs_url=None, redoc_url=None,
-              openapi_url=None)
+app = FastAPI(
+    title="采知道 服务端",
+    description=(
+        "装修采购管理的数据接口。\n\n"
+        "**认证**：除 `/api/health` 外一律需要身份。浏览器用登录后的会话 Cookie；"
+        "外部程序用「设置 / 数据 → 账号」里生成的 API 密钥，放进 `X-API-Key` 请求头，"
+        "或写成 `Authorization: Bearer <密钥>`。\n\n"
+        "**多份清单**：每份清单的数据互相隔离。用 `X-List-Id` 请求头（或 `?list_id=` "
+        "查询参数）指定这次操作哪一份，都不给就落到第一份。\n\n"
+        "**金额口径**：原价、日常价、已付是三个独立口径，算法与网页上显示的完全一致。"
+    ),
+    docs_url=None, redoc_url=None, openapi_url=None)
 
 # 不需要 allow_credentials：网页靠 Cookie 认证，而生产是同源（后端自己发前端），
 # 开发走 vite 代理也是同源，CORS 根本不参与。keep 住不带 credentials 的
@@ -78,13 +89,16 @@ def _custom_openapi():
     塞凭据；不声明的话，点「试调」发出去的请求是不带钥匙的。"""
     if app.openapi_schema:
         return app.openapi_schema
-    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    schema = get_openapi(title=app.title, version=app.version,
+                         description=app.description, routes=app.routes)
     schema.setdefault("components", {})["securitySchemes"] = {
         "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
         "BearerAuth": {"type": "http", "scheme": "bearer"},
     }
     # 两种任选其一：浏览器里登录着就用 Cookie，外部程序填密钥
     schema["security"] = [{"ApiKeyAuth": []}, {"BearerAuth": []}]
+    # 接口的中文标题与说明（api_docs.py 里集中维护）
+    api_docs.patch_schema(schema)
     app.openapi_schema = schema
     return schema
 
@@ -109,7 +123,7 @@ if os.path.isdir(SWAGGER_DIR):
 
 
 @app.get("/api/docs", include_in_schema=False)
-def api_docs(request: Request, db: Session = Depends(get_db)):
+def swagger_page(request: Request, db: Session = Depends(get_db)):
     require_user(request, db)
     if not os.path.isdir(SWAGGER_DIR):
         # 本地开发没构建前端时会走到这里，给一句能照做的提示
