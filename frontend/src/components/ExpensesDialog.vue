@@ -2,12 +2,16 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, money } from '../api'
+import { pagedSlice } from '../paging'
+import MiniPager from './MiniPager.vue'
 
 const visible = defineModel({ type: Boolean, default: false })
 const emit = defineEmits(['changed'])
 
 const KINDS = ['运费', '安装费', '搬运费', '辅料', '其他']
 const rows = ref([])
+const rowPage = ref(1)
+const pagedRows = pagedSlice(rows, rowPage)
 const items = ref([])   // 用来把费用关联到具体物料的货（选填）
 
 // 同名物料只靠名字分不清（真实数据里就有两条「易来灯带控制器」），
@@ -135,7 +139,7 @@ const total = computed(() =>
       <el-button type="primary" :loading="busy" @click="add">添加</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="rows" size="small" max-height="380">
+    <el-table v-loading="loading" :data="pagedRows" size="small" max-height="380">
       <el-table-column label="类型" width="96">
         <template #default="{ row }">
           <el-select v-model="row.kind" size="small" filterable allow-create
@@ -191,6 +195,7 @@ const total = computed(() =>
         <el-empty description="还没有记过额外费用" :image-size="70" />
       </template>
     </el-table>
+    <MiniPager v-model:page="rowPage" :total="rows.length" />
 
     <div class="foot">
       共 {{ rows.length }} 笔 · 合计 <b>￥{{ money(total) }}</b>

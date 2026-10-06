@@ -3,9 +3,14 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { api, money } from '../api'
 import ExpensesDialog from '../components/ExpensesDialog.vue'
+import MiniPager from '../components/MiniPager.vue'
+import { pagedSlice } from '../paging'
 
 const emit = defineEmits(['go-items'])
 const summary = ref(null)
+// 未采购清单可能有上百项，分页看；「未采购金额 Top 6」那张条形图不受影响
+const unboughtPage = ref(1)
+const pagedUnbought = pagedSlice(computed(() => summary.value?.unbought ?? []), unboughtPage)
 const rootEl = ref(null)
 
 const donutPaidEl = ref(null)
@@ -429,7 +434,7 @@ function renderCharts() {
           <template #header>未采购清单（按金额排序，共 {{ summary.unbought.length }} 项）</template>
           <el-empty v-if="!summary.unbought.length" description="全部买完啦" :image-size="72" />
           <div v-else ref="unboughtBoxEl" class="table-box">
-            <el-table :data="summary.unbought" size="small" :height="unboughtTableH">
+            <el-table :data="pagedUnbought" size="small" :height="unboughtTableH">
               <el-table-column prop="name" label="物料" min-width="150" />
               <el-table-column label="状态" width="84">
                 <template #default="{ row }">
@@ -450,6 +455,7 @@ function renderCharts() {
               </el-table-column>
               <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
             </el-table>
+            <MiniPager v-model:page="unboughtPage" :total="summary.unbought.length" />
           </div>
         </el-card>
       </el-col>

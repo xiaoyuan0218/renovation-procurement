@@ -2,6 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, money } from '../api'
+import { PAGE_SIZE, pagedSlice } from '../paging'
+import MiniPager from './MiniPager.vue'
 import { auth, changePassword, loadAuthState } from '../auth'
 import { deleteList, lists, updateList } from '../lists'
 import NewListDialog from './NewListDialog.vue'
@@ -171,6 +173,7 @@ async function addRoom() {
   try {
     const r = await api.post('/api/rooms', { name: newRoom.value.trim(), sort: rooms.value.length })
     rooms.value.push(r)
+    gotoLast(rooms.value.length, roomPage)
     newRoom.value = ''
     ElMessage.success('已添加')
   } catch (e) { ElMessage.error(e.message) }
@@ -190,6 +193,7 @@ async function addCategory() {
   try {
     const c = await api.post('/api/categories', { name: newCategory.value.trim(), sort: categories.value.length })
     categories.value.push(c)
+    gotoLast(categories.value.length, categoryPage)
     newCategory.value = ''
     ElMessage.success('已添加')
   } catch (e) { ElMessage.error(e.message) }
@@ -299,12 +303,32 @@ async function submitPassword() {
   }
 }
 
+// ---------- 列表分页 ----------
+// 一页十条：设置里的这些列表都不长，分页后表格不必再靠内部滚动翻数据，
+// 也就不会出现「内容没撑满就先滚起来」
+const listPage = ref(1)
+const roomPage = ref(1)
+const categoryPage = ref(1)
+const trashPage = ref(1)
+const pagedLists = pagedSlice(computed(() => lists.all), listPage)
+const pagedRooms = pagedSlice(rooms, roomPage)
+const pagedCategories = pagedSlice(categories, categoryPage)
+const pagedTrash = pagedSlice(trash, trashPage)
+// 密钥列表的分页跟着 apiKeys 一起声明（它在下面才定义，不能提前引用）
+
+/** 新增一条后跳到最后一页：否则刚加的东西藏在下一页，看着像没加成功 */
+function gotoLast(count, pageRef) {
+  pageRef.value = Math.max(1, Math.ceil(count / PAGE_SIZE))
+}
+
 // ---------- API 密钥 ----------
 //
 // 给脚本、手机快捷指令这类不方便走登录流程的调用方用。完整密钥只在下发
 // 那一刻返回一次（库里只留 sha256），所以这里没有「查看」，只有生成和撤销。
 
 const apiKeys = ref([])
+const keyPage = ref(1)
+const pagedKeys = pagedSlice(apiKeys, keyPage)
 const newKeyName = ref('')
 const creatingKey = ref(false)
 const createdKey = ref('')
@@ -332,6 +356,7 @@ async function createApiKey() {
     showKeyVisible.value = true
     newKeyName.value = ''
     await loadApiKeys()
+    gotoLast(apiKeys.value.length, keyPage)
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -487,7 +512,7 @@ async function undoLog(row) {
           <el-button type="primary" plain @click="newListVisible = true">新建清单</el-button>
           <span class="add-hint">空白起步，或照抄现有清单的分组与分类</span>
         </div>
-        <el-table :data="lists.all" size="small" max-height="300">
+        <el-table :data="pagedLists" size="small" height="100%" class="pane-table">
           <el-table-column label="清单" min-width="150">
             <template #default="{ row }">
               <span class="list-name">{{ row.name }}</span>
@@ -509,6 +534,7 @@ async function undoLog(row) {
             </template>
           </el-table-column>
         </el-table>
+        <MiniPager v-model:page="listPage" :total="lists.all.length" />
         <el-alert type="info" :closable="false" class="mt12"
                   title="每份清单的物料、分组、分类互相独立，互不影响；删除清单会连里面的内容一起删掉，最后一份不允许删除。" />
       </el-tab-pane>
@@ -519,7 +545,7 @@ async function undoLog(row) {
                     @keyup.enter="addRoom" />
           <el-button type="primary" plain @click="addRoom">添加</el-button>
         </div>
-        <el-table :data="rooms" size="small" max-height="320">
+        <el-table :data="pagedRooms" size="small" height="100%" class="pane-table">
           <el-table-column prop="name" label="分组" min-width="120" />
           <el-table-column label="操作" width="168">
             <template #default="{ row }">
@@ -528,6 +554,7 @@ async function undoLog(row) {
             </template>
           </el-table-column>
         </el-table>
+        <MiniPager v-model:page="roomPage" :total="rooms.length" />
       </el-tab-pane>
 
       <el-tab-pane label="分类">
@@ -536,7 +563,7 @@ async function undoLog(row) {
                     @keyup.enter="addCategory" />
           <el-button type="primary" plain @click="addCategory">添加</el-button>
         </div>
-        <el-table :data="categories" size="small" max-height="320">
+        <el-table :data="pagedCategories" size="small" height="100%" class="pane-table">
           <el-table-column prop="name" label="分类" min-width="120" />
           <el-table-column label="操作" width="168">
             <template #default="{ row }">
@@ -545,6 +572,7 @@ async function undoLog(row) {
             </template>
           </el-table-column>
         </el-table>
+        <MiniPager v-model:page="categoryPage" :total="categories.length" />
       </el-tab-pane>
 
       <el-tab-pane label="备份">
@@ -609,7 +637,7 @@ async function undoLog(row) {
           <el-button type="danger" plain :disabled="!trash.length || trashing"
                      @click="purgeAll">清空回收站</el-button>
         </div>
-        <el-table v-loading="trashing" :data="trash" size="small" max-height="320">
+        <el-table v-loading="trashing" :data="pagedTrash" size="small" height="100%" class="pane-table">
           <el-table-column prop="name" label="物料" min-width="120" />
           <el-table-column label="原价小计" width="100">
             <template #default="{ row }">￥{{ money(row.list_total) }}</template>
@@ -632,6 +660,7 @@ async function undoLog(row) {
             <el-empty description="回收站是空的" :image-size="70" />
           </template>
         </el-table>
+        <MiniPager v-model:page="trashPage" :total="trash.length" />
       </el-tab-pane>
 
       <el-tab-pane label="账号">
@@ -674,7 +703,7 @@ async function undoLog(row) {
             打开接口文档 →
           </a>
         </div>
-        <el-table :data="apiKeys" size="small" max-height="240">
+        <el-table :data="pagedKeys" size="small" class="pane-table">
           <el-table-column prop="name" label="用途" min-width="110" />
           <el-table-column label="密钥" width="126">
             <template #default="{ row }">
@@ -696,6 +725,7 @@ async function undoLog(row) {
             <el-empty description="还没有密钥" :image-size="70" />
           </template>
         </el-table>
+        <MiniPager v-model:page="keyPage" :total="apiKeys.length" />
         <el-alert type="info" :closable="false" class="mt12"
                   title="密钥等同管理员权限：拿着它就能读写全部清单。只存在你要用的那台设备上；怀疑泄漏就立刻撤销。" />
       </el-tab-pane>
@@ -720,7 +750,7 @@ async function undoLog(row) {
                     @keyup.enter="loadLogs" @clear="loadLogs" />
           <el-button size="small" :loading="logsLoading" @click="loadLogs">查询</el-button>
         </div>
-        <el-table :data="logs" size="small" max-height="300" v-loading="logsLoading">
+        <el-table :data="logs" size="small" height="100%" class="pane-table" v-loading="logsLoading">
           <el-table-column prop="at" label="时间" width="138" />
           <el-table-column label="来源" width="126" show-overflow-tooltip>
             <template #default="{ row }">{{ row.actor_name }}</template>
@@ -802,11 +832,21 @@ async function undoLog(row) {
 .settings-tabs :deep(.el-tabs__nav) {
   transform: none !important;
 }
-/* 内容区高度固定：各页签长短不一，跟着内容伸缩的话弹窗会一跳一跳的。
-   矮的页签留白，高的（账号、备份）在内部滚 */
+/* 内容区高度固定：各页签长短不一，跟着内容伸缩的话弹窗会一跳一跳的 */
 .settings-tabs :deep(.el-tabs__content) {
   height: min(560px, 62vh);
   overflow-y: auto;
+}
+/* 各页签纵向排满：表格吃掉添加行之外的剩余高度，行多时在表格内部滚
+   （表头保持可见），而不是内容还没填满外层就先出现滚动条 */
+.settings-tabs :deep(.el-tab-pane) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.settings-tabs :deep(.el-tab-pane > .pane-table) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
