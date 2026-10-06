@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api, money, qty as fmtQty } from '../api'
+import { api, money, qty as fmtQty, shortStamp, toLocalStamp } from '../api'
 import ItemDialog from '../components/ItemDialog.vue'
 
 const items = ref([])
@@ -79,12 +79,26 @@ watch([q, categoryId, brand, statusFilter], () => { page.value = 1 })
 
 // 先排序、再切页：排序必须作用于**全量**筛选结果，
 // 交给 el-table 自己排的话只会在当前页内排，翻到第二页数字就乱了
+
+// 采购状态有业务顺序（未买 → 部分已买 → 已买完），照字母序排会变成
+// done < partial < unbought，正好反着
+const STATUS_RANK = { unbought: 0, partial: 1, done: 2, none: 3 }
+
+// 数字按数比，其余按字符串比：名称与分类走中文拼音，时间戳是等宽的
+// "YYYY-MM-DD HH:MM:SS"，字典序就是时间序。**不能统一用 Number()** ——
+// 它会把名字、时间戳全算成 NaN（当 0 处理），那些列点了等于没排。
+function compareValues(x, y) {
+  if (typeof x === 'number' && typeof y === 'number') return x - y
+  return String(x ?? '').localeCompare(String(y ?? ''), 'zh')
+}
+
 const sorted = computed(() => {
   const arr = [...filtered.value]
   const { prop, order } = sortState.value
   if (!prop || !order) return arr
   const dir = order === 'ascending' ? 1 : -1
-  return arr.sort((a, b) => ((Number(a[prop]) || 0) - (Number(b[prop]) || 0)) * dir)
+  const valueOf = (row) => (prop === 'status' ? STATUS_RANK[row.status] ?? 9 : row[prop])
+  return arr.sort((a, b) => compareValues(valueOf(a), valueOf(b)) * dir)
 })
 
 const paged = computed(() => {
@@ -328,14 +342,15 @@ function onSaved() {
                 @selection-change="onSelectionChange">
         <!-- reserve-selection：翻页勾选的也留着，不然跨页批量删会漏 -->
         <el-table-column type="selection" width="36" reserve-selection />
-        <el-table-column prop="name" label="物料" min-width="150" />
-        <el-table-column prop="brand" label="品牌" width="80" show-overflow-tooltip>
+        <el-table-column prop="name" label="物料" min-width="150" sortable="custom" />
+        <el-table-column prop="brand" label="品牌" width="80" sortable="custom"
+                         show-overflow-tooltip>
           <template #default="{ row }">{{ row.brand || '-' }}</template>
         </el-table-column>
         <el-table-column prop="model" label="型号" width="110" show-overflow-tooltip>
           <template #default="{ row }">{{ row.model || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="category_name" label="分类" width="96">
+        <el-table-column prop="category_name" label="分类" width="96" sortable="custom">
           <template #default="{ row }">
             <span v-if="row.category_name" class="cat-cell">
               <i class="cat-dot" :style="{ background: catColor(row.category_name) }" />
@@ -344,7 +359,8 @@ function onSaved() {
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="数量" width="80" align="right">
+        <el-table-column prop="total_qty" label="数量" width="80" align="right"
+                         sortable="custom">
           <template #default="{ row }">{{ fmtQty(row.total_qty) }} {{ row.unit }}</template>
         </el-table-column>
         <el-table-column prop="price" label="单价" width="90" align="right"
@@ -355,7 +371,8 @@ function onSaved() {
                          sortable="custom" prop="discount_total">
           <template #default="{ row }">￥{{ money(row.discount_total) }}</template>
         </el-table-column>
-        <el-table-column label="已付 / 未付" width="118" align="right">
+        <el-table-column prop="paid" label="已付 / 未付" width="118" align="right"
+                         sortable="custom">
           <template #default="{ row }">
             <div>{{ row.paid ? `￥${money(row.paid)}` : '-' }}</div>
             <div class="unpaid-cell" :class="{ cleared: row.paid && row.unpaid <= 0 }">
@@ -363,7 +380,7 @@ function onSaved() {
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="采购状态" width="124">
+        <el-table-column prop="status" label="采购状态" width="124" sortable="custom">
           <template #default="{ row }">
             <el-tag :type="STATUS[row.status]?.type || 'info'" effect="light"
                     class="status-tag" @click="openPay(row)">
@@ -375,6 +392,22 @@ function onSaved() {
           </template>
         </el-table-column>
         <el-table-column prop="note" label="备注" min-width="110" show-overflow-tooltip />
+        <!-- 时间戳存的是 UTC，显示时转本地；排序仍按原始值，
+             因为是等宽格式、字典序就等于时间序，时区偏移不影响先后 -->
+        <el-table-column prop="created_at" label="添加时间" width="102" sortable="custom">
+          <template #default="{ row }">
+            <span :title="toLocalStamp(row.created_at)">
+              {{ shortStamp(row.created_at) || '-' }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="updated_at" label="修改时间" width="102" sortable="custom">
+          <template #default="{ row }">
+            <span :title="toLocalStamp(row.updated_at)">
+              {{ shortStamp(row.updated_at) || '-' }}
+            </span>
+          </template>
+        </el-table-column>
         <!-- 宽度按胶囊按钮算：两个按钮 + 间距 + 单元格内边距 -->
         <el-table-column label="操作" width="140">
           <template #default="{ row }">
