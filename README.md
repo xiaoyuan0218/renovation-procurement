@@ -142,7 +142,7 @@ cd mobile                    # 单机版，命令相同；testDebugUnitTest 是�
 
 ## Windows 桌面端
 
-**下载**：[Windows 桌面版安装包](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-desktop-setup.exe)（约 33 MB，Windows 10/11 64 位；直链固定指向最新构建，不用登录）
+**下载**：[Windows 桌面版安装包](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-desktop-setup.exe)（约 25 MB，Windows 10/11 64 位；直链固定指向最新构建，不用登录）
 
 `src-tauri/` 下是一个 Windows 桌面应用（Tauri 2 外壳 + 打包进安装包的 Python 后端）。它和手机单机版是同一种形态：**数据默认存在这台电脑上**，不搭服务器也能用；连上自己的服务端之后，两边可以双向同步。同步用的是和手机端同一套合并算法与冲突规则。
 
