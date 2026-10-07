@@ -62,6 +62,13 @@ ACTIONS = {
     ("POST", "/api/auth/login"): "登录",
     ("POST", "/api/auth/password"): "修改密码",
     ("POST", "/api/logs/{id}/undo"): "回退操作",
+    # 桌面端连服务器同步（自动同步不在此列，见 SKIPPED）
+    ("POST", "/api/desktop/login"): "连接服务器",
+    ("POST", "/api/desktop/sync"): "与服务器同步",
+    ("POST", "/api/desktop/upload"): "上传清单到服务器",
+    ("POST", "/api/desktop/resolve-upload"): "处理清单冲突",
+    ("POST", "/api/desktop/pull"): "从服务器拉取清单",
+    ("POST", "/api/desktop/unbind"): "解除服务器绑定",
 }
 
 # 不碰业务数据、因此也不阻断回退的操作：最新一条若是它们，往前找写操作。
@@ -74,8 +81,12 @@ NON_DATA = {
     ("POST", "/api/logs/{id}/undo"),
 }
 
-# 明确不记的（退出登录没留下值得翻的痕迹）
-SKIPPED = {("POST", "/api/auth/logout")}
+# 明确不记的：退出登录没留下值得翻的痕迹；**自动同步**是后台行为，本地一改动
+# 就防抖触发一次，记进去只会把用户真正的操作淹掉（手动同步照记，见 ACTIONS）。
+SKIPPED = {
+    ("POST", "/api/auth/logout"),
+    ("POST", "/api/desktop/auto"),
+}
 
 # 日志只留最近 LIMIT 条（写满就裁到 KEEP）——它是翻最近发生的事用的，不是审计归档
 LOG_LIMIT = 2000

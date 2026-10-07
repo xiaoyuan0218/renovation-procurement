@@ -266,13 +266,14 @@ def test_allocation_without_override_stays_without_override(db):
 
 
 def test_export_carries_item_id(db):
-    """三个 sheet 都要带上物料ID列。"""
+    """三个 sheet 都要带上物料ID，而且它在第一列 —— 对账时一眼能找到它。"""
     _build_duplicate_name_db(db)
     wb = openpyxl.load_workbook(io.BytesIO(excel_io.export_xlsx(db)))
     for sheet in ("物料汇总", "布点明细", "采购记录"):
         header = [c.value for c in wb[sheet][1]]
-        assert "物料ID" in header, f"{sheet} 缺少物料ID列"
-        ids = [row[-1] for row in wb[sheet].iter_rows(min_row=2, values_only=True)]
+        assert header[:1] == ["物料ID"], f"{sheet} 的物料ID不在第一列：{header[:3]}"
+        ids = [row[header.index("物料ID")]
+               for row in wb[sheet].iter_rows(min_row=2, values_only=True)]
         assert all(ids), f"{sheet} 有行没写物料ID"
 
 

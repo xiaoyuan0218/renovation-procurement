@@ -1,18 +1,16 @@
 """桌面端专用接口：连远程服务器、把本地清单同步过去。
 
 普通服务端部署用不到这些 —— 它们是「本机当客户端」这条路上的东西。守卫和其它
-业务接口一样，所以桌面端（本机免登录）能直接用，局域网来的请求仍要登录。
+业务接口一样，登录后才能用。
 """
 
 from contextlib import contextmanager
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .. import auth
 from ..db import get_db
-from ..models import User
 from ..services import desktop_sync
 from ..services.remote_sync import RemoteError
 
@@ -68,10 +66,6 @@ class ListIn(BaseModel):
 class AutoSyncIn(BaseModel):
     list_id: int
     enabled: bool
-
-
-class PasswordIn(BaseModel):
-    password: str
 
 
 # ---------------------------------------------------------------- 登录与状态
@@ -151,25 +145,4 @@ def unbind(data: ListIn, db: Session = Depends(get_db)):
 def set_auto_sync(data: AutoSyncIn, db: Session = Depends(get_db)):
     with _as_http_error():
         desktop_sync.set_auto_sync(db, data.list_id, data.enabled)
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------- 局域网访问密码
-
-@router.post("/set-password")
-def set_password(data: PasswordIn, request: Request,
-                 user: User = Depends(auth.require_user),
-                 db: Session = Depends(get_db)):
-    """给这个本地账号设一个自己记得住的密码。
-
-    本机免登录时，本机请求根本不看密码；但要让同局域网的设备连进来，就得有一个
-    能说出口的密码 —— 启动时自动生成的那个是随机串，用户并不知道。**只允许在
-    本机上设置**，否则局域网里谁都能把密码改掉。
-    """
-    if not auth.LOCAL_NO_AUTH or not auth.is_local_request(request):
-        raise HTTPException(403, "只允许在本机上设置")
-    if len(data.password) < 6:
-        raise HTTPException(400, "密码至少 6 位")
-    user.password_hash = auth.hash_password(data.password)
-    db.commit()
     return {"ok": True}

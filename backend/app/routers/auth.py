@@ -42,6 +42,7 @@ def setup(data: CredentialsIn, response: Response, db: Session = Depends(get_db)
     db.refresh(user)
     token = auth.create_token(user)
     auth.set_session_cookie(response, token)
+    auth.mark_password_known()
     return LoginOut(token=token, username=user.username)
 
 
@@ -62,6 +63,7 @@ def login(data: CredentialsIn, request: Request, response: Response,
     auth.clear_failures(key)
     token = auth.create_token(user)
     auth.set_session_cookie(response, token)
+    auth.mark_password_known()  # 登进来就说明知道密码，桌面端的迁移据此保留账号
     return LoginOut(token=token, username=user.username)
 
 
@@ -90,4 +92,5 @@ def change_password(data: PasswordChangeIn, response: Response,
     # 这里给当前这个会话补发一个新 token，免得改完密码把自己踢下线。
     token = auth.create_token(user)
     auth.set_session_cookie(response, token)
+    auth.mark_password_known()
     return LoginOut(token=token, username=user.username)

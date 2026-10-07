@@ -94,7 +94,6 @@ fn start_backend(app: &tauri::App) -> Result<u16, Box<dyn std::error::Error>> {
         .env("RENOVATION_DIST", dist.to_string_lossy().to_string())
         .env("RENOVATION_HOST", "127.0.0.1")
         .env("RENOVATION_PORT", "8000")
-        .env("RENOVATION_LOCAL_NO_AUTH", "1")
         .spawn()
         .map_err(|error| format!("内置服务启动不了：{error}"))?;
     app.manage(ServerProcess(Mutex::new(Some(child))));

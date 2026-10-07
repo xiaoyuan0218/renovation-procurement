@@ -10,6 +10,7 @@ import com.xiaoyuan.renovation.mobile.data.db.PurchaseRecordEntity
 import com.xiaoyuan.renovation.mobile.data.db.RecordRoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.RoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.nowStamp
+import com.xiaoyuan.renovation.mobile.data.db.normalizeStamp
 import com.xiaoyuan.renovation.mobile.domain.LocalCompute
 
 /**
@@ -45,17 +46,23 @@ object SheetMapping {
     const val SHEET_ROOMS = "分组"
     const val SHEET_CATEGORIES = "分类"
 
+    // 列名与顺序都和后端 excel_io.py 里的 ITEM_HEADER 等常量一一对应 ——
+    // 三端互导靠的就是这套列名，改一边必须同时改另一边。
+    // 「物料ID」在第一列：它才是物料的身份，对账时一眼能找到。
     private val ITEM_HEADERS = listOf(
-        "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
+        "物料ID", "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
         "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
         "日常价未付", "实际优惠", "日常价优惠",
-        "已购", "备注", "物料ID",
+        "已购", "备注", "添加时间", "修改时间",
     )
-    private val ALLOC_HEADERS = listOf("物料名称", "房间", "数量", "单价", "备注", "物料ID")
+    private val ALLOC_HEADERS = listOf("物料ID", "物料名称", "房间", "数量", "单价", "备注")
     private val RECORD_HEADERS = listOf(
-        "物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家", "订单号", "备注", "物料ID",
+        "物料ID", "物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家",
+        "订单号", "备注", "添加时间", "修改时间",
     )
-    private val EXPENSE_HEADERS = listOf("类型", "金额", "日期", "商家", "订单号", "备注")
+    private val EXPENSE_HEADERS = listOf(
+        "类型", "金额", "日期", "商家", "订单号", "备注", "添加时间", "修改时间",
+    )
     private val ROOM_HEADERS = listOf("分组名称")
     private val CATEGORY_HEADERS = listOf("分类名称")
 
@@ -87,6 +94,7 @@ object SheetMapping {
             val dto = LocalCompute.toDto(bundle)
 
             itemRows += listOf(
+                item.id,
                 categories[item.categoryId]?.name ?: "",
                 item.name,
                 item.brand,
@@ -108,20 +116,23 @@ object SheetMapping {
                 LocalCompute.dailyDiscount(item, mine, bundle.records),
                 if (dto.bought) "是" else "否",
                 item.note,
-                item.id,
+                // 时间跟着一起走：不然导出再导回来，所有「修改时间」都变成刚刚，
+                // 同步还会把每条都当成新改动推一遍
+                item.createdAt,
+                item.updatedAt,
             )
 
             mine.forEach { alloc ->
                 // 数量为 0 的分配别处一律视为"没有这条"，导出时也不写，否则回灌会丢
                 if (alloc.qty == 0.0) return@forEach
                 allocRows += listOf(
+                    item.id,
                     item.name,
                     rooms[alloc.roomId]?.name ?: "",
                     alloc.qty,
                     // 写原始的覆盖价：留空表示跟随物料单价，写死会变成固定价
                     alloc.priceOverride,
                     alloc.note,
-                    item.id,
                 )
             }
 
@@ -129,6 +140,7 @@ object SheetMapping {
                 val names = recordRooms[record.id].orEmpty()
                     .mapNotNull { it.roomId?.let { id -> rooms[id]?.name } }
                 recordRows += listOf(
+                    item.id,
                     item.name,
                     record.qty,
                     record.amount,
@@ -138,14 +150,16 @@ object SheetMapping {
                     record.vendor,
                     record.orderNo,
                     record.note,
-                    item.id,
+                    record.createdAt,
+                    record.updatedAt,
                 )
             }
         }
 
         val expenseRows: MutableList<List<Any?>> = mutableListOf(EXPENSE_HEADERS)
         db.expenses().byList(listId).forEach { e ->
-            expenseRows += listOf(e.kind, e.amount, e.date, e.vendor, e.orderNo, e.note)
+            expenseRows += listOf(e.kind, e.amount, e.date, e.vendor, e.orderNo, e.note,
+                e.createdAt, e.updatedAt)
         }
 
         // 分组与分类单独成页：上面几页里它们只以「用到的名字」出现，没有任何物料
@@ -306,6 +320,13 @@ object SheetMapping {
                     price = itemTable.number(row, "单价") ?: current.price,
                     discountPrice = itemTable.number(row, "优惠单价") ?: current.discountPrice,
                     note = itemTable.cell(row, "备注").ifBlank { current.note },
+                    // 表里带了时间就照原样写回，导出再导入不改动任何时间；
+                    // 没带的（老文件、或本次新建的行）补一个"现在"，免得界面
+                    // 上「添加时间」是空的
+                    createdAt = normalizeStamp(itemTable.cell(row, "添加时间"))
+                        ?: current.createdAt.ifEmpty { nowStamp() },
+                    updatedAt = normalizeStamp(itemTable.cell(row, "修改时间"))
+                        ?: current.updatedAt.ifEmpty { nowStamp() },
                     rev = current.rev + 1,
                 ),
             )
@@ -367,6 +388,8 @@ object SheetMapping {
                     note = recordTable.cell(row, "备注"),
                     vendor = recordTable.cell(row, "商家"),
                     orderNo = recordTable.cell(row, "订单号"),
+                    createdAt = normalizeStamp(recordTable.cell(row, "添加时间")) ?: nowStamp(),
+                    updatedAt = normalizeStamp(recordTable.cell(row, "修改时间")) ?: nowStamp(),
                 ),
             ).toInt()
             // 先整体匹配已有分组名，匹配不到才按分隔符拆：分组名本身可能含顿号或
@@ -404,7 +427,8 @@ object SheetMapping {
                     vendor = expenseTable.cell(row, "商家"),
                     orderNo = expenseTable.cell(row, "订单号"),
                     note = expenseTable.cell(row, "备注"),
-                    createdAt = nowStamp(),
+                    createdAt = normalizeStamp(expenseTable.cell(row, "添加时间")) ?: nowStamp(),
+                    updatedAt = normalizeStamp(expenseTable.cell(row, "修改时间")) ?: nowStamp(),
                 ),
             )
             expenseCount++

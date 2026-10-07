@@ -175,7 +175,9 @@ def test_excel_roundtrip_keeps_expenses(client):
 
     exported = client.get("/api/export", headers=_hdr(client)).content
     ws = openpyxl.load_workbook(io.BytesIO(exported))["额外费用"]
-    assert [c.value for c in ws[1]] == ["类型", "金额", "日期", "商家", "订单号", "备注"]
+    # 前六列是费用本身；末尾两列是添加/修改时间（导出带上、导入写回，见
+    # tests/test_import_timestamps.py）
+    assert [c.value for c in ws[1]][:6] == ["类型", "金额", "日期", "商家", "订单号", "备注"]
 
     # 先清空再回灌：费用得回到 60
     client.delete(f"/api/expenses/{client.get('/api/expenses', headers=_hdr(client)).json()[0]['id']}",

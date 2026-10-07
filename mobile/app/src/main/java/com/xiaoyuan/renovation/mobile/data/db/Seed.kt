@@ -39,6 +39,24 @@ fun parseStamp(text: String): LocalDateTime? =
     if (text.isBlank()) null else runCatching { LocalDateTime.parse(text, STAMP) }.getOrNull()
 
 /**
+ * 表格里的时间戳 → 本机存储格式（`STAMP`，UTC）。认不出来返回 null。
+ *
+ * 电脑端导出的表格里是 `YYYY-MM-DD HH:MM:SS`（不带小数秒），手机自己写的是带
+ * 微秒的，两种都要认。归一成同一格式之后，库里、同步比较、界面上才是同一把尺子。
+ * 认不出来就返回 null —— 调用方保持原有时间不动，宁可留旧的也不要编一个。
+ */
+fun normalizeStamp(text: String): String? {
+    val raw = text.trim()
+    if (raw.isEmpty()) return null
+    parseStamp(raw)?.let { return it.format(STAMP) }
+    val plain = raw.replace('T', ' ')
+    return runCatching {
+        LocalDateTime.parse(plain, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            .format(STAMP)
+    }.getOrNull()
+}
+
+/**
  * UTC 时间戳转**设备本地时区**，给界面显示用。
  *
  * 存的是 UTC、给用户看的是本地时间 —— 直接拿 UTC 字符串显示的话，

@@ -82,7 +82,10 @@ def test_deleted_item_disappears_from_every_view(client):
     assert client.get("/api/lists").json()[0]["item_count"] == 1
     # 导出里没有它
     wb = openpyxl.load_workbook(io.BytesIO(client.get("/api/export", headers=_hdr(client)).content))
-    names = [row[1] for row in wb["物料汇总"].iter_rows(min_row=2, values_only=True)]
+    ws = wb["物料汇总"]
+    header = [c.value for c in ws[1]]
+    names = [row[header.index("物料名称")]
+             for row in ws.iter_rows(min_row=2, values_only=True)]
     assert names == ["网线"]
     assert other["id"]  # 另一条不受影响
 

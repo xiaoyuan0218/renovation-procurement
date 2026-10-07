@@ -6,11 +6,11 @@
   - 数据放用户目录（%APPDATA%\\采知道）。安装目录可能只读，PyInstaller 解压
     出来的 _MEIPASS 更是每次启动都换路径，数据库、签名密钥、迁移备份写在那里
     要么直接失败、要么下次启动就找不到了。
-  - 本机免登录（见 auth.LOCAL_NO_AUTH），打开就是自己的数据。
+  - 首次使用先注册管理员账号，之后用自己设的密码登录（和其它端一致）。
   - **默认只监听 127.0.0.1**：桌面端和手机端一样是「客户端」角色 —— 数据在
     本机、需要时同步到自己的服务器，不把自己暴露给局域网。真想让同局域网的
-    设备连它，把 RENOVATION_HOST 设成 0.0.0.0（那时局域网请求需要账号密码，
-    本机仍免登录）。
+    设备连它，把 RENOVATION_HOST 设成 0.0.0.0（那时局域网设备用同一个账号
+    密码登录）。
   - 端口被占用时自动往后找一个，避免和电脑上已有的服务（比如 Docker 里那个）
     打架。
   - 起来之后把实际端口写进数据目录的 `port` 文件。外壳程序（Tauri）读它决定
@@ -75,7 +75,6 @@ def _prepare_env() -> Path:
     data_dir = Path(os.environ.get("RENOVATION_DATA_DIR") or _default_data_dir())
     data_dir.mkdir(parents=True, exist_ok=True)
     os.environ["RENOVATION_DATA_DIR"] = str(data_dir)
-    os.environ.setdefault("RENOVATION_LOCAL_NO_AUTH", "1")
     # 版本与构建时间：CI 打包时写进 _MEIPASS/version.json（见 build_server.py）。
     # Tauri 拉起 sidecar 时只传固定几个环境变量，不传版本号，所以打包时固化
     # 进去是唯一可靠的途径；漏了的话「关于」页显示 dev、检查更新永远说本地没
@@ -136,11 +135,44 @@ def main() -> None:
     import uvicorn
 
     from app.main import app
+    from app.db import SessionLocal
+    from app.models import User
+    from app import auth
+
+    _drop_unusable_local_account(SessionLocal, User, auth)
 
     print(f"[桌面端] 数据目录：{data_dir}", flush=True)
     print(f"[桌面端] 前端产物：{os.environ.get('RENOVATION_DIST', '(未设置)')}", flush=True)
     print(f"[桌面端] 监听 http://{host}:{port}", flush=True)
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def _drop_unusable_local_account(SessionLocal, User, auth) -> None:
+    """清掉老版本"本机免登录"留下的、没人知道口令的管理员账号。
+
+    那一版启动时自动建管理员，口令是随机串，用户不知道也改不了（改密码要先进
+    去）。去掉免密之后它会把人挡在登录页外面：注册要求库里一个账号都没有，
+    登录又需要那个随机口令。库里还留着它 = 这个安装永远进不去。
+
+    判断依据是"有人证明过知道密码"的标记（注册、登录成功、改密码时写下）：
+    标记不在、却有账号，说明那个账号的口令没人知道，删掉让首次注册重走一遍。
+
+    只删账号，不碰清单与物料 —— 数据是清单维度的，和账号没关系。
+    """
+    if auth.password_known():
+        return
+    db = SessionLocal()
+    try:
+        stale = db.query(User).all()
+        if not stale:
+            return
+        for user in stale:
+            db.delete(user)
+        db.commit()
+        print(f"[桌面端] 已清除 {len(stale)} 个无法登录的旧账号（口令由旧版本随机生成），"
+              f"请重新注册一次", flush=True)
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

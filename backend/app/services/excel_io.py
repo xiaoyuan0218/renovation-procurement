@@ -13,12 +13,62 @@
 import io
 import re
 from collections import Counter
+from datetime import datetime
 
 from openpyxl import Workbook, load_workbook
 
 from . import compute, dates
 
 PRODUCT_HEADER = {"灯具", "面板", "物料", "产品"}
+
+# 各页表头只写一份：导出与模板共用，两边不会慢慢漂开（从前各写一遍，模板就多过
+# 一列「实付数量」）。**列表顺序就是列顺序**。
+#
+# 「物料ID」放在第一列：它才是物料的身份（改名、重名都不变），对账时一眼能找到。
+# 读取一律按列名找列，所以老文件（ID 在最后一列）照样能读。
+ITEM_HEADER = ["物料ID", "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价",
+               "优惠单价", "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
+               "日常价未付", "实际优惠", "日常价优惠", "已购", "备注",
+               "添加时间", "修改时间"]
+ALLOC_HEADER = ["物料ID", "物料名称", "房间", "数量", "单价", "备注"]
+RECORD_HEADER = ["物料ID", "物料名称", "实付数量", "实付金额", "付款日期", "分组",
+                 "商家", "订单号", "备注", "添加时间", "修改时间"]
+EXPENSE_HEADER = ["类型", "金额", "日期", "商家", "订单号", "备注",
+                  "添加时间", "修改时间"]
+
+
+def _stamp_out(value) -> str:
+    """库里存的时间 → 表格里的写法（`YYYY-MM-DD HH:MM:SS`，UTC）。
+
+    与接口、手机端同一把尺子：全端都存 UTC，显示时才各自转本地。
+    """
+    return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
+
+
+def _parse_stamp(value):
+    """表格里的时间 → datetime（UTC）。缺失或认不出来都返回 None。
+
+    宁可不写也不拿"现在"冒充：这列是同步判"谁改得更近"的依据，编一个时间出来
+    会让较旧的改动被当成新的，反把对方的更新盖掉。认不出来就交给数据库默认值。
+
+    两种写法都要认：电脑端导出的是 `YYYY-MM-DD HH:MM:SS`，手机端带微秒
+    （`...05:06:07.123456`）—— 微秒一并保留，"同一时刻"才不会因为精度被改写。
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    text = str(value).strip().replace("T", " ")
+    m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.(\d{1,6})\d*)?$", text)
+    if not m:
+        return None
+    try:
+        parsed = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    if m.group(2):
+        parsed = parsed.replace(microsecond=int(m.group(2).ljust(6, "0")))
+    return parsed
 
 
 def _v(ws, row, col):
@@ -333,6 +383,8 @@ def _parse_flat(path_or_bytes):
     c_paid_amount = col_of(ws_items, "实付金额")
     c_bought = col_of(ws_items, "已购")
     c_note = col_of(ws_items, "备注")
+    c_created = col_of(ws_items, "添加时间")
+    c_updated = col_of(ws_items, "修改时间")
 
     items = []
     for r in range(2, ws_items.max_row + 1):
@@ -360,6 +412,9 @@ def _parse_flat(path_or_bytes):
                                         f"{label}的「实付金额」", warnings),
             "bought": bought_cell in ("是", "TRUE", "True", "1"),
             "note": _txt(_v(ws_items, r, c_note)),
+            # 老文件没有这两列（返回 None），落库时按数据库默认值走
+            "created_at": _parse_stamp(_vo(ws_items, r, c_created)),
+            "updated_at": _parse_stamp(_vo(ws_items, r, c_updated)),
         })
 
     allocs = []  # {item_id, item_name, room, qty, price_override, paid_qty, note}
@@ -393,7 +448,7 @@ def _parse_flat(path_or_bytes):
         # 商家 / 订单号是后加的列：老文件里没有，_vo 会安全地返回 None
         rcols = {t: col_of(ws_rec, t) for t in
                  ("物料ID", "物料名称", "实付数量", "实付金额", "付款日期",
-                  "分组", "商家", "订单号", "备注")}
+                  "分组", "商家", "订单号", "备注", "添加时间", "修改时间")}
         for r in range(2, ws_rec.max_row + 1):
             name = _txt(_v(ws_rec, r, rcols["物料名称"]))
             if not name:
@@ -421,6 +476,8 @@ def _parse_flat(path_or_bytes):
                 # （「客厅/餐厅」「客厅、过道」），解析阶段还没有清单上下文，
                 # 无脑拆会把一个分组拆成两个。落库时按 _split_rooms 再定。
                 "room_raw": _txt(_vo(ws_rec, r, rcols.get("分组"))),
+                "created_at": _parse_stamp(_vo(ws_rec, r, rcols.get("添加时间"))),
+                "updated_at": _parse_stamp(_vo(ws_rec, r, rcols.get("修改时间"))),
             })
 
     # 额外费用页：老文件没有这一页时返回 None（而不是空列表），
@@ -430,7 +487,8 @@ def _parse_flat(path_or_bytes):
         if sheet.title == "额外费用":
             ws_exp = sheet
             ecols = {t: col_of(ws_exp, t) for t in
-                     ("类型", "金额", "日期", "商家", "订单号", "备注")}
+                     ("类型", "金额", "日期", "商家", "订单号", "备注",
+                      "添加时间", "修改时间")}
             expenses = []
             for r in range(2, ws_exp.max_row + 1):
                 amount = _num_checked(_vo(ws_exp, r, ecols.get("金额")),
@@ -444,6 +502,8 @@ def _parse_flat(path_or_bytes):
                     "vendor": _txt(_vo(ws_exp, r, ecols.get("商家"))),
                     "order_no": _txt(_vo(ws_exp, r, ecols.get("订单号"))),
                     "note": _txt(_vo(ws_exp, r, ecols.get("备注"))),
+                    "created_at": _parse_stamp(_vo(ws_exp, r, ecols.get("添加时间"))),
+                    "updated_at": _parse_stamp(_vo(ws_exp, r, ecols.get("修改时间"))),
                 })
             break
 
@@ -759,6 +819,8 @@ def _apply_flat(db, parsed, mode, report, list_id):
             return by_source_id[rid]
         return by_name.get(_norm(row["item_name"]))
 
+    # 表里带回来的时间戳，先记下来：写完布点/记录之后还要再落一遍（原因见下面的注释）
+    stamped: list = []
     for data in parsed["items"]:
         item = _match_existing(data) if mode == "merge" else None
         if not item:
@@ -776,6 +838,8 @@ def _apply_flat(db, parsed, mode, report, list_id):
         item.brand = data["brand"] or ""
         item.model = data["model"] or ""
         item.note = data["note"]
+        if data.get("created_at") or data.get("updated_at"):
+            stamped.append((item, data.get("created_at"), data.get("updated_at")))
         if (data["paid_qty"] or data["paid_amount"]) and _norm(data["name"]) not in rec_names:
             item.records.append(PurchaseRecord(
                 qty=data["paid_qty"] or 0, amount=data["paid_amount"] or 0))
@@ -816,13 +880,26 @@ def _apply_flat(db, parsed, mode, report, list_id):
                 db, room_name, rooms_cache, report, list_id).id)
             for room_name in _split_rooms(r.get("room_raw"), rooms_cache)
         ]
-        item.records.append(PurchaseRecord(
+        record = PurchaseRecord(
             qty=r["qty"] or 0, amount=r["amount"] or 0,
             date=r["date"] or "", note=r["note"] or "",
             vendor=r.get("vendor") or "", order_no=r.get("order_no") or "",
-            rooms=record_rooms))
+            rooms=record_rooms)
+        if r.get("created_at"):
+            record.created_at = r["created_at"]
+        if r.get("updated_at"):
+            record.updated_at = r["updated_at"]
+        item.records.append(record)
         report["records"] = report.get("records", 0) + 1
     item_bought_sync(db, list_id)
+    # 表里读回来的时间必须最后再落一遍：item_bought_sync 会把这些行再改一次
+    # （重算已购、顶 rev），那是一次新的 UPDATE，SQLAlchemy 的 onupdate 会顺手
+    # 把「修改时间」刷成现在 —— 上一步写进去的值就这么被盖掉了。
+    for item, made, changed in stamped:
+        if made:
+            item.created_at = made
+        if changed:
+            item.updated_at = changed
     report["expenses"] = _apply_expenses(db, parsed, list_id)
     db.commit()
 
@@ -840,9 +917,14 @@ def _apply_expenses(db, parsed, list_id) -> int:
     from ..models import ExtraExpense
     db.query(ExtraExpense).filter(ExtraExpense.list_id == list_id).delete()
     for r in rows:
-        db.add(ExtraExpense(list_id=list_id, kind=r["kind"], amount=r["amount"],
-                            date=r["date"], vendor=r["vendor"],
-                            order_no=r["order_no"], note=r["note"]))
+        expense = ExtraExpense(list_id=list_id, kind=r["kind"], amount=r["amount"],
+                               date=r["date"], vendor=r["vendor"],
+                               order_no=r["order_no"], note=r["note"])
+        if r.get("created_at"):
+            expense.created_at = r["created_at"]
+        if r.get("updated_at"):
+            expense.updated_at = r["updated_at"]
+        db.add(expense)
     return len(rows)
 
 
@@ -891,10 +973,7 @@ def export_xlsx(db, list_id=None) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "物料汇总"
-    ws.append(["类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
-               "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
-               "日常价未付", "实际优惠", "日常价优惠",
-               "已购", "备注", "物料ID"])
+    ws.append(ITEM_HEADER)
     rooms = {r.id: r.name for r in db.query(Room)
              .filter(Room.list_id == list_id).all()}
     cats = {c.id: c.name for c in db.query(Category)
@@ -903,16 +982,19 @@ def export_xlsx(db, list_id=None) -> bytes:
             .order_by(Item.sort, Item.id).all():
         d = compute.item_dict(i)
         ws.append([
-            cats.get(i.category_id, ""), i.name, i.brand or "", i.model or "",
+            i.id, cats.get(i.category_id, ""), i.name, i.brand or "", i.model or "",
             i.unit, d["total_qty"],
             i.price, i.discount_price, d["discount_total"],
             d["paid_qty"], d["paid"], d["unpaid_qty"], d["unpaid"],
             d["daily_unpaid"], d["actual_discount"], d["daily_discount"],
-            "是" if d["bought"] else "否", i.note, i.id,
+            "是" if d["bought"] else "否", i.note,
+            # 时间带上一起走：不然导出再灌回去，所有「修改时间」都变成刚刚，
+            # 同步还会把每条都当成新改动推一遍
+            _stamp_out(i.created_at), _stamp_out(i.updated_at),
         ])
 
     ws2 = wb.create_sheet("布点明细")
-    ws2.append(["物料名称", "房间", "数量", "单价", "备注", "物料ID"])
+    ws2.append(ALLOC_HEADER)
     for i in db.query(Item).filter(Item.list_id == list_id, Item.alive()) \
             .order_by(Item.sort, Item.id).all():
         for a in i.allocations:
@@ -922,29 +1004,31 @@ def export_xlsx(db, list_id=None) -> bytes:
                 continue
             # 写原始的覆盖价而不是折算后的单价：留空表示「跟随物料单价」，
             # 写成具体数字会把它变成固定价，以后改物料单价这行就不跟着动了
-            ws2.append([i.name, rooms.get(a.room_id, ""), a.qty, a.price_override, a.note, i.id])
+            ws2.append([i.id, i.name, rooms.get(a.room_id, ""), a.qty,
+                        a.price_override, a.note])
 
     ws3 = wb.create_sheet("采购记录")
-    ws3.append(["物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家",
-                "订单号", "备注", "物料ID"])
+    ws3.append(RECORD_HEADER)
     for i in db.query(Item).filter(Item.list_id == list_id, Item.alive()) \
             .order_by(Item.sort, Item.id).all():
         for r in i.records:
             # 涉及多个分组时用顿号连起来，导入时按分隔符拆回
             room_names = "、".join(rooms[rr.room_id] for rr in r.rooms
                                    if rr.room_id in rooms)
-            ws3.append([i.name, r.qty or 0, r.amount or 0, r.date or "",
+            ws3.append([i.id, i.name, r.qty or 0, r.amount or 0, r.date or "",
                         room_names, r.vendor or "", r.order_no or "",
-                        r.note or "", i.id])
+                        r.note or "",
+                        _stamp_out(r.created_at), _stamp_out(r.updated_at)])
 
     # 额外费用单独一页：它是独立于物料的支出，不掺进上面三页的金额口径
     from ..models import ExtraExpense
     ws4 = wb.create_sheet("额外费用")
-    ws4.append(["类型", "金额", "日期", "商家", "订单号", "备注"])
+    ws4.append(EXPENSE_HEADER)
     for e in (db.query(ExtraExpense).filter(ExtraExpense.list_id == list_id)
               .order_by(ExtraExpense.id).all()):
         ws4.append([e.kind or "", e.amount or 0, e.date or "",
-                    e.vendor or "", e.order_no or "", e.note or ""])
+                    e.vendor or "", e.order_no or "", e.note or "",
+                    _stamp_out(e.created_at), _stamp_out(e.updated_at)])
 
     # 分组与分类单独成页：上面几页里它们只以「用到的名字」形式出现，没有任何
     # 物料的分组/分类就会在搬运中消失（导进一份空清单时尤其明显）。全量列出来
@@ -967,35 +1051,35 @@ def export_xlsx(db, list_id=None) -> bytes:
 
 
 def build_template() -> bytes:
-    """生成导入模板：与导出格式一致，另加一页填写说明。"""
+    """生成导入模板：与导出格式一致，另加一页填写说明。
+
+    表头直接引用导出用的常量，两边永远逐列一致 —— 用户会把导出文件当模板用，
+    少一列多一列都会让人以为文件不对。
+    """
     wb = Workbook()
     ws = wb.active
     ws.title = "物料汇总"
-    ws.append(["类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
-               "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
-               "日常价未付", "实际优惠", "日常价优惠",
-               "已购", "备注", "物料ID"])
-    ws.append(["照明", "示例筒灯（导入前请删除本行）", None, None, "个", 4, 99, 79.4,
-               None, None, None, None, None, None, None, None, "否", "日常单价留空则按原价计", None])
-    ws.append(["网络", "示例网线（导入前请删除本行）", None, None, "米", 150, 4.41, None,
-               None, None, None, None, None, None, None, None, None, "实付见「采购记录」页", None])
+    ws.append(ITEM_HEADER)
+    ws.append([None, "照明", "示例筒灯（导入前请删除本行）", None, None, "个", 4, 99, 79.4,
+               None, None, None, None, None, None, None, None, "否", "日常单价留空则按原价计",
+               None, None])
+    ws.append([None, "网络", "示例网线（导入前请删除本行）", None, None, "米", 150, 4.41, None,
+               None, None, None, None, None, None, None, None, None, "实付见「采购记录」页",
+               None, None])
 
     ws2 = wb.create_sheet("布点明细")
-    # 表头与导出**逐列一致**（这里从前多一列「实付数量」）：模板和导出文件长得
-    # 一样，用户才不会以为自己少了哪一列
-    ws2.append(["物料名称", "房间", "数量", "单价", "备注", "物料ID"])
-    ws2.append(["示例筒灯（导入前请删除本行）", "客厅", 2, 1199,
-                "单价留空=用物料单价；填了布点的物料，总量以布点合计为准", None])
+    ws2.append(ALLOC_HEADER)
+    ws2.append([None, "示例筒灯（导入前请删除本行）", "客厅", 2, 1199,
+                "单价留空=用物料单价；填了布点的物料，总量以布点合计为准"])
 
     ws3 = wb.create_sheet("采购记录")
-    ws3.append(["物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家",
-                "订单号", "备注", "物料ID"])
-    ws3.append(["示例网线（导入前请删除本行）", 150, 661.2, "2026-09-14",
+    ws3.append(RECORD_HEADER)
+    ws3.append([None, "示例网线（导入前请删除本行）", 150, 661.2, "2026-09-14",
                 "客厅", "京东", "JD20260914001",
-                "一笔可覆盖多个物料，分批买就分多行", None])
+                "一笔可覆盖多个物料，分批买就分多行", None, None])
 
     ws5 = wb.create_sheet("额外费用")
-    ws5.append(["类型", "金额", "日期", "商家", "订单号", "备注"])
+    ws5.append(EXPENSE_HEADER)
     ws5.append(["运费", 120, "2026-09-14", "京东", "JD20260914001",
                 "示例行，导入前请删除"])
 
@@ -1016,13 +1100,16 @@ def build_template() -> bytes:
         "5. 也可以不填采购记录，直接在物料汇总里填实付数量/实付金额，会生成一笔记录。",
         "6. 未付自动=剩余数量×单价；「已购」列由实付数量决定，可留空。",
         "7. 「日常价未付」「实际优惠」「日常价优惠」三列由系统自动计算，导入时忽略，不必填写。",
-        "8. 「物料ID」由系统填写，用来区分同名物料；请勿手动修改，留空则按物料名称匹配。",
+        "8. 「物料ID」在每页第一列，由系统填写，用来区分同名物料（改名也跟着它）；"
+        "请勿手动修改，留空则按物料名称匹配。",
         "9. 导入前请删除示例行。导入方式支持两种：覆盖现有数据 / 与现有数据按名称合并。",
         "10. 「商家」「订单号」是选填的：填了方便对账和售后，留空不影响任何金额计算。",
         "11. 「额外费用」页记运费、安装费这类钱：它们不掺进物料的金额合计，"
         "在总览里单独汇总。有了这页，运费不用再摊进单价。",
         "12. 「分组」「分类」两页列出清单里的全部名字（含暂时没有物料的）："
         "想在导入时把某个空分组也建出来，就填在这里。",
+        "13. 「添加时间」「修改时间」由系统填写（UTC），导出时一并带出、导入时照原样写回，"
+        "所以导出再导入不会改动任何时间。手填无效，认不出来会忽略。",
     ]:
         ws4.append([line])
 

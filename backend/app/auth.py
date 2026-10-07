@@ -13,6 +13,7 @@ import base64
 import hashlib
 import hmac
 import os
+import pathlib
 import secrets
 import threading
 import time
@@ -46,17 +47,10 @@ SESSION_DAYS = _env_int("RENOVATION_SESSION_DAYS", 30)
 COOKIE_SECURE = (os.environ.get("RENOVATION_COOKIE_SECURE", "") or "").strip().lower() in (
     "1", "true", "yes", "on")
 
-# 桌面端本机免登录：桌面版把后端跑在用户自己的机器上，打开就该看到自己的数据，
-# 没必要先登录一次。**只对本机来源生效** —— 局域网来的请求照旧要凭据，所以
-# "这台电脑同时当服务端给手机连"这条路依然受账号保护，不会因为开了它而裸奔。
-LOCAL_NO_AUTH = (os.environ.get("RENOVATION_LOCAL_NO_AUTH", "") or "").strip().lower() in (
-    "1", "true", "yes", "on")
-
-# 免登录时用的那个管理员账号名。用户要给手机连的时候，就是拿它加自己设的密码登。
-LOCAL_ADMIN_USERNAME = "admin"
-
-# 算作"本机"的来源。testclient 是 FastAPI 测试客户端的 host，测试里要能免登录。
-_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+# 桌面端从前有个"本机免登录"开关（RENOVATION_LOCAL_NO_AUTH），已经去掉：
+# 免密的代价是点一次「退出登录」就再也进不来 —— 本机账号的口令是随机串，
+# 用户不可能知道，界面停在登录页没有出口。现在桌面端和其它端一样，
+# 首次打开先注册，之后用自己设的密码登录。
 
 
 def _b64(raw: bytes) -> str:
@@ -243,31 +237,29 @@ def _extract_token(request: Request):
     return request.cookies.get(COOKIE_NAME)
 
 
-def is_local_request(request: Request) -> bool:
-    """请求是不是从本机发出的（桌面端免登录只认这个）。"""
-    client = request.client
-    return client is not None and client.host in _LOCAL_HOSTS
+# ---------------------------------------------------------------- 密码知悉标记
+#
+# 桌面端老版本"本机免登录"时，启动会自动建一个管理员账号，口令是随机串 ——
+# 用户既不知道也没法登录。去掉免密之后，这类账号会把用户挡在登录页外面
+# （注册流程要求库里一个账号都没有），所以桌面端启动时要认出它并清掉，
+# 让首次注册重新走一遍（见 backend/desktop.py）。
+#
+# 判断依据就是这个标记文件：**有人证明过他知道密码**（注册、登录成功、改密码）
+# 就写一份。标记不在 = 库里的账号是当年自动建的，谁也不知道口令。
 
 
-def local_admin(db: Session) -> User:
-    """本机免登录时用的管理员。
+def mark_password_known() -> None:
+    """注册、登录成功、改密码三处调用：记下"这个库有人知道密码"。"""
+    marker = pathlib.Path(DATA_DIR) / ".password_known"
+    try:
+        marker.write_text("1", encoding="utf-8")
+    except OSError:
+        pass  # 数据目录不可写时不该拦住登录本身
 
-    桌面版首次启动库里还没有账号，这里现建一个 —— 口令是随机串，用户既不需要
-    知道也不用记（本机请求根本不校验它）。**这顺带堵住了"账号创建窗口期"**：
-    从前首次部署后局域网里谁先打开页面谁就能把管理员建走，现在账号在启动时就
-    已经存在，别人抢不到。
 
-    要给手机连的时候，用户在设置里把这个账号的密码改成自己记得住的即可。
-    """
-    user = db.query(User).first()
-    if user is not None:
-        return user
-    user = User(username=LOCAL_ADMIN_USERNAME,
-                password_hash=hash_password(secrets.token_urlsafe(24)))
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+def password_known() -> bool:
+    marker = pathlib.Path(DATA_DIR) / ".password_known"
+    return marker.is_file()
 
 
 def current_user_or_none(request: Request, db: Session):
@@ -276,10 +268,6 @@ def current_user_or_none(request: Request, db: Session):
     两种凭据都认：API 密钥（给外部程序，长期有效）和登录 token（Cookie 或
     Bearer，给网页与安卓）。密钥先看 —— 它自带 xk_ 前缀，与登录 token 一眼
     可分，不会互相误判。
-
-    桌面端（`RENOVATION_LOCAL_NO_AUTH`）额外放行本机请求：本机即使没带任何
-    凭据也当作已登录。带了有效凭据的仍按凭据走，所以本机上用别的账号登录、
-    或带着 API 密钥调接口都照常工作。
     """
     key = _extract_api_key(request)
     if key is not None:
@@ -289,8 +277,6 @@ def current_user_or_none(request: Request, db: Session):
         user = verify_token(token, db)
         if user is not None:
             return user
-    if LOCAL_NO_AUTH and is_local_request(request):
-        return local_admin(db)
     return None
 
 

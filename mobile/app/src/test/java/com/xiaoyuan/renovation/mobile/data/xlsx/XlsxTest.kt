@@ -1,5 +1,6 @@
 package com.xiaoyuan.renovation.mobile.data.xlsx
 
+import com.xiaoyuan.renovation.mobile.data.db.normalizeStamp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -82,10 +83,10 @@ class XlsxTest {
         // 列名要和手机端导出时写的完全一致，不然两个方向就对不上了
         assertEquals(
             listOf(
-                "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
-                "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
-                "日常价未付", "实际优惠", "日常价优惠",
-                "已购", "备注", "物料ID",
+                "物料ID", "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价",
+                "优惠单价", "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
+                "日常价未付", "实际优惠", "日常价优惠", "已购", "备注",
+                "添加时间", "修改时间",
             ),
             header,
         )
@@ -96,19 +97,28 @@ class XlsxTest {
         // 数字按值比：openpyxl 把 6.0 写成 "6"，两家写法不同但值一样
         assertEquals(30.5, row[header.indexOf("单价")].toDouble(), 1e-9)
         assertEquals(6.0, row[header.indexOf("数量")].toDouble(), 1e-9)
+        // 时间戳带出来了（电脑端写的是不带小数秒的 UTC 格式）
+        assertTrue("添加时间不能是空的", row[header.indexOf("添加时间")].isNotBlank())
+        assertTrue("添加时间要认得出来",
+            normalizeStamp(row[header.indexOf("添加时间")]) != null)
 
         val allocs = sheets["布点明细"]!!
         val allocHeader = allocs[0]
-        assertEquals(listOf("物料名称", "房间", "数量", "单价", "备注", "物料ID"), allocHeader)
+        assertEquals(listOf("物料ID", "物料名称", "房间", "数量", "单价", "备注"), allocHeader)
         assertEquals("客厅", allocs[1][allocHeader.indexOf("房间")])
 
         val records = sheets["采购记录"]!!
         val recordHeader = records[0]
         assertEquals("京东", records[1][recordHeader.indexOf("商家")])
         assertEquals(180.5, records[1][recordHeader.indexOf("实付金额")].toDouble(), 1e-9)
+        assertTrue("采购记录也要带时间",
+            normalizeStamp(records[1][recordHeader.indexOf("添加时间")]) != null)
 
         val expenses = sheets["额外费用"]!!
-        assertEquals(listOf("类型", "金额", "日期", "商家", "订单号", "备注"), expenses[0])
+        assertEquals(
+            listOf("类型", "金额", "日期", "商家", "订单号", "备注", "添加时间", "修改时间"),
+            expenses[0],
+        )
         assertEquals("运费", expenses[1][0])
     }
 }
