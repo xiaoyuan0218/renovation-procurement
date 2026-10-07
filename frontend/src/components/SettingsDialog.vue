@@ -348,6 +348,23 @@ async function loadVersion() {
   } catch { /* 拿不到就显示未知，不影响别的功能 */ }
 }
 
+/** 逐段比版本号：a > b 返回正数，相等返回 0。段数不同时缺的按 0 算。 */
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d) return d
+  }
+  return 0
+}
+
+// CI 是先记下构建时间、几分钟后才把安装包传上 release，所以资产更新时间永远比
+// 本机的构建时间晚一截。拿它和 built_at 直接比，刚装上的最新版也会被判成「有新
+// 版本」（实测差 6 分钟）。版本号能读到时按版本号判，读不到才退回比时间，并且
+// 留出一段窗口：同一个构建过程里的时间差不作数。
+const BUILD_GRACE_MS = 30 * 60 * 1000
+
 async function checkUpdate() {
   checking.value = true
   updateState.value = ''
@@ -361,11 +378,29 @@ async function checkUpdate() {
     const stamps = (data.assets || []).map((a) => a.updated_at).filter(Boolean).sort()
     const remote = stamps[stamps.length - 1] || data.published_at
     const local = version.value.built_at
+    const localVersion = version.value.version || ''
     if (!remote) throw new Error('读不到远端的构建时间')
+
+    // 发布说明第一行写着版本号（见 .github/workflows/apk.yml），与手机端同一套判据
+    const matched = (data.body || '').match(/\*\*版本\s*([0-9][0-9.]*)\*\*/)
+    const remoteVersion = matched ? matched[1] : ''
+    if (remoteVersion && localVersion && localVersion !== 'dev') {
+      if (compareVersions(remoteVersion, localVersion) > 0) {
+        updateState.value = 'newer'
+        updateInfo.value = `有新版本：远端是 ${remoteVersion}，本机是 ${localVersion}。`
+          + '服务器或网页版跑 docker compose pull && docker compose up -d；'
+          + '桌面版重新下载安装包覆盖安装即可（数据不受影响）'
+      } else {
+        updateState.value = 'latest'
+        updateInfo.value = `已是最新（${localVersion}）`
+      }
+      return
+    }
+
     if (!local) {
       updateState.value = 'latest'
       updateInfo.value = `本地是开发版（没有构建时间）。GitHub 上最新构建于 ${localTime(remote)}`
-    } else if (new Date(remote) > new Date(local)) {
+    } else if (new Date(remote).getTime() - new Date(local).getTime() > BUILD_GRACE_MS) {
       updateState.value = 'newer'
       updateInfo.value = `有新版本：GitHub 上 ${localTime(remote)} 的构建比本机`
         + `（${localTime(local)}）新。在服务器上跑 docker compose pull && `
