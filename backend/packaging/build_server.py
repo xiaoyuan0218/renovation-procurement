@@ -14,6 +14,20 @@ import shutil
 import sys
 from pathlib import Path
 
+
+def _utf8_output() -> None:
+    """让标准输出能打印中文。
+
+    Windows 上 Python 按系统代码页编码 stdout：英文系统是 cp1252，打印中文
+    直接 UnicodeEncodeError（CI 的 runner 就是英文系统，本地中文系统看不出来）。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_utf8_output()
+
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
 OUT_DIR = ROOT / "src-tauri" / "binaries"

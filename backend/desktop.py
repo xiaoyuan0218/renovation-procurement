@@ -27,6 +27,21 @@ import sys
 from pathlib import Path
 
 
+def _utf8_output() -> None:
+    """让标准输出能打印中文。
+
+    Windows 上 Python 按系统代码页编码 stdout：英文系统是 cp1252，下面那几行
+    中文启动日志会直接 UnicodeEncodeError、服务起不来。英文版 Windows 和 CI
+    的 runner 都会踩，中文系统看不出来。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_utf8_output()
+
+
 def _default_data_dir() -> Path:
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
     return Path(base) / "采知道"

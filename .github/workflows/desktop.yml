@@ -20,6 +20,9 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    # 英文版 runner 的默认编码是 cp1252，任何打印中文的 Python 步骤都会崩
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
