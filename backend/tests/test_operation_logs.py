@@ -246,6 +246,41 @@ def test_filters(client):
     assert any(x["status_code"] >= 400 for x in all_rows)
 
 
+# ---------------------------------------------------------------- 变更明细
+
+def test_log_records_what_changed(client):
+    item = _create_item(client, "筒灯")
+
+    # 改价与改名：日志要说清从多少改到多少
+    client.patch(f"/api/items/{item['id']}", json={"price": 78, "name": "筒灯新款"})
+    top = _top_log(client)
+    assert "单价 88 → 78" in top["action"], top["action"]
+    assert "名称 「筒灯」 → 「筒灯新款」" in top["action"], top["action"]
+
+    # 记一笔采购：说清记录条数怎么变的（金额细节在主体描述里）
+    client.post(f"/api/items/{item['id']}/records",
+                json={"qty": 2, "amount": 168, "date": "2026-10-07"})
+    assert "采购记录 0 → 1 条" in _top_log(client)["action"]
+
+    # 删除：说「移入回收站」，而不是甩一个时间戳
+    client.delete(f"/api/items/{item['id']}")
+    assert "移入回收站" in _top_log(client)["action"]
+
+    # 改费用
+    fee = client.post("/api/expenses",
+                      json={"kind": "运费", "amount": 45, "date": "2026-10-07"}).json()
+    client.put(f"/api/expenses/{fee['id']}",
+               json={"kind": "运费", "amount": 99, "date": "2026-10-07"})
+    assert "金额 45 → 99" in _top_log(client)["action"]
+
+    # 分组改名（没有快照，由路由自己填明细）
+    room = client.post("/api/rooms", json={"name": "客厅"}).json()
+    client.put(f"/api/rooms/{room['id']}", json={"name": "主卧", "sort": 0})
+    top = _top_log(client)
+    assert "分组「客厅」" in top["action"]
+    assert "名称 「客厅」 → 「主卧」" in top["action"], top["action"]
+
+
 # ---------------------------------------------------------------- 保留上限
 
 def test_trim_keeps_recent_logs(client):

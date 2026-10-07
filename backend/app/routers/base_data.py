@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -26,7 +26,8 @@ def list_rooms(lst: ItemList = Depends(current_list),
 
 
 @router.post("/rooms", response_model=RoomOut)
-def create_room(data: RoomIn, lst: ItemList = Depends(current_list),
+def create_room(data: RoomIn, request: Request,
+                lst: ItemList = Depends(current_list),
                 db: Session = Depends(get_db)):
     dup = (db.query(Room)
            .filter(Room.list_id == lst.id, Room.name == data.name).first())
@@ -36,13 +37,18 @@ def create_room(data: RoomIn, lst: ItemList = Depends(current_list),
     db.add(room)
     db.commit()
     db.refresh(room)
+    request.state.audit_subject = f"分组「{room.name}」"
     return room
 
 
 @router.put("/rooms/{room_id}", response_model=RoomOut)
-def update_room(room_id: int, data: RoomIn, lst: ItemList = Depends(current_list),
+def update_room(room_id: int, data: RoomIn, request: Request,
+                lst: ItemList = Depends(current_list),
                 db: Session = Depends(get_db)):
     room = room_in_list(db, room_id, lst)
+    request.state.audit_subject = f"分组「{room.name}」"
+    if room.name != data.name:
+        request.state.audit_detail = f"名称 「{room.name}」 → 「{data.name}」"
     room.name = data.name
     room.sort = data.sort
     db.commit()
@@ -51,9 +57,11 @@ def update_room(room_id: int, data: RoomIn, lst: ItemList = Depends(current_list
 
 
 @router.delete("/rooms/{room_id}")
-def delete_room(room_id: int, lst: ItemList = Depends(current_list),
+def delete_room(room_id: int, request: Request,
+                lst: ItemList = Depends(current_list),
                 db: Session = Depends(get_db)):
     room = room_in_list(db, room_id, lst)
+    request.state.audit_subject = f"分组「{room.name}」（它的布点一起删）"
     db.delete(room)  # 布点明细级联删除
     db.commit()
     return {"ok": True}
@@ -69,7 +77,8 @@ def list_categories(lst: ItemList = Depends(current_list),
 
 
 @router.post("/categories", response_model=CategoryOut)
-def create_category(data: CategoryIn, lst: ItemList = Depends(current_list),
+def create_category(data: CategoryIn, request: Request,
+                     lst: ItemList = Depends(current_list),
                     db: Session = Depends(get_db)):
     dup = (db.query(Category)
            .filter(Category.list_id == lst.id, Category.name == data.name).first())
@@ -79,14 +88,18 @@ def create_category(data: CategoryIn, lst: ItemList = Depends(current_list),
     db.add(cat)
     db.commit()
     db.refresh(cat)
+    request.state.audit_subject = f"分类「{cat.name}」"
     return cat
 
 
 @router.put("/categories/{cat_id}", response_model=CategoryOut)
-def update_category(cat_id: int, data: CategoryIn,
+def update_category(cat_id: int, data: CategoryIn, request: Request,
                     lst: ItemList = Depends(current_list),
                     db: Session = Depends(get_db)):
     cat = _category_in_list(db, cat_id, lst)
+    request.state.audit_subject = f"分类「{cat.name}」"
+    if cat.name != data.name:
+        request.state.audit_detail = f"名称 「{cat.name}」 → 「{data.name}」"
     cat.name = data.name
     cat.sort = data.sort
     db.commit()
@@ -95,9 +108,11 @@ def update_category(cat_id: int, data: CategoryIn,
 
 
 @router.delete("/categories/{cat_id}")
-def delete_category(cat_id: int, lst: ItemList = Depends(current_list),
+def delete_category(cat_id: int, request: Request,
+                    lst: ItemList = Depends(current_list),
                     db: Session = Depends(get_db)):
     cat = _category_in_list(db, cat_id, lst)
+    request.state.audit_subject = f"分类「{cat.name}」"
     if cat.items:
         raise HTTPException(400, "该类目下仍有物料，请先移动物料再删除")
     db.delete(cat)

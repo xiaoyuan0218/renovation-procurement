@@ -21,8 +21,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from . import auth
-from .models import (Allocation, ApiKey, ExtraExpense, Item, OperationLog,
-                     PurchaseRecord, RecordRoom, utcnow)
+from .models import (Allocation, ApiKey, Category, ExtraExpense, Item,
+                     OperationLog, PurchaseRecord, RecordRoom, utcnow)
 from .services import compute
 
 # 动作名：路径参数归一化成 {id} 之后按 (方法, 路径) 查
@@ -130,15 +130,109 @@ def write_log(db: Session, request, status_code: int) -> None:
     if subject:
         action = f"{action} · {subject}"
     undo = getattr(request.state, "audit_undo", None)
+    # 改了什么：路由能说清的自己说（audit_detail），说不清的（物料/费用那几类）
+    # 拿操作前快照和当前状态比一次，把差异补上
+    detail = getattr(request.state, "audit_detail", None) or _auto_detail(db, undo)
+    if detail:
+        action = f"{action} · {detail}"
     kind, name = actor_of(request, db)
     db.add(OperationLog(
-        actor_kind=kind, actor_name=name, action=action,
+        actor_kind=kind, actor_name=name, action=action[:150],
         method=method, path=path[:200], status_code=status_code,
         undo_kind=undo["kind"] if undo else None,
         undo_data=json.dumps(undo["data"], ensure_ascii=False) if undo else None,
     ))
     db.commit()
     _trim(db)
+
+
+# ---------------------------------------------------------------- 变更明细
+#
+# 字段名到中文的对照。改了什么要说人话：「价格 88 → 78」而不是「price 88 → 78」
+
+_ITEM_LABELS = (("name", "名称"), ("category_id", "分类"), ("unit", "单位"),
+                ("brand", "品牌"), ("model", "型号"), ("qty_total", "总量"),
+                ("price", "单价"), ("discount_price", "日常单价"), ("note", "备注"))
+
+_EXPENSE_LABELS = (("kind", "类型"), ("amount", "金额"), ("date", "日期"),
+                   ("vendor", "商家"), ("order_no", "订单号"), ("note", "备注"),
+                   ("item_id", "关联物料"))
+
+
+def _text(value) -> str:
+    """数值原样，文本加书名号 —— 「名称 筒灯 → 筒灯新款」读起来分不清哪截是值。"""
+    if value is None or value == "":
+        return "空"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(int(value)) if float(value) == int(value) else str(value)
+    return f"「{value}」"
+
+
+def _category_name(db: Session, category_id) -> str:
+    if category_id is None:
+        return ""
+    row = db.get(Category, category_id)
+    return row.name if row else str(category_id)
+
+
+def _item_name(db: Session, item_id) -> str:
+    if item_id is None:
+        return ""
+    row = db.get(Item, item_id)
+    return row.name if row else str(item_id)
+
+
+def _auto_detail(db: Session, undo: dict | None) -> str:
+    """拿操作前的快照和库里现在的状态比一比，用中文说出改了什么。
+
+    只对带快照的操作有效（物料、费用的增删改）；分组改名之类没有快照，
+    由路由自己往 request.state.audit_detail 里写一句。
+    """
+    if not undo:
+        return ""
+    kind, before = undo.get("kind"), undo.get("data")
+    if kind == "item_restore":
+        after = snapshot_item(db, before["item"]["id"])
+        return diff_item(db, before, after) if after else ""
+    if kind == "expense_restore":
+        after = snapshot_expense(db, before["id"])
+        return diff_expense(db, before, after) if after else ""
+    return ""
+
+
+def diff_item(db: Session, before: dict, after: dict) -> str:
+    """两次物料快照之间的差异。布点与采购记录按条数比 —— 逐条列出来太长。"""
+    b, a = before["item"], after["item"]
+    # 软删：deleted_at 从空变成有值，说「移入回收站」比甩一个时间戳强
+    if not b.get("deleted_at") and a.get("deleted_at"):
+        return "移入回收站"
+    parts = []
+    for field, label in _ITEM_LABELS:
+        bv, av = b.get(field), a.get(field)
+        if bv == av:
+            continue
+        if field == "category_id":
+            parts.append(f"{label}「{_category_name(db, bv)}」→「{_category_name(db, av)}」")
+        else:
+            parts.append(f"{label} {_text(bv)} → {_text(av)}")
+    for key, label in (("allocations", "布点"), ("records", "采购记录")):
+        nb, na = len(before[key]), len(after[key])
+        if nb != na:
+            parts.append(f"{label} {nb} → {na} 条")
+    return "；".join(parts)
+
+
+def diff_expense(db: Session, before: dict, after: dict) -> str:
+    parts = []
+    for field, label in _EXPENSE_LABELS:
+        bv, av = before.get(field), after.get(field)
+        if bv == av:
+            continue
+        if field == "item_id":
+            parts.append(f"{label}「{_item_name(db, bv)}」→「{_item_name(db, av)}」")
+        else:
+            parts.append(f"{label} {_text(bv)} → {_text(av)}")
+    return "；".join(parts)
 
 
 def _trim(db: Session) -> None:

@@ -5,7 +5,7 @@
 不然界面上就没有可用的清单了。
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -44,7 +44,8 @@ def list_lists(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=ItemListOut)
-def create_list(data: ItemListIn, db: Session = Depends(get_db)):
+def create_list(data: ItemListIn, request: Request,
+                db: Session = Depends(get_db)):
     # 名字允许重复：编号才是身份。同名两份清单各自独立，不拦也不加后缀
     source = None
     if data.copy_from is not None:
@@ -70,14 +71,26 @@ def create_list(data: ItemListIn, db: Session = Depends(get_db)):
             db.add(Category(list_id=lst.id, name=cat.name, sort=cat.sort))
     db.commit()
     db.refresh(lst)
+    request.state.audit_subject = f"清单「{lst.name}」"
+    if source is not None:
+        request.state.audit_detail = f"复制自「{source.name}」的分组与分类"
     return _view(lst, _counts(db))
 
 
 @router.put("/{list_id}", response_model=ItemListOut)
-def update_list(list_id: int, data: ItemListIn, db: Session = Depends(get_db)):
+def update_list(list_id: int, data: ItemListIn, request: Request,
+                db: Session = Depends(get_db)):
     lst = db.get(ItemList, list_id)
     if not lst:
         raise HTTPException(404, "清单不存在")
+    request.state.audit_subject = f"清单「{lst.name}」"
+    changes = []
+    if lst.name != data.name:
+        changes.append(f"名称 「{lst.name}」 → 「{data.name}」")
+    if (lst.note or "") != (data.note or ""):
+        changes.append(f"备注 「{lst.note or ''}」 → 「{data.note or ''}」")
+    if changes:
+        request.state.audit_detail = "；".join(changes)
     # 名字重复不拦（身份是编号）；只更新，不做重名检查
     lst.name = data.name
     lst.note = data.note or ""
@@ -88,12 +101,15 @@ def update_list(list_id: int, data: ItemListIn, db: Session = Depends(get_db)):
 
 
 @router.delete("/{list_id}")
-def delete_list(list_id: int, db: Session = Depends(get_db)):
+def delete_list(list_id: int, request: Request,
+                db: Session = Depends(get_db)):
     lst = db.get(ItemList, list_id)
     if not lst:
         raise HTTPException(404, "清单不存在")
     if db.query(ItemList).count() <= 1:
         raise HTTPException(400, "至少要保留一份清单")
+    request.state.audit_subject = (
+        f"清单「{lst.name}」（{db.query(Item).filter(Item.list_id == lst.id).count()} 项物料一起删）")
     db.delete(lst)  # 条目、分组、分类连同它们的记录/分配一起走
     db.commit()
     return {"ok": True}
