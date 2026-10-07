@@ -21,6 +21,7 @@
 环境变量：RENOVATION_DATA_DIR / RENOVATION_HOST / RENOVATION_PORT / RENOVATION_DIST
 """
 
+import json
 import os
 import socket
 import sys
@@ -75,6 +76,25 @@ def _prepare_env() -> Path:
     data_dir.mkdir(parents=True, exist_ok=True)
     os.environ["RENOVATION_DATA_DIR"] = str(data_dir)
     os.environ.setdefault("RENOVATION_LOCAL_NO_AUTH", "1")
+    # 版本与构建时间：CI 打包时写进 _MEIPASS/version.json（见 build_server.py）。
+    # Tauri 拉起 sidecar 时只传固定几个环境变量，不传版本号，所以打包时固化
+    # 进去是唯一可靠的途径；漏了的话「关于」页显示 dev、检查更新永远说本地没
+    # 构建时间。环境变量仍优先，本地开发不受影响。
+    if not os.environ.get("RENOVATION_VERSION"):
+        for base in (getattr(sys, "_MEIPASS", None), Path(sys.executable).parent):
+            if not base:
+                continue
+            marker = Path(base) / "version.json"
+            if marker.is_file():
+                try:
+                    info = json.loads(marker.read_text(encoding="utf-8"))
+                    if info.get("version"):
+                        os.environ.setdefault("RENOVATION_VERSION", info["version"])
+                    if info.get("built_at"):
+                        os.environ.setdefault("RENOVATION_BUILT_AT", info["built_at"])
+                except (OSError, ValueError):
+                    pass
+                break
     if not os.environ.get("RENOVATION_DIST"):
         dist = _bundled_dist()
         if dist:

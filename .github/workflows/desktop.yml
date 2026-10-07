@@ -46,6 +46,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt pyinstaller
 
+      # 版本号与构建时间喂给 sidecar：「关于」页显示它、检查更新也拿它比对。
+      # 不注入的话装出来显示 dev、检查更新永远提示「本地是开发版」。
+      - name: 记下版本与构建时间
+        shell: bash
+        run: |
+          echo "RENOVATION_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+          echo "RENOVATION_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: 构建前端
         working-directory: frontend
         run: |
@@ -55,6 +63,9 @@ jobs:
       # 打包失败时把日志尾部挂成 annotation。CI 的完整日志要登录才看得到，
       # 这步在 runner 上挂过一次、本地却怎么都复现不出来，当时一点线索都没有。
       - name: 打包内置后端（sidecar exe）
+        env:
+          RENOVATION_VERSION: ${{ env.RENOVATION_VERSION }}
+          RENOVATION_BUILT_AT: ${{ env.RENOVATION_BUILT_AT }}
         run: |
           Write-Output "python: $(python --version 2>&1)"
           Write-Output "pyinstaller: $(python -m PyInstaller --version 2>&1)"
