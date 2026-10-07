@@ -13,7 +13,7 @@ fun appVersionName(): String {
     return if (f.exists()) f.readText().trim() else "0.0.0"
 }
 
-/** 1.2.0 换算成 10200：versionCode 必须是只涨不跌的整数 */
+/** 1.2.1 换算成 10201：versionCode 必须是只涨不跌的整数 */
 fun appVersionCode(): Int {
     val p = appVersionName().split(".").map { it.toIntOrNull() ?: 0 }
     return p.getOrElse(0) { 0 } * 10000 + p.getOrElse(1) { 0 } * 100 + p.getOrElse(2) { 0 }

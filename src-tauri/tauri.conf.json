@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "采知道",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "identifier": "com.xiaoyuan.caizhidao",
   "build": {
     "frontendDist": "../frontend/dist"
