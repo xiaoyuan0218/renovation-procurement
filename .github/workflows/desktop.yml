@@ -91,4 +91,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
-        run: gh release upload latest out/*.exe --clobber
+        run: |
+          # release 平时由 apk.yml 建；手动触发时可能还没有，补一个
+          gh release view latest 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create latest --title "最新构建" --notes "手机与桌面端的下载直链"
+          }
+          # 文件名写死，不要写成 out/*.exe：pwsh 不会替原生命令展开通配符，
+          # gh 收到的是字面量，会报找不到文件（bash 才会展开）。名字与上一步对齐。
+          $out = gh release upload latest out/caizhidao-desktop-setup.exe --clobber 2>&1
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code -ne 0) {
+            $tail = ($out | Select-Object -Last 20) -join "`n"
+            $tail = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=发布失败::$tail"
+            exit 1
+          }
