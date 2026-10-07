@@ -13,6 +13,10 @@ on:
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
+# gh release upload 要写权限，缺了这行 token 只有只读，发布那步会 403
+permissions:
+  contents: write
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -45,8 +49,21 @@ jobs:
           npm ci
           npm run build
 
+      # 打包失败时把日志尾部挂成 annotation。CI 的完整日志要登录才看得到，
+      # 这步在 runner 上挂过一次、本地却怎么都复现不出来，当时一点线索都没有。
       - name: 打包内置后端（sidecar exe）
-        run: python backend/packaging/build_server.py
+        run: |
+          Write-Output "python: $(python --version 2>&1)"
+          Write-Output "pyinstaller: $(python -m PyInstaller --version 2>&1)"
+          $out = python backend/packaging/build_server.py 2>&1
+          $code = $LASTEXITCODE
+          $out | Write-Output
+          if ($code -ne 0) {
+            $tail = ($out | Select-Object -Last 40) -join "`n"
+            $tail = $tail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=sidecar 打包失败::$tail"
+            exit 1
+          }
 
       - name: 安装桌面端依赖
         run: npm install

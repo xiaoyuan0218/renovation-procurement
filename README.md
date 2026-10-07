@@ -4,11 +4,13 @@
 
 装修买建材、办年货、备项目物料……凡是"一批东西要分头买、分次付、还得盯着进度"的场合都能用。默认只给一个示例分组与分类（照着你的习惯改掉就行），也可以建**多份互相独立的清单**，换件事用不需要再装一个程序。
 
-**手机安装**（点链接直接下载，不用登录，永远是最新构建）：
+**下载**（点链接直接下载，不用登录，永远是最新构建）：
 
-[网络版 APK](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-online.apk)　·　[单机版 APK](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-offline.apk)
+手机　[网络版 APK](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-online.apk)　·　[单机版 APK](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-offline.apk)
 
-（两个都要连自家服务器的话装网络版；想完全离线用就装单机版。调试包见 [最新构建](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest) 页面。）
+电脑　[Windows 桌面版](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-desktop-setup.exe)
+
+（两个 APK 要连自家服务器的话装网络版，想完全离线用就装单机版；桌面版数据默认存在本机，连上服务器就能和手机互相同步。调试包见 [最新构建](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest) 页面。）
 
 **它解决什么**：一批东西几十上百种、分布在十几个分组里，还得分次付款、随时看"总共多少 / 花了多少 / 还差多少"。用表格维护容易算错、改乱、看不出进度。这里把这些做成结构化数据：
 
@@ -140,6 +142,8 @@ cd mobile                    # 单机版，命令相同；testDebugUnitTest 是�
 
 ## Windows 桌面端
 
+**下载**：[Windows 桌面版安装包](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest/download/caizhidao-desktop-setup.exe)（约 33 MB，Windows 10/11 64 位；直链固定指向最新构建，不用登录）
+
 `src-tauri/` 下是一个 Windows 桌面应用（Tauri 2 外壳 + 打包进安装包的 Python 后端）。它和手机单机版是同一种形态：**数据默认存在这台电脑上**，不搭服务器也能用；连上自己的服务端之后，两边可以双向同步。同步用的是和手机端同一套合并算法与冲突规则。
 
 - **本机免登录**：打开就是自己的数据，不用先建账号、输密码
@@ -168,7 +172,7 @@ npx tauri build
 # 产物在 src-tauri/target/release/bundle/nsis/ 下
 ```
 
-`.github/workflows/desktop.yml` 在 `src-tauri/`、`backend/` 或 `frontend/` 有改动时自动构建，安装包挂到 [最新构建](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest) 页面。
+`.github/workflows/desktop.yml` 在 `src-tauri/`、`backend/` 或 `frontend/` 有改动时自动构建，产物覆盖到 [最新构建](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest) 页面（下载直链见本节开头）。
 
 开发时想直接看界面：起后端（`python backend/desktop.py`，本机免登录），浏览器打开它监听的地址就行 —— 桌面端与网页端用的是同一份前端代码。
 
