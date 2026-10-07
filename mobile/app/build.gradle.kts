@@ -8,6 +8,18 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+/** 版本号统一在仓库根的 VERSION 文件里（后端与安卓端也读它，三端一致）。 */
+fun appVersionName(): String {
+    val f = rootProject.file("../VERSION")
+    return if (f.exists()) f.readText().trim() else "0.0.0"
+}
+
+/** 1.2.0 换算成 10200：versionCode 必须是只涨不跌的整数 */
+fun appVersionCode(): Int {
+    val p = appVersionName().split(".").map { it.toIntOrNull() ?: 0 }
+    return p.getOrElse(0) { 0 } * 10000 + p.getOrElse(1) { 0 } * 100 + p.getOrElse(2) { 0 }
+}
+
 android {
     namespace = "com.xiaoyuan.renovation.mobile"
     compileSdk = 35
@@ -16,8 +28,8 @@ android {
         applicationId = "com.xiaoyuan.renovation.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = appVersionCode()
+        versionName = appVersionName()
     }
 
     signingConfigs {

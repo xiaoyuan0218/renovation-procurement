@@ -1,0 +1,13 @@
+{
+  "name": "caizhidao-desktop",
+  "private": true,
+  "description": "采知道 Windows 桌面端的打包入口（前端在 frontend/，外壳在 src-tauri/）",
+  "scripts": {
+    "tauri": "tauri",
+    "desktop:server": "python backend/packaging/build_server.py",
+    "desktop:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

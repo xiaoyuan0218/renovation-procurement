@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "桌面端默认权限：只放开核心能力，以及启动内置后端这一个 sidecar。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "caizhidao-server",
+          "sidecar": true
+        }
+      ]
+    }
+  ]
+}

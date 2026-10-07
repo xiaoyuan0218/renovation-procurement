@@ -1,23 +1,53 @@
-# 构建上下文排除项：只把源码送进 Docker
+# 构建上下文排除项：只把源码送进 Docker。
+# Dockerfile 只 COPY frontend/ 与 backend/，其余都是给构建上下文白白增重，
+# 其中 backend/_tmp_* 里还有本地数据库与密钥，更不能进镜像。
+
+# 版本控制与工具产物
 .git/
 .github/
+.zcode/
+.mimosa/
+.wt-tmp/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.log
+
+# 依赖与构建产物
 .venv/
 node_modules/
-frontend/dist/
 frontend/node_modules/
+frontend/dist/
+dist/
+
+# 运行数据（含个人采购数据）
 data/
 seed/
 screenshots/
+screenshots-mobile/
+screenshots-android/
+
 # 安卓客户端不参与镜像构建：把整个目录挡在构建上下文外，
 # 否则 android/.gradle 与 app/build 会给每次 docker build 凭空加几百 MB
 android/
-dist/
-screenshots-android/
-__pycache__/
-*.pyc
-.pytest_cache/
-*.log
+mobile/
+
+# 桌面端同理：Rust 的 target 能到几个 GB，sidecar exe 还有几十 MB
+src-tauri/
+
+# 签名密钥不进镜像
+keystore/
+
+# 后端的本地实例与打包产物：_tmp_* 里是本地数据库和 .secret_key，
+# dist/build 是 PyInstaller 的中间产物（合起来约 75MB）
+backend/_tmp_*/
+backend/dist/
+backend/build/
+
+# 文档与宣传物料不参与构建
 README.md
+AGENT.md
+promo/
 docker-compose.yml
 启动服务.bat
 启动服务-后台运行.bat

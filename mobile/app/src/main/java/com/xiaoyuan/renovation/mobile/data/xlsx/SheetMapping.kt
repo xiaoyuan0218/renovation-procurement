@@ -42,6 +42,8 @@ object SheetMapping {
     const val SHEET_ALLOCS = "布点明细"
     const val SHEET_RECORDS = "采购记录"
     const val SHEET_EXPENSES = "额外费用"
+    const val SHEET_ROOMS = "分组"
+    const val SHEET_CATEGORIES = "分类"
 
     private val ITEM_HEADERS = listOf(
         "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
@@ -54,6 +56,8 @@ object SheetMapping {
         "物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家", "订单号", "备注", "物料ID",
     )
     private val EXPENSE_HEADERS = listOf("类型", "金额", "日期", "商家", "订单号", "备注")
+    private val ROOM_HEADERS = listOf("分组名称")
+    private val CATEGORY_HEADERS = listOf("分类名称")
 
     /* ============================================================
        导出
@@ -144,11 +148,20 @@ object SheetMapping {
             expenseRows += listOf(e.kind, e.amount, e.date, e.vendor, e.orderNo, e.note)
         }
 
+        // 分组与分类单独成页：上面几页里它们只以「用到的名字」出现，没有任何物料
+        // 的分组/分类会因此消失。全量列出来才搬得完整。
+        val roomRows: MutableList<List<Any?>> = mutableListOf(ROOM_HEADERS)
+        db.rooms().byList(listId).forEach { roomRows += listOf(it.name) }
+        val categoryRows: MutableList<List<Any?>> = mutableListOf(CATEGORY_HEADERS)
+        db.categories().byList(listId).forEach { categoryRows += listOf(it.name) }
+
         return listOf(
             "物料汇总" to itemRows,
             "布点明细" to allocRows,
             "采购记录" to recordRows,
             "额外费用" to expenseRows,
+            "分组" to roomRows,
+            "分类" to categoryRows,
         )   // 清单名不写进表里：导入是导进当前清单
     }
 
@@ -218,28 +231,55 @@ object SheetMapping {
             return id
         }
 
-        // 按名字找到的现有物料（merge 时用）
-        val byName = db.items().all(listId)
-            .associateBy({ it.name }, { it })
+        // 「分组」「分类」两页：没有物料的空分组/空分类只存在于此，先按它把名字
+        // 建出来。也正因为先建好了，下面采购记录「分组」列的整串匹配才命中得了。
+        sheets[SHEET_ROOMS]?.drop(1)?.forEach { row ->
+            row.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }?.let { roomId(it) }
+        }
+        sheets[SHEET_CATEGORIES]?.drop(1)?.forEach { row ->
+            row.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }?.let { categoryId(it) }
+        }
+
+        // 名称 → 未认领的现有物料队列。同名物料（真实数据里就有，比如两条
+        // 「易来灯带控制器」）必须各归各的：用 associateBy 只留最后一条的话，
+        // 布点与采购记录会全挂到那一条上，数量与金额凭空翻倍。
+        val unclaimed = db.items().all(listId)
+            .groupBy { it.name }
+            .mapValues { it.value.toMutableList() }
             .toMutableMap()
+        // 本次导入后「名字 → 本地 id」与「导出文件里的物料ID → 本地 id」，
+        // 布点与采购记录靠它们认物料（先认 ID，认不到再退名字）
+        val nameToId = mutableMapOf<String, Int>()
+        val idMap = mutableMapOf<String, Int>()
+
+        fun itemFor(table: Table, row: List<String>): Int? {
+            val sourceId = table.cell(row, "物料ID").trim()
+            if (sourceId.isNotEmpty()) idMap[sourceId]?.let { return it }
+            return nameToId[table.cell(row, "物料名称").trim()]
+        }
 
         if (mode == "replace") {
             db.items().all(listId).forEach { db.items().purgeCascade(it.id) }
-            byName.clear()
+            unclaimed.clear()
+        }
+        // 额外费用是流水账，没有天然的匹配键：文件带了这一页就整体替换（与后端
+        // 一致）。老文件没有这一页时不动 —— 否则拿一份旧备份导一次，现有费用
+        // 就被清空了。
+        if (sheets.containsKey(SHEET_EXPENSES)) {
             db.expenses().byList(listId).forEach { db.expenses().delete(it) }
         }
 
-        // 物料 ID 列 → 本地 id，供布点与采购记录对上号
-        val idMap = mutableMapOf<String, Int>()
-
         // 已经清过旧分配的物料：布点明细里一条物料占多行，只清第一次
         val clearedAllocItems = mutableSetOf<Int>()
+
+        // 已经清过旧记录的物料：同上，采购记录页是该物料的完整付款历史
+        val clearedRecordItems = mutableSetOf<Int>()
 
         for (row in itemTable.rows) {
             val name = itemTable.cell(row, "物料名称").trim()
             if (name.isEmpty()) continue
 
-            val existing = byName[name]
+            val existing = unclaimed[name]?.removeFirstOrNull()
             val itemId: Int
             if (existing != null) {
                 itemId = existing.id
@@ -269,7 +309,7 @@ object SheetMapping {
                     rev = current.rev + 1,
                 ),
             )
-            byName[name] = db.items().byId(itemId)!!
+            nameToId.putIfAbsent(name, itemId)
 
             val remoteId = itemTable.cell(row, "物料ID").trim()
             if (remoteId.isNotEmpty()) idMap[remoteId] = itemId
@@ -277,7 +317,7 @@ object SheetMapping {
 
         for (row in allocTable.rows) {
             val itemName = allocTable.cell(row, "物料名称").trim()
-            val itemId = byName[itemName]?.id
+            val itemId = itemFor(allocTable, row)
             if (itemId == null) {
                 warnings += "布点明细里的物料「$itemName」在表格里找不到，已跳过"
                 continue
@@ -307,27 +347,48 @@ object SheetMapping {
 
         for (row in recordTable.rows) {
             val itemName = recordTable.cell(row, "物料名称").trim()
-            val itemId = byName[itemName]?.id
+            val itemId = itemFor(recordTable, row)
             if (itemId == null) {
                 warnings += "采购记录里的物料「$itemName」在表格里找不到，已跳过"
                 continue
+            }
+            // 表格是「这条物料的完整付款历史」，重建前先清旧记录 —— 否则同一份
+            // 文件连导两次，采购记录会翻倍（后端也是这么做的）
+            if (clearedRecordItems.add(itemId)) {
+                db.records().deleteRecordRoomsOfItem(itemId)
+                db.records().deleteOfItem(itemId)
             }
             val id = db.records().insert(
                 PurchaseRecordEntity(
                     itemId = itemId,
                     qty = recordTable.number(row, "实付数量") ?: 0.0,
                     amount = recordTable.number(row, "实付金额") ?: 0.0,
-                    date = recordTable.cell(row, "付款日期"),
+                    date = LocalCompute.forRead(recordTable.cell(row, "付款日期")),
                     note = recordTable.cell(row, "备注"),
                     vendor = recordTable.cell(row, "商家"),
                     orderNo = recordTable.cell(row, "订单号"),
                 ),
             ).toInt()
-            recordTable.cell(row, "分组")
-                .split("、", ",", "，")
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .forEach { name -> roomId(name)?.let { db.recordRooms().insert(RecordRoomEntity(id, it)) } }
+            // 先整体匹配已有分组名，匹配不到才按分隔符拆：分组名本身可能含顿号或
+            // 斜杠（「客厅/餐厅」），无脑拆会把它拆成两个分组，来回导一次数据就散了。
+            // 导出时这些名字原样写在「分组」页里，上面已按它建好，所以自己导出的
+            // 文件这里必定命中。
+            val rawRooms = recordTable.cell(row, "分组").trim()
+            val roomNames = when {
+                rawRooms.isEmpty() -> emptyList()
+                roomIds.containsKey(rawRooms) -> listOf(rawRooms)
+                else -> rawRooms.split("、", ",", "，", "/")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+            }
+            roomNames.forEach { name ->
+                // 用具名参数：RecordRoomEntity 的字段顺序是 (id, recordId, roomId)，
+                // 按位置传会把记录 id 当主键、分组 id 当 record_id，roomId 永远为 null
+                // ——「这笔钱花在哪几个分组」就整个丢了。
+                roomId(name)?.let {
+                    db.recordRooms().insert(RecordRoomEntity(recordId = id, roomId = it))
+                }
+            }
             recordCount++
         }
 
@@ -339,7 +400,7 @@ object SheetMapping {
                     listId = listId,
                     kind = expenseTable.cell(row, "类型").ifBlank { "其他" },
                     amount = amount,
-                    date = expenseTable.cell(row, "日期"),
+                    date = LocalCompute.forRead(expenseTable.cell(row, "日期")),
                     vendor = expenseTable.cell(row, "商家"),
                     orderNo = expenseTable.cell(row, "订单号"),
                     note = expenseTable.cell(row, "备注"),

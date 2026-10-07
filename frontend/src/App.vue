@@ -3,12 +3,17 @@ import { onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { auth, loadAuthState, logout } from './auth'
 import { lists, loadLists, setCurrentList } from './lists'
+import { setSyncedHandler } from './api'
 import Dashboard from './views/Dashboard.vue'
 import Items from './views/Items.vue'
 import Matrix from './views/Matrix.vue'
 import Login from './views/Login.vue'
 import NewListDialog from './components/NewListDialog.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
+import DonateFab from './components/DonateFab.vue'
+import { openHelp } from './help'
+import WelcomeGuide from './components/WelcomeGuide.vue'
+import HelpDialog from './components/HelpDialog.vue'
 
 const tabs = [
   { key: 'dashboard', label: '总览' },
@@ -37,6 +42,11 @@ watch(() => auth.status, async (status) => {
 function onImported() {
   reloadKey.value++
 }
+
+// 后台自动同步把本地数据重建了（id 会变），整体刷新一遍，否则界面还拿着旧 id
+setSyncedHandler(() => {
+  reloadKey.value++
+})
 
 function onSwitchList(id) {
   if (id === lists.currentId) return
@@ -120,6 +130,7 @@ async function onLogout() {
             {{ t.label }}
           </button>
         </nav>
+        <el-button class="help-btn" text bg @click="openHelp">使用说明</el-button>
         <el-button class="settings-btn" text bg @click="settingsVisible = true">设置 / 数据</el-button>
         <el-button class="logout-btn" text bg @click="onLogout">
           退出<span v-if="auth.username" class="who">（{{ auth.username }}）</span>
@@ -136,6 +147,12 @@ async function onLogout() {
     <SettingsDialog v-model="settingsVisible" @imported="onImported"
                     @switched="onSwitchList" />
     <NewListDialog v-model="newListVisible" @created="onListCreated" />
+    <!-- 打赏入口：默认开着，每次打开弹一次；开关在「设置 → 关于」 -->
+    <DonateFab />
+    <!-- 第一次打开时的欢迎引导，看过就不再弹 -->
+    <WelcomeGuide />
+    <!-- 使用说明：顶部栏有入口 -->
+    <HelpDialog />
   </el-container>
 </template>
 

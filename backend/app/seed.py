@@ -7,7 +7,8 @@ from sqlalchemy import text
 from . import migrations
 from .services import codes
 from .db import Base, SessionLocal, engine
-from .models import Category, Item, ItemList, PurchaseRecord, Room, utcnow
+from .models import (Category, Item, ItemList, PurchaseRecord, Room, User,
+                     utcnow)
 from .services.compute import item_status
 
 DEFAULT_LIST_NAME = migrations.DEFAULT_LIST_NAME
@@ -29,8 +30,21 @@ def init_db():
     db = SessionLocal()
     try:
         _seed_defaults(db)
+        _ensure_local_admin(db)
     finally:
         db.close()
+
+
+def _ensure_local_admin(db) -> None:
+    """桌面端（本机免登录）启动时就把管理员建好，不等有人打开页面。
+
+    普通服务端部署不开这个开关，走的还是"首次打开页面创建账号"那套，行为不变。
+    """
+    from . import auth  # 局部导入：auth 模块级要读环境变量，延后到启动时才触发
+
+    if not auth.LOCAL_NO_AUTH or db.query(User).count() > 0:
+        return
+    auth.local_admin(db)
 
 
 def _ensure_code_unique_index_safe() -> None:

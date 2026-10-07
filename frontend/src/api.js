@@ -16,6 +16,43 @@ export function setCurrentListId(id) {
 // 登录、查询登录态这些接口返回 401 是正常结果，不该被当成"会话失效"
 const AUTH_ENDPOINTS = ['/api/auth/']
 
+// 写操作之后自动跟服务器对齐一次（防抖 1.5 秒，与手机端一致）。
+// 桌面端自己的接口和登录接口不参与 —— 否则会自己触发自己，转成死循环。
+const AUTO_SYNC_EXEMPT = ['/api/auth/', '/api/desktop/']
+const AUTO_SYNC_DEBOUNCE_MS = 1500
+
+let autoSyncTimer = null
+let onSynced = null
+
+/** 同步把本地数据重建之后，通知界面整体刷新（由 App.vue 注册）。 */
+export function setSyncedHandler(fn) {
+  onSynced = fn
+}
+
+function scheduleAutoSync() {
+  if (autoSyncTimer) clearTimeout(autoSyncTimer)
+  autoSyncTimer = setTimeout(async () => {
+    autoSyncTimer = null
+    if (currentListId == null) return
+    try {
+      // 直接 fetch 而不是走 request()：走 request 会再调度一次，自己转起来。
+      // 该不该同步由后端判断（没连服务器、没绑定、关掉了自动同步都会直接返回）。
+      const res = await fetch('/api/desktop/auto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ list_id: currentListId }),
+      })
+      if (res.ok && onSynced) {
+        const data = await res.json()
+        if (data.changed) onSynced()
+      }
+    } catch {
+      /* 自动同步失败不打扰用户：离线、服务器没开都属正常 */
+    }
+  }, AUTO_SYNC_DEBOUNCE_MS)
+}
+
 async function request(method, url, body, isForm = false) {
   // 凭证放在 httpOnly Cookie 里，同源请求自动带上；
   // 设置页的下载链接是 <a href> 直接导航（带不了自定义头），走 ?list_id= 参数。
@@ -45,7 +82,11 @@ async function request(method, url, body, isForm = false) {
     throw err
   }
   const ct = res.headers.get('content-type') || ''
-  return ct.includes('json') ? res.json() : res
+  const payload = ct.includes('json') ? await res.json() : res
+  if (method !== 'GET' && !AUTO_SYNC_EXEMPT.some((p) => url.startsWith(p))) {
+    scheduleAutoSync()
+  }
+  return payload
 }
 
 export const api = {

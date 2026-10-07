@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -17,6 +19,22 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import com.xiaoyuan.renovation.mobile.R
+import com.xiaoyuan.renovation.mobile.ui.CONTACT_LINE
+import com.xiaoyuan.renovation.mobile.ui.OFFICIAL_LINE
+import com.xiaoyuan.renovation.mobile.di.AppContainer
+import com.xiaoyuan.renovation.mobile.data.sync.UpdateChecker
+import com.xiaoyuan.renovation.mobile.ui.design.GhostButton
+import com.xiaoyuan.renovation.mobile.ui.theme.Ink
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,7 +65,6 @@ import com.xiaoyuan.renovation.mobile.ui.design.TagPill
 import com.xiaoyuan.renovation.mobile.ui.design.TextPromptDialog
 import com.xiaoyuan.renovation.mobile.ui.lists.ListsViewModel
 import com.xiaoyuan.renovation.mobile.ui.lists.NewListDialog
-import com.xiaoyuan.renovation.mobile.ui.theme.Ink
 import com.xiaoyuan.renovation.mobile.util.Fmt
 
 /**
@@ -589,7 +606,10 @@ fun TrashPage(vm: SettingsViewModel, onBack: () -> Unit) {
    ============================================================ */
 
 @Composable
-fun AboutPage(onBack: () -> Unit) {
+fun AboutPage(container: AppContainer, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var donateOn by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) { donateOn = container.prefs.donateEnabled.first() }
     SettingsPage(title = "关于", caption = "数据放在哪、怎么备份", onBack = onBack) {
         item {
             GlassPanel {
@@ -642,5 +662,155 @@ fun AboutPage(onBack: () -> Unit) {
                 )
             }
         }
+
+        item { UpdateCard() }
+
+        item {
+            GlassPanel {
+                Text(
+                    text = "请作者喝杯咖啡",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Ink.TextPrimary,
+                )
+                Spacer(Modifier.height(6.dp))
+                HintText("如果这东西帮你省了点事，可以扫码支持一下。")
+                Spacer(Modifier.height(10.dp))
+                // 开关：默认开着，每次打开弹一次；关掉后连这个区块也不再弹提醒
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = donateOn,
+                        onCheckedChange = {
+                            donateOn = it
+                            scope.launch { container.prefs.setDonateEnabled(it) }
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    HintText(if (donateOn) "每次打开都会提示一次" else "已关闭，不再提示")
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    DonateCode(R.drawable.donate_wechat, "微信", Modifier.weight(1f))
+                    DonateCode(R.drawable.donate_alipay, "支付宝", Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(12.dp))
+                HintText(CONTACT_LINE)
+                Spacer(Modifier.height(4.dp))
+                HintText(OFFICIAL_LINE)
+            }
+        }
+    }
+}
+
+/** 一张收款码：图 + 下面的名字，两张并排时等宽 */
+@Composable
+private fun DonateCode(resId: Int, label: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Image(
+            painter = painterResource(resId),
+            contentDescription = "$label 收款码",
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(10.dp)),
+        )
+        Spacer(Modifier.height(6.dp))
+        HintText(label)
+    }
+}
+
+/**
+ * 检查更新：问 GitHub 上最新构建的版本号，跟这台手机上装的比。
+ * App 装在手机上不会自己更新，所以这里只负责告诉用户"有新版本了"。
+ */
+@Composable
+private fun UpdateCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<UpdateChecker.Result?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    GlassPanel {
+        Text(
+            text = "检查更新",
+            style = MaterialTheme.typography.bodyLarge,
+            color = Ink.TextPrimary,
+        )
+        Spacer(Modifier.height(6.dp))
+        HintText(
+            "手机上装的版本是 ${UpdateChecker.currentVersion(context)}。" +
+                "点一下看看 GitHub 上有没有更新的包。",
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GhostButton(
+                text = if (checking) "检查中…" else "检查更新",
+                onClick = {
+                    if (checking) return@GhostButton
+                    checking = true
+                    error = null
+                    result = null
+                    scope.launch {
+                        runCatching { UpdateChecker.check(context) }
+                            .onSuccess { result = it }
+                            .onFailure { error = it.message ?: "检查失败" }
+                        checking = false
+                    }
+                },
+            )
+        }
+        val message = when {
+            error != null -> error
+            result == null -> null
+            result!!.hasNew -> "有新版本 ${result!!.latest}（本机 ${result!!.current}）。" +
+                "到项目的 releases/latest 页面下载最新 APK 覆盖安装即可。"
+            else -> "已经是最新版本（${result!!.current}）。"
+        }
+        val color = when {
+            error != null -> Ink.Danger
+            result?.hasNew == true -> Ink.Amber
+            else -> Ink.Mint
+        }
+        if (message != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(text = message, style = MaterialTheme.typography.bodySmall, color = color)
+        }
+    }
+}
+
+/** 使用说明：第一次进来该知道的都在这一页上，照着做就行 */
+@Composable
+fun HelpPage(onBack: () -> Unit) {
+    SettingsPage(title = "使用说明", caption = "怎么记一笔、数和状态是怎么算出来的", onBack = onBack) {
+        item {
+            GlassPanel {
+                HintText(
+                    "这是一套自己部署的装修采购账本。数据存在你自己的机器上，" +
+                        "不经过任何第三方；手机上的单机版还能和电脑互通。",
+                )
+            }
+        }
+
+        item { HelpSection("采购状态怎么来的", "系统拿「采购记录里买到的数量合计」去比「物料总量」：一分没买是未买，买了一些是部分已买，买够了或买超了是已买完。") }
+        item { HelpSection("只填金额不填数量，状态不会动", "记一笔的时候记得把数量写上 —— 只填金额的话，那笔账会进「已付」，但状态仍停在原来的档位。") }
+        item { HelpSection("分配（布点）是什么", "一条物料在哪些房间各要几个。填了分配，总量就由分配合计决定；一次采购买的东西可能分属好几个房间，记账时能多选涉及的分组，这样「哪个房间还差什么」才算得准。") }
+        item { HelpSection("三个金额口径", "原价小计 = 总量 × 原价；日常价小计 = 总量 × 日常价；已付 = 所有采购记录的金额之和。运费、安装费这类是单独一笔账，不摊进任何物料的单价，所以不会出现在上面三个数里。") }
+        item { HelpSection("日常怎么用", "先去「设置 → 分组与分类」把房间和类别建好；回「清单」页右下角新增物料，填总量和单价；买完点那条物料的状态标签记一笔；随时去「总览」看进度，或到「矩阵」页按房间核对。") }
+        item { HelpSection("删错了怎么办", "删物料是软删，会先进「设置 → 回收站」，在那里能恢复，分配和采购记录一起回来。彻底删除才不可逆。") }
+        item { HelpSection("和电脑互通", "「设置 → 服务器」里填上电脑那套服务的地址和账号，这份清单就能传上去、也能把电脑上的拉下来。两边都改过时它会自动合起来，只有改到同一处才问你以哪边为准。") }
+    }
+}
+
+/** 说明页里的一小节 */
+@Composable
+private fun HelpSection(title: String, body: String) {
+    GlassPanel {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = Ink.TextPrimary,
+        )
+        Spacer(Modifier.height(6.dp))
+        HintText(body)
     }
 }

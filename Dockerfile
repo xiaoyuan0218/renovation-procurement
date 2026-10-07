@@ -9,10 +9,17 @@ RUN npm run build
 # ---------- 阶段二：运行镜像 ----------
 FROM python:3.12-slim
 
+# 版本与构建时间由 CI 传进来（见 .github/workflows/build-image.yml），写进
+# 环境变量给 /api/version 读 —— 「关于」页显示它、检查更新也拿它比对
+ARG RENOVATION_VERSION=dev
+ARG RENOVATION_BUILT_AT=""
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     RENOVATION_DATA_DIR=/data \
-    RENOVATION_DIST=/app/frontend/dist
+    RENOVATION_DIST=/app/frontend/dist \
+    RENOVATION_VERSION=$RENOVATION_VERSION \
+    RENOVATION_BUILT_AT=$RENOVATION_BUILT_AT
 
 WORKDIR /app
 

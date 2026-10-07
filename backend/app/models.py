@@ -295,3 +295,46 @@ class Allocation(Base):
 
     item = relationship("Item", back_populates="allocations")
     room = relationship("Room", back_populates="allocations")
+
+
+class SyncBinding(Base):
+    """桌面端本地库和某个服务器清单之间的绑定关系。
+
+    **只存在于本地库，不参与同步** —— 它记的是"这台电脑怎么连别人"，不是清单
+    内容的一部分，跟着 payload 走只会污染指纹。字段对齐手机单机版那张同名表。
+
+    一份本地清单最多绑一个服务器清单（list_id 既是主键也是外键），换服务器就
+    重新绑。
+    """
+
+    __tablename__ = "sync_bindings"
+
+    list_id = Column(Integer, ForeignKey("lists.id", ondelete="CASCADE"),
+                     primary_key=True)
+    server_url = Column(String(200), default="")
+    remote_list_id = Column(Integer, nullable=False)
+    remote_name = Column(String(50), default="")
+    # 上次同步后服务器那份的指纹，用来判"服务器有没有变过"
+    fingerprint = Column(String(64), default="")
+    # 上次同步时服务器返回的 payload + 「服务器 id → 本地 id」映射，序列化成 JSON。
+    # 下次同步靠它做三方合并 —— 没有它就分不清"谁改了什么"。
+    baseline = Column(Text, default="")
+    last_synced_at = Column(DateTime, nullable=True)
+    # 本地一有改动就自动对齐（关掉就只手动同步）
+    auto_sync = Column(Boolean, default=True)
+
+
+class RemoteSession(Base):
+    """桌面端连远程服务器的登录凭证（整张表只有一行）。
+
+    单机版把地址和 token 放在手机的 DataStore 里；桌面端的后端是独立进程，
+    得自己存一份才能免去每次同步都重新登录。
+    """
+
+    __tablename__ = "remote_session"
+
+    id = Column(Integer, primary_key=True)
+    server_url = Column(String(200), default="")
+    username = Column(String(50), default="")
+    token = Column(String(500), default="")
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

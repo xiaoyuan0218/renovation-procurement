@@ -70,12 +70,30 @@ object LocalCompute {
         val text = value?.trim().orEmpty()
         if (text.isEmpty()) return ""
         if (validIso(text)) return text
+        // Excel 把日期存成「1900 起的天数」，用 Excel 编辑过日期列的文件读出来
+        // 就是一串数字（如 45500）。后端用 openpyxl 能识别成真日期，手机这边是
+        // 自己写的读取器、只拿得到文本，得在这里补上换算，否则同一份文件在两台
+        // 设备上导入会得到不同的日期。
+        fromExcelSerial(text)?.let { return it }
         val m = LOOSE.matchEntire(text) ?: return text
         val (y, mo, d) = m.destructured
         return try {
             LocalDate.of(y.toInt(), mo.toInt(), d.toInt()).toString()
         } catch (_: Exception) {
             text
+        }
+    }
+
+    /** Excel 日期序列号 → `YYYY-MM-DD`；不像序列号就返回 null。 */
+    private fun fromExcelSerial(text: String): String? {
+        val days = text.toDoubleOrNull() ?: return null
+        // 合理区间大致是 1900-01-01 到 2447 年；这个范围外多半是数量之类的普通数字
+        if (days < 1 || days > 200000) return null
+        return try {
+            // 基准取 1899-12-30：Excel 把 1900 当闰年，用 1900-01-01 当 1 会差一天
+            LocalDate.of(1899, 12, 30).plusDays(days.toLong()).toString()
+        } catch (_: Exception) {
+            null
         }
     }
 

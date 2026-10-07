@@ -124,4 +124,152 @@ class ImportMergeTest {
         assertEquals("覆盖两次后仍是一条分配", 1, db.allocations().ofItem(item.id).size)
         assertTrue(db.items().all(listId).size == 1)
     }
+
+    /* ---------------- PC 与手机互传：这几条盯的是「换了设备也不出错」 ---------------- */
+
+    @Test
+    fun `分组页里的空分组与空分类也要建出来`() = runBlocking {
+        // 只存在于「分组」「分类」两页、没有任何物料的分组，从前会在搬运中消失
+        val table = mapOf(
+            "物料汇总" to listOf(listOf("类目", "物料名称", "单位", "数量", "单价")),
+            "分组" to listOf(listOf("分组名称"), listOf("客厅"), listOf("还没用过")),
+            "分类" to listOf(listOf("分类名称"), listOf("照明"), listOf("备用")),
+        )
+        SheetMapping.fromSheets(db, listId, table, mode = "replace")
+
+        assertEquals(
+            setOf("客厅", "还没用过"),
+            db.rooms().byList(listId).map { it.name }.toSet(),
+        )
+        assertEquals(
+            setOf("照明", "备用"),
+            db.categories().byList(listId).map { it.name }.toSet(),
+        )
+    }
+
+    @Test
+    fun `分组名里带斜杠或顿号不会被拆成两个分组`() = runBlocking {
+        // 「客厅/餐厅」是一个分组名。采购记录的「分组」列多个分组用顿号连接，
+        // 无脑拆会把它拆坏 —— 先整体匹配已有分组名就不会。
+        val table = mapOf(
+            "物料汇总" to listOf(
+                listOf("类目", "物料名称", "单位", "数量", "单价", "物料ID"),
+                listOf("", "筒灯", "个", "2", "10", "1"),
+            ),
+            "采购记录" to listOf(
+                listOf("物料名称", "实付数量", "实付金额", "付款日期", "分组", "物料ID"),
+                listOf("筒灯", "2", "20", "2026-09-01", "客厅/餐厅", "1"),
+            ),
+            "分组" to listOf(listOf("分组名称"), listOf("客厅/餐厅")),
+        )
+        SheetMapping.fromSheets(db, listId, table, mode = "replace")
+
+        assertEquals(listOf("客厅/餐厅"), db.rooms().byList(listId).map { it.name })
+    }
+
+    @Test
+    fun `同名物料各归各的，不会并成一条`() = runBlocking {
+        val table = mapOf(
+            "物料汇总" to listOf(
+                listOf("类目", "物料名称", "单位", "数量", "单价", "物料ID"),
+                listOf("", "灯带控制器", "个", "1", "99", "1"),
+                listOf("", "灯带控制器", "个", "2", "99", "2"),
+            ),
+            "布点明细" to listOf(
+                listOf("物料名称", "房间", "数量", "单价", "备注", "物料ID"),
+                listOf("灯带控制器", "客厅", "1", "", "", "1"),
+                listOf("灯带控制器", "卧室", "2", "", "", "2"),
+            ),
+        )
+        SheetMapping.fromSheets(db, listId, table, mode = "merge")
+
+        val items = db.items().all(listId)
+        assertEquals("两条同名物料要各留一条", 2, items.size)
+        val perItem = items.map { db.allocations().ofItem(it.id).sumOf { a -> a.qty } }
+        assertEquals("布点要按「物料ID」各归各的", setOf(1.0, 2.0), perItem.toSet())
+    }
+
+    @Test
+    fun `合并模式下采购记录不会翻倍`() = runBlocking {
+        val table = mapOf(
+            "物料汇总" to listOf(
+                listOf("类目", "物料名称", "单位", "数量", "单价", "物料ID"),
+                listOf("", "筒灯", "个", "2", "10", "1"),
+            ),
+            "采购记录" to listOf(
+                listOf("物料名称", "实付数量", "实付金额", "付款日期", "分组", "物料ID"),
+                listOf("筒灯", "1", "10", "2026-09-01", "客厅", "1"),
+            ),
+        )
+        SheetMapping.fromSheets(db, listId, table, mode = "merge")
+        SheetMapping.fromSheets(db, listId, table, mode = "merge")
+
+        val item = db.items().all(listId).single()
+        assertEquals("同一份文件连导两次，记录仍只有一笔", 1, db.records().ofItem(item.id).size)
+    }
+
+    @Test
+    fun `一笔采购涉及的分组要真的关联上`() = runBlocking {
+        // 从前按位置传参（RecordRoomEntity(id, it)），字段错位、roomId 永远是 null
+        // —— 钱花在哪几个分组整个丢掉
+        val table = mapOf(
+            "物料汇总" to listOf(
+                listOf("类目", "物料名称", "单位", "数量", "单价", "物料ID"),
+                listOf("", "筒灯", "个", "6", "10", "1"),
+            ),
+            "采购记录" to listOf(
+                listOf("物料名称", "实付数量", "实付金额", "付款日期", "分组", "物料ID"),
+                listOf("筒灯", "6", "60", "2026-09-01", "客厅、卧室", "1"),
+            ),
+        )
+        SheetMapping.fromSheets(db, listId, table, mode = "replace")
+
+        val record = db.records().byList(listId).single()
+        val rooms = db.recordRooms().ofRecord(record.id)
+            .mapNotNull { rr -> rr.roomId?.let { id -> db.rooms().byId(id)?.name } }
+            .toSet()
+        assertEquals("一笔钱涉及的两个分组都要关联上", setOf("客厅", "卧室"), rooms)
+    }
+
+    @Test
+    fun `合并模式下额外费用按表格整体替换，不叠加`() = runBlocking {
+        fun withExpense(kind: String, amount: String) = mapOf(
+            "物料汇总" to listOf(listOf("类目", "物料名称", "单位", "数量", "单价")),
+            "额外费用" to listOf(
+                listOf("类型", "金额", "日期", "商家", "订单号", "备注"),
+                listOf(kind, amount, "2026-09-01", "", "", ""),
+            ),
+        )
+        SheetMapping.fromSheets(db, listId, withExpense("运费", "120"), mode = "merge")
+        assertEquals(1, db.expenses().byList(listId).size)
+
+        SheetMapping.fromSheets(db, listId, withExpense("安装费", "80"), mode = "merge")
+        val expenses = db.expenses().byList(listId)
+        assertEquals("费用是流水账，按表格整体替换", 1, expenses.size)
+        assertEquals("安装费", expenses.single().kind)
+    }
+
+    @Test
+    fun `老文件没有费用页时不动现有费用`() = runBlocking {
+        SheetMapping.fromSheets(
+            db, listId,
+            mapOf(
+                "物料汇总" to listOf(listOf("类目", "物料名称", "单位", "数量", "单价")),
+                "额外费用" to listOf(
+                    listOf("类型", "金额", "日期", "商家", "订单号", "备注"),
+                    listOf("运费", "120", "", "", "", ""),
+                ),
+            ),
+            mode = "replace",
+        )
+        assertEquals(1, db.expenses().byList(listId).size)
+
+        // 不带费用页的表格（老版本导出的）导一次：现有费用留着，不能被清掉
+        SheetMapping.fromSheets(
+            db, listId,
+            mapOf("物料汇总" to listOf(listOf("类目", "物料名称", "单位", "数量", "单价"))),
+            mode = "replace",
+        )
+        assertEquals("老文件不该清掉现有费用", 1, db.expenses().byList(listId).size)
+    }
 }

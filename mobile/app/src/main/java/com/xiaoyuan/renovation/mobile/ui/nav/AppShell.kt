@@ -38,6 +38,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -71,6 +74,9 @@ import com.xiaoyuan.renovation.mobile.ui.lists.ListsViewModel
 import com.xiaoyuan.renovation.mobile.ui.matrix.MatrixScreen
 import com.xiaoyuan.renovation.mobile.ui.matrix.MatrixViewModel
 import com.xiaoyuan.renovation.mobile.ui.settings.AboutPage
+import com.xiaoyuan.renovation.mobile.ui.DonateDialog
+import com.xiaoyuan.renovation.mobile.ui.WelcomeDialog
+import com.xiaoyuan.renovation.mobile.ui.settings.HelpPage
 import com.xiaoyuan.renovation.mobile.ui.settings.BackupPage
 import com.xiaoyuan.renovation.mobile.ui.settings.ExpensesPage
 import com.xiaoyuan.renovation.mobile.ui.settings.ListsPage
@@ -154,7 +160,9 @@ fun AppShellHost(container: AppContainer) {
 
                     "backup" -> BackupPage(container = container, onBack = back)
 
-                    "about" -> AboutPage(onBack = back)
+                    "help" -> HelpPage(onBack = back)
+
+                    "about" -> AboutPage(container = container, onBack = back)
 
                     "server" -> {
                         val pageListsVm: ListsViewModel = sharedViewModel(container) {
@@ -211,6 +219,7 @@ private fun AppShell(
     onOpenSettingsPage: (String) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(ShellTab.Dashboard) }
+    val scope = rememberCoroutineScope()
     val dataVersion by container.dataVersion.collectAsStateWithLifecycle()
 
     // ViewModel 挂在 "main" 这个导航条目上，切 Tab 不会丢筛选条件与已加载数据
@@ -226,6 +235,37 @@ private fun AppShell(
     val settingsVm: SettingsViewModel = sharedViewModel(container) { SettingsViewModel(it.repo) }
     val syncVm: SyncViewModel = sharedViewModel(container) {
         SyncViewModel(it.sync, it.repo, it.session, it.dataVersion)
+    }
+
+    // 第一次打开先弹欢迎引导，看过就记下来；之后每次打开弹一次打赏提醒
+    // （开关在「设置 → 关于」里，默认开着，关掉就不再出现）
+    var showGuide by remember { mutableStateOf(false) }
+    var showDonate by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!container.prefs.guideSeen.first()) {
+            showGuide = true
+        } else if (container.prefs.donateEnabled.first()) {
+            showDonate = true
+        }
+    }
+    if (showGuide) {
+        WelcomeDialog(onClose = {
+            showGuide = false
+            scope.launch { container.prefs.setGuideSeen() }
+            // 引导关掉之后紧接着提示一次打赏，别两个弹窗叠在一起
+            scope.launch {
+                if (container.prefs.donateEnabled.first()) showDonate = true
+            }
+        })
+    }
+    if (showDonate) {
+        DonateDialog(
+            onClose = { showDonate = false },
+            onNever = {
+                showDonate = false
+                scope.launch { container.prefs.setDonateEnabled(false) }
+            },
+        )
     }
 
     Column(Modifier.fillMaxSize()) {

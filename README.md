@@ -16,13 +16,14 @@
 - **多笔采购记录**：一笔付款可以覆盖多件物料，记录后自动算已付、未付与实付单价，状态自动变成"部分已买 / 已买完"
 - **自动汇总看板**：总价、日常价、已付、未付、各分类与各分组的分布、未采购清单
 
-## 三种用法
+## 四种用法
 
 同一套数据、同一套算法，按你怎么方便怎么来：
 
 | | 数据在哪 | 适合 |
 |---|---|---|
 | **网页版** | 服务器上 | 电脑上整理、对账、导 Excel；浏览器打开即用 |
+| **Windows 桌面端** | 电脑本地 | 不想开浏览器、也不想搭服务器：装一个应用，数据在自己电脑上；连上服务器就能和手机互相同步 |
 | **安卓客户端** | 服务器上 | 手机上随时看进度，在外面买了什么随手记上 |
 | **安卓单机版** | 手机本地 | 完全离线也能用；想联网时可以把某份清单传到服务器，或把服务器上的清单拉到手机（两边都改过会自动合并，只有改到同一处才问你） |
 
@@ -137,6 +138,40 @@ cd mobile                    # 单机版，命令相同；testDebugUnitTest 是�
 
 也可以由 GitHub Actions 自动构建：`.github/workflows/apk.yml` 在 `android/` 或 `mobile/` 有改动时构建两个 App（单机版会先跑单测），并把 APK 发布到上面那两个固定链接 —— 每次 push 自动更新，链接不变。
 
+## Windows 桌面端
+
+`src-tauri/` 下是一个 Windows 桌面应用（Tauri 2 外壳 + 打包进安装包的 Python 后端）。它和手机单机版是同一种形态：**数据默认存在这台电脑上**，不搭服务器也能用；连上自己的服务端之后，两边可以双向同步。同步用的是和手机端同一套合并算法与冲突规则。
+
+- **本机免登录**：打开就是自己的数据，不用先建账号、输密码
+- **不占局域网端口**：只监听 `127.0.0.1`。想让同局域网的设备连它，把 `RENOVATION_HOST` 设成 `0.0.0.0`，并先在「设置 / 服务器」里给账号设一个自己记得住的密码（那时局域网请求需要登录，本机仍然免登录）
+- **端口自动避让**：默认 8000，被占用就往后找一个，不会和电脑上已有的服务（比如 Docker 里那个）打架
+- **数据位置**：`%APPDATA%\采知道\`（数据库、签名密钥、迁移备份都在这里，拷走就是完整备份）
+
+### 与手机互传数据
+
+没有服务器也能用：两端都用「设置 / 数据 → 备份」里的导出 / 导入传表格文件。列名与金额口径三端完全一致，电脑导出的文件手机能直接导入，反过来也一样。
+
+表格里有几处值得留意：「分组」「分类」两页列的是清单里的全部名字（含暂时没有物料的），搬运时靠它把空分组、空分类也带过去；采购记录页的「分组」列里多个分组用顿号连接 —— 若某个分组名本身就含顿号或斜杠（比如「客厅/餐厅」），导入时会优先按整串匹配已有分组名，不会被拆成两个。
+
+### 构建
+
+```bash
+# 1) 前端
+cd frontend && npm install && npm run build && cd ..
+
+# 2) 把后端打成 sidecar exe（先 pip install pyinstaller）
+python backend/packaging/build_server.py
+
+# 3) 出安装包（需要 Rust 与 MSVC Build Tools）
+npm install
+npx tauri build
+# 产物在 src-tauri/target/release/bundle/nsis/ 下
+```
+
+`.github/workflows/desktop.yml` 在 `src-tauri/`、`backend/` 或 `frontend/` 有改动时自动构建，安装包挂到 [最新构建](https://github.com/xiaoyuan0218/renovation-procurement/releases/latest) 页面。
+
+开发时想直接看界面：起后端（`python backend/desktop.py`，本机免登录），浏览器打开它监听的地址就行 —— 桌面端与网页端用的是同一份前端代码。
+
 ## Docker 部署
 
 镜像由 GitHub Actions 构建并推送到 GitHub Container Registry，`main` 分支每次推送自动更新：
@@ -187,8 +222,14 @@ docker compose pull && docker compose up -d   # 更新到最新构建
 | `RENOVATION_SECRET` | 自动生成 | 登录 token 的签名密钥。不设就在数据目录生成 `.secret_key` 并一直用下去；**改这个值等于让所有设备登出** |
 | `RENOVATION_COOKIE_SECURE` | `false` | 只在 HTTPS 下才该设为 `true`。局域网走明文 HTTP 时设成 true，浏览器会直接丢弃登录 Cookie，症状是"登录成功但下个请求又是未登录" |
 | `RENOVATION_SESSION_DAYS` | `30` | 登录状态保留天数 |
+| `RENOVATION_VERSION` | `dev` | 版本号。镜像构建时由 CI 从 `VERSION` 注入，「关于」页显示它，`/api/version` 返回它 |
+| `RENOVATION_BUILT_AT` | 空 | 构建时间（UTC），「检查更新」拿它和 GitHub 上的最新构建比对 |
+| `RENOVATION_HOST` | `127.0.0.1` | 桌面端内置服务的监听地址。想让同局域网的设备连，改成 `0.0.0.0`（那时要账号密码） |
+| `RENOVATION_PORT` | `8000` | 桌面端内置服务的端口，被占用了会自动往后找 |
+| `RENOVATION_LOCAL_NO_AUTH` | 关 | 置 `1` 时本机来源（`127.0.0.1` / `::1`）免登录，桌面端默认打开。局域网来的请求照样要凭据 |
 
 端口由启动命令的 `--port` 决定（compose 里映射 8000）。容器内数据目录固定挂 `/data`。
+后三个只对桌面端（`backend/desktop.py`）有意义。
 
 ## 接口与 API 密钥
 
@@ -215,6 +256,24 @@ curl -H "Authorization: Bearer xk_xxxxxxxx" http://<服务器IP>:8000/api/lists
 
 **权限与风险**：密钥等同管理员 —— 能读写全部清单，也能调备份与恢复。所以只存在你要用的那台
 设备上，别贴进聊天记录或截图；怀疑泄漏就立刻在同一个面板里撤销（立即生效，且发不出同一把）。
+
+## 版本、更新与打赏
+
+**版本号**统一在仓库根的 `VERSION` 文件里，后端、网页、两个安卓 App 都读它 ——
+发版只改这一个文件（安卓的 versionCode 由版本号换算，1.2.0 对应 10200，只增不减）。
+
+**检查更新**在网页「设置 / 数据 → 关于」里，拿本机的构建时间和 GitHub 上最新一批构建的
+时间比（滚动 release 的 tag 永远是 latest，比不了版本号）。这个时间由 CI 建镜像时注入
+（见 `.github/workflows/build-image.yml`），本地直接跑没有，那里会显示「开发版」。
+
+**打赏入口**是右下角一颗悬浮小圆钮，默认开着、每次打开网页弹一次收款码；开关在同一个
+「关于」页里，关掉后不再出现。把自己的收款码存成下面两个文件就行，不放则显示同尺寸的
+占位框：
+
+- `frontend/public/donate/wechat.png`
+- `frontend/public/donate/alipay.png`
+
+两个码建议一样大（二维码占画面的比例一致），并排显示时才整齐。
 
 ## 备份与恢复
 
@@ -243,7 +302,7 @@ curl -H "Authorization: Bearer xk_xxxxxxxx" http://<服务器IP>:8000/api/lists
 ## 测试与回归脚本
 
 ```bash
-cd backend && ..\.venv\Scripts\python -m pytest tests -q      # 单测：金额口径 / 删除级联 / 多清单隔离 / 老库迁移 / 备份恢复 / 导入导出 / 登录鉴权
+cd backend && ..\.venv\Scripts\python -m pytest tests -q      # 单测：金额口径 / 删除级联 / 多清单隔离 / 老库迁移 / 备份恢复 / 导入导出 / 登录鉴权 / 操作日志与回退 / API 密钥 / 桌面端同步
 
 # 以下需要先启动服务（默认 127.0.0.1:8000，可用 WALKTHROUGH_BASE 指向其他实例）
 .venv\Scripts\python backend\scripts\walkthrough.py           # 功能走查：登录页、看板数字、矩阵编辑、导入导出
@@ -264,16 +323,25 @@ WALKTHROUGH_USER=admin WALKTHROUGH_PASSWORD=你的密码 \
 
 ```
 backend/    FastAPI + SQLAlchemy + SQLite
-  app/        模型、路由(auth/items/base_data/matrix/summary/transfer/lists/backup)、
-              金额计算、excel 导入导出
+  app/        模型、路由、金额计算、excel 导入导出、操作日志与回退
+              路由  auth/items/expenses/base_data/matrix/summary/transfer/
+                    lists/trash/backup/sync/keys/logs/desktop
               deps.py       「当前清单」依赖（请求头 X-List-Id / ?list_id= / 兜底第一份）
               migrations.py 老库升级到多清单：备份 + 单事务 + 前后自检 + 幂等
-              auth.py       密码哈希 + 签名 token + 请求守卫 + 登录限流（只用标准库）
+              auth.py       密码哈希 + 签名 token + API 密钥 + 请求守卫 + 登录限流（只用标准库）
+              audit.py      操作日志与回退（中间件兜底 + 路由补细节）
+              api_docs.py   接口文档的中文标题与说明
+  desktop.py  桌面端的内置服务入口（本机免登录，只监听 127.0.0.1）
+  packaging/  build_server.py：把后端打成桌面端用的 sidecar exe
   scripts/    seed_from_excel.py 历史表格导入、compare_with_excel.py 差异核对、
               reset_password.py 忘记密码时重设、walkthrough.py 功能走查、measure_layout.py 布局回归
-  tests/      pytest（金额口径 / 清单隔离 / 迁移 / 备份恢复 / 鉴权）
+  tests/      pytest（金额口径 / 清单隔离 / 迁移 / 备份恢复 / 鉴权 / 日志回退 / 桌面端同步）
 frontend/   Vue3 + Vite + Element Plus + ECharts（登录 / 总览 / 物料清单 / 分配矩阵 / 设置）
-android/    Kotlin + Jetpack Compose 原生客户端（服务器地址可自定义）
+android/    Kotlin + Jetpack Compose 网络版客户端（连自己的服务器）
+mobile/     Kotlin + Jetpack Compose 单机版（数据在手机上，可选连服务器同步）
+src-tauri/  桌面端外壳（Tauri 2，Windows 安装包；前端复用 frontend/ 的产物）
+keystore/   安卓签名密钥（本地与 CI 共用同一把，否则新包装不上旧包）
+VERSION     版本号，三端构建与 CI 都读它
 data/       renovation.db 与 .secret_key（运行时生成，备份拷这个目录即可）
 ```
 

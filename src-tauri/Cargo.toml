@@ -1,0 +1,19 @@
+[package]
+name = "caizhidao-desktop"
+version = "1.2.0"
+edition = "2021"
+description = "采知道 桌面端"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# 用官方 sidecar 机制拉起内置后端（受 capabilities 权限约束）
+tauri-plugin-shell = "2"
+
+[profile.release]
+# 桌面外壳本身没什么计算量，优先要体积小
+opt-level = "s"
+lto = true
+strip = true

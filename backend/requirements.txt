@@ -3,3 +3,5 @@ uvicorn[standard]>=0.32
 sqlalchemy>=2.0
 openpyxl>=3.1
 python-multipart>=0.0.12
+# 桌面端「连远程服务器同步」要主动外呼（服务端部署用不到，但依赖统一装一份）
+httpx>=0.27

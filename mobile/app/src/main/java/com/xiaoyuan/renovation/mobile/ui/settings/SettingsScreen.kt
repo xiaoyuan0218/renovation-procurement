@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material3.Icon
@@ -166,6 +167,16 @@ fun SettingsScreen(
                 },
                 accent = Ink.Mint,
                 onClick = { onOpenPage("server") },
+            )
+        }
+
+        item {
+            MenuRow(
+                icon = Icons.Filled.MenuBook,
+                title = "使用说明",
+                summary = "怎么记一笔、状态和金额是怎么算的",
+                accent = Ink.Cyan,
+                onClick = { onOpenPage("help") },
             )
         }
 

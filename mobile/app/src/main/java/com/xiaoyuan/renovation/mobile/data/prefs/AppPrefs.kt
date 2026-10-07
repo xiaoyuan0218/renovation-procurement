@@ -1,6 +1,7 @@
 package com.xiaoyuan.renovation.mobile.data.prefs
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -23,6 +24,22 @@ class AppPrefs(private val context: Context) {
         val SERVER_URL = stringPreferencesKey("server_url")
         val USERNAME = stringPreferencesKey("username")
         val TOKEN = stringPreferencesKey("token")
+        val GUIDE_SEEN = booleanPreferencesKey("guide_seen")
+        val DONATE_OFF = booleanPreferencesKey("donate_off")
+    }
+
+    /** 首次打开时弹一次新手引导，看过就不再打扰 */
+    val guideSeen: Flow<Boolean> = context.dataStore.data.map { it[Keys.GUIDE_SEEN] ?: false }
+
+    suspend fun setGuideSeen() {
+        context.dataStore.edit { it[Keys.GUIDE_SEEN] = true }
+    }
+
+    /** 打赏提醒：默认开着，每次打开弹一次收款码；关掉后不再出现 */
+    val donateEnabled: Flow<Boolean> = context.dataStore.data.map { !(it[Keys.DONATE_OFF] ?: false) }
+
+    suspend fun setDonateEnabled(on: Boolean) {
+        context.dataStore.edit { it[Keys.DONATE_OFF] = !on }
     }
 
     val currentListId: Flow<Int?> =

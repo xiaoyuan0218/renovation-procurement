@@ -46,6 +46,18 @@ SESSION_DAYS = _env_int("RENOVATION_SESSION_DAYS", 30)
 COOKIE_SECURE = (os.environ.get("RENOVATION_COOKIE_SECURE", "") or "").strip().lower() in (
     "1", "true", "yes", "on")
 
+# 桌面端本机免登录：桌面版把后端跑在用户自己的机器上，打开就该看到自己的数据，
+# 没必要先登录一次。**只对本机来源生效** —— 局域网来的请求照旧要凭据，所以
+# "这台电脑同时当服务端给手机连"这条路依然受账号保护，不会因为开了它而裸奔。
+LOCAL_NO_AUTH = (os.environ.get("RENOVATION_LOCAL_NO_AUTH", "") or "").strip().lower() in (
+    "1", "true", "yes", "on")
+
+# 免登录时用的那个管理员账号名。用户要给手机连的时候，就是拿它加自己设的密码登。
+LOCAL_ADMIN_USERNAME = "admin"
+
+# 算作"本机"的来源。testclient 是 FastAPI 测试客户端的 host，测试里要能免登录。
+_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
 
 def _b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
@@ -231,18 +243,55 @@ def _extract_token(request: Request):
     return request.cookies.get(COOKIE_NAME)
 
 
+def is_local_request(request: Request) -> bool:
+    """请求是不是从本机发出的（桌面端免登录只认这个）。"""
+    client = request.client
+    return client is not None and client.host in _LOCAL_HOSTS
+
+
+def local_admin(db: Session) -> User:
+    """本机免登录时用的管理员。
+
+    桌面版首次启动库里还没有账号，这里现建一个 —— 口令是随机串，用户既不需要
+    知道也不用记（本机请求根本不校验它）。**这顺带堵住了"账号创建窗口期"**：
+    从前首次部署后局域网里谁先打开页面谁就能把管理员建走，现在账号在启动时就
+    已经存在，别人抢不到。
+
+    要给手机连的时候，用户在设置里把这个账号的密码改成自己记得住的即可。
+    """
+    user = db.query(User).first()
+    if user is not None:
+        return user
+    user = User(username=LOCAL_ADMIN_USERNAME,
+                password_hash=hash_password(secrets.token_urlsafe(24)))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def current_user_or_none(request: Request, db: Session):
     """不抛异常的版本，给「查询登录态」这类端点用。
 
     两种凭据都认：API 密钥（给外部程序，长期有效）和登录 token（Cookie 或
     Bearer，给网页与安卓）。密钥先看 —— 它自带 xk_ 前缀，与登录 token 一眼
     可分，不会互相误判。
+
+    桌面端（`RENOVATION_LOCAL_NO_AUTH`）额外放行本机请求：本机即使没带任何
+    凭据也当作已登录。带了有效凭据的仍按凭据走，所以本机上用别的账号登录、
+    或带着 API 密钥调接口都照常工作。
     """
     key = _extract_api_key(request)
     if key is not None:
         return verify_api_key(key, db)
     token = _extract_token(request)
-    return verify_token(token, db) if token else None
+    if token:
+        user = verify_token(token, db)
+        if user is not None:
+            return user
+    if LOCAL_NO_AUTH and is_local_request(request):
+        return local_admin(db)
+    return None
 
 
 def require_user(request: Request, db: Session = Depends(get_db)) -> User:

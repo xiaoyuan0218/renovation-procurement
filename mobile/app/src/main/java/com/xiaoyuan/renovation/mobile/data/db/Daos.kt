@@ -268,6 +268,18 @@ interface RecordDao {
     @Delete
     suspend fun delete(record: PurchaseRecordEntity)
 
+    /** 清掉这条物料的全部采购记录（导入时表格就是该物料的完整付款历史）。
+     *
+     * 先删 record_rooms：它引用了 purchase_records，外键约束不允许留下悬空引用。 */
+    @Query(
+        "DELETE FROM record_rooms WHERE record_id IN " +
+            "(SELECT id FROM purchase_records WHERE item_id = :itemId)",
+    )
+    suspend fun deleteRecordRoomsOfItem(itemId: Int)
+
+    @Query("DELETE FROM purchase_records WHERE item_id = :itemId")
+    suspend fun deleteOfItem(itemId: Int)
+
     /** 解除这批记录与某个分组的关联（删分组时用，记录本身留着）。 */
     @Query("UPDATE purchase_records SET room_id = NULL WHERE room_id = :roomId")
     suspend fun detachRoom(roomId: Int)

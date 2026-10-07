@@ -12,8 +12,8 @@ from . import api_docs
 from . import audit
 from .auth import require_user
 from .db import SessionLocal, get_db
-from .routers import (auth, base_data, backup, expenses, items, keys, lists,
-                      logs, matrix, sync,
+from .routers import (auth, base_data, backup, desktop, expenses, items, keys,
+                      lists, logs, matrix, sync,
                       summary, transfer, trash)
 from .routers.items import records_router
 from .seed import init_db
@@ -71,6 +71,20 @@ def health():
     return {"status": "ok"}
 
 
+# 版本与构建信息：建镜像时由 CI 注入（见 .github/workflows/build-image.yml），
+# 本地开发没有这两个变量。「检查更新」就是拿本地的构建时间和 GitHub 上最新
+# 那批构建的时间比 —— 比版本号可靠，滚动 release 的 tag 永远是 latest。
+APP_VERSION = os.environ.get("RENOVATION_VERSION", "dev")
+BUILT_AT = os.environ.get("RENOVATION_BUILT_AT", "")
+REPO = "xiaoyuan0218/renovation-procurement"
+
+
+@app.get("/api/version")
+def version_info():
+    """版本与构建时间，给「关于」页显示、以及检查更新用。不需要登录。"""
+    return {"version": APP_VERSION, "built_at": BUILT_AT, "repo": REPO}
+
+
 # 登录接口自身不能挂守卫，否则没法登录
 app.include_router(auth.router)
 
@@ -89,13 +103,30 @@ app.include_router(backup.router, dependencies=_guard)
 app.include_router(sync.router, dependencies=_guard)
 app.include_router(keys.router, dependencies=_guard)
 app.include_router(logs.router, dependencies=_guard)
+# 桌面端连远程服务器、把本地清单同步过去（普通服务端部署用不到，留着也无害）
+app.include_router(desktop.router, dependencies=_guard)
 
 
 # 前端构建产物目录可用环境变量覆盖（本地开发走 vite:5173，不经过这里）
-DIST_DIR = os.environ.get(
+def _plain_path(path: str) -> str:
+    r"""去掉 Windows 扩展长度路径的 \\?\ 前缀。
+
+    桌面端（Tauri）解析资源目录时给的是 \\?\D:\... 这种扩展长度路径，它会
+    绕开 Windows 的路径规范化：正斜杠不再算分隔符，于是
+    os.path.join(DIST, "donate/wechat.png") 整串被当成一个文件名，子目录里
+    的静态文件一律取不到、全落到首页兜底上（根目录的文件倒是对的）。
+    """
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
+
+
+DIST_DIR = _plain_path(os.environ.get(
     "RENOVATION_DIST",
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), "frontend", "dist"))
+        os.path.abspath(__file__)))), "frontend", "dist")))
 
 
 # ---------------------------------------------------------------- 接口文档

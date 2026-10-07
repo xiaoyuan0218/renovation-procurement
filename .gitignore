@@ -5,6 +5,7 @@
 /seed/
 /screenshots/
 /screenshots-mobile/
+# screenshots-android 故意不忽略：android/DESIGN.md 要靠它展示设计稿
 /.wt-tmp/
 # 依赖本地 seed 原始表格的测试，含真实物料/金额，仅本机保留
 backend/tests/test_import_original.py
@@ -15,6 +16,9 @@ node_modules/
 frontend/dist/
 # APK 分发目录（构建产物，用 GitHub Release 或 Actions artifact 分发）
 /dist/
+# PyInstaller 的中间目录与产物（桌面端 sidecar，合起来约 75MB）
+/backend/build/
+/backend/dist/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -32,3 +36,13 @@ Thumbs.db
 
 # 本地临时实例（测试用的数据目录与密钥）
 backend/_tmp_*/
+
+# 宣传物料的制作工作区：渲染产物、录屏、依赖包、临时文件都在里面，
+# 体积也不小（视频与海报），不进仓库
+/promo/
+
+# 桌面端（Tauri）构建产物
+/src-tauri/target/
+/src-tauri/gen/
+# 打包出来的后端 exe（每次构建生成，几十 MB）
+/src-tauri/binaries/

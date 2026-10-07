@@ -22,6 +22,13 @@ PRODUCT_HEADER = {"灯具", "面板", "物料", "产品"}
 
 
 def _v(ws, row, col):
+    """读单元格。列号可能为 None（文件里没有这一列）时返回 None。
+
+    用户把某一列整列删掉是常事（比如觉得「备注」没用），从前这里会拿 None 当
+    列号去调 `ws.cell`，直接抛 TypeError 变成 500 —— 一份能读的文件被判成坏文件。
+    """
+    if not col:
+        return None
     return ws.cell(row=row, column=col).value
 
 
@@ -39,6 +46,23 @@ def _num(x):
         return float(x)
     except (TypeError, ValueError):
         return None
+
+
+def _num_checked(value, where, warnings):
+    """解析数字；填了东西却解析不出来时记一条 warning。
+
+    从前一律 `_num(...) or 0`：用户把金额填成「八十」这种文本不会有任何提示，
+    直接算成 0，账目对不上还找不到原因。这里不改变「坏行照旧跳过」的容错策略，
+    只是让它不再悄无声息。空单元格不算错（没填就是没填）。
+    """
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    parsed = _num(value)
+    if parsed is None:
+        warnings.append(f"{where}填的「{value}」不是数字，已按 0 处理")
+    return parsed
 
 
 def _txt(x):
@@ -315,6 +339,7 @@ def _parse_flat(path_or_bytes):
         name = _txt(_v(ws_items, r, c_name))
         if not name:
             continue
+        label = f"物料汇总第 {r} 行"
         bought_cell = _txt(_v(ws_items, r, c_bought)) if c_bought else ""
         items.append({
             "item_id": int(_num(_vo(ws_items, r, c_id))) if c_id and _num(_vo(ws_items, r, c_id)) else None,
@@ -323,11 +348,16 @@ def _parse_flat(path_or_bytes):
             "model": _txt(_vo(ws_items, r, c_model)),
             "category": _txt(_v(ws_items, r, c_cat)) or None,
             "unit": _txt(_v(ws_items, r, c_unit)) or "个",
-            "qty_total": _num(_v(ws_items, r, c_qty)) or 0,
-            "price": _num(_v(ws_items, r, c_price)) or 0,
-            "discount_price": _num(_v(ws_items, r, c_disc)),
-            "paid_qty": _num(_vo(ws_items, r, c_paid_qty)) or 0,
-            "paid_amount": _num(_vo(ws_items, r, c_paid_amount)),
+            "qty_total": _num_checked(_v(ws_items, r, c_qty),
+                                      f"{label}的「数量」", warnings) or 0,
+            "price": _num_checked(_v(ws_items, r, c_price),
+                                  f"{label}的「单价」", warnings) or 0,
+            "discount_price": _num_checked(_v(ws_items, r, c_disc),
+                                           f"{label}的「优惠单价」", warnings),
+            "paid_qty": _num_checked(_vo(ws_items, r, c_paid_qty),
+                                     f"{label}的「实付数量」", warnings) or 0,
+            "paid_amount": _num_checked(_vo(ws_items, r, c_paid_amount),
+                                        f"{label}的「实付金额」", warnings),
             "bought": bought_cell in ("是", "TRUE", "True", "1"),
             "note": _txt(_v(ws_items, r, c_note)),
         })
@@ -339,15 +369,19 @@ def _parse_flat(path_or_bytes):
         for r in range(2, ws_alloc.max_row + 1):
             name = _txt(_v(ws_alloc, r, cols["物料名称"]))
             room = _txt(_v(ws_alloc, r, cols["房间"]))
-            qty = _num(_v(ws_alloc, r, cols["数量"])) or 0
+            label = f"布点明细第 {r} 行"
+            qty = _num_checked(_v(ws_alloc, r, cols["数量"]),
+                               f"{label}的「数量」", warnings) or 0
             if not name or not room or not qty:
                 continue
             aid = _num(_vo(ws_alloc, r, cols.get("物料ID")))
             allocs.append({
                 "item_id": int(aid) if aid else None,
                 "item_name": name, "room": room, "qty": qty,
-                "price_override": _num(_v(ws_alloc, r, cols["单价"])),
-                "paid_qty": min(_num(_vo(ws_alloc, r, cols.get("实付数量"))) or 0, qty),
+                "price_override": _num_checked(_v(ws_alloc, r, cols["单价"]),
+                                               f"{label}的「单价」", warnings),
+                "paid_qty": min(_num_checked(_vo(ws_alloc, r, cols.get("实付数量")),
+                                             f"{label}的「实付数量」", warnings) or 0, qty),
                 "note": _txt(_v(ws_alloc, r, cols["备注"])),
             })
     records = []
@@ -364,8 +398,11 @@ def _parse_flat(path_or_bytes):
             name = _txt(_v(ws_rec, r, rcols["物料名称"]))
             if not name:
                 continue
-            qty = _num(_vo(ws_rec, r, rcols.get("实付数量"))) or 0
-            amount = _num(_vo(ws_rec, r, rcols.get("实付金额"))) or 0
+            label = f"采购记录第 {r} 行"
+            qty = _num_checked(_vo(ws_rec, r, rcols.get("实付数量")),
+                               f"{label}的「实付数量」", warnings) or 0
+            amount = _num_checked(_vo(ws_rec, r, rcols.get("实付金额")),
+                                  f"{label}的「实付金额」", warnings) or 0
             if not qty and not amount:
                 continue  # 空记录忽略
             rid = _num(_vo(ws_rec, r, rcols.get("物料ID")))
@@ -380,9 +417,10 @@ def _parse_flat(path_or_bytes):
                 "note": _txt(_vo(ws_rec, r, rcols.get("备注"))),
                 "vendor": _txt(_vo(ws_rec, r, rcols.get("商家"))),
                 "order_no": _txt(_vo(ws_rec, r, rcols.get("订单号"))),
-                # 分组先按名字带着，落库时再在当前清单里找/建（解析阶段还没有 db）
-                "room_names": [s.strip() for s in re.split(
-                    r"[、,，/]", _txt(_vo(ws_rec, r, rcols.get("分组")))) if s.strip()],
+                # 分组名**原样带着，不在这里拆**：分组名本身可能含顿号或斜杠
+                # （「客厅/餐厅」「客厅、过道」），解析阶段还没有清单上下文，
+                # 无脑拆会把一个分组拆成两个。落库时按 _split_rooms 再定。
+                "room_raw": _txt(_vo(ws_rec, r, rcols.get("分组"))),
             })
 
     # 额外费用页：老文件没有这一页时返回 None（而不是空列表），
@@ -395,7 +433,8 @@ def _parse_flat(path_or_bytes):
                      ("类型", "金额", "日期", "商家", "订单号", "备注")}
             expenses = []
             for r in range(2, ws_exp.max_row + 1):
-                amount = _num(_vo(ws_exp, r, ecols.get("金额")))
+                amount = _num_checked(_vo(ws_exp, r, ecols.get("金额")),
+                                      f"额外费用第 {r} 行的「金额」", warnings)
                 if amount is None:
                     continue  # 没金额的行不算一笔费用
                 expenses.append({
@@ -407,8 +446,24 @@ def _parse_flat(path_or_bytes):
                     "note": _txt(_vo(ws_exp, r, ecols.get("备注"))),
                 })
             break
+
+    # 「分组」「分类」名单页：没有物料的空分组/空分类只存在于此。老文件没有
+    # 这两页时返回 None，落库时就不额外建（行为与从前一致）。
+    def _names_sheet(title):
+        for sheet in wb.worksheets:
+            if sheet.title == title:
+                names = []
+                for row in sheet.iter_rows(min_row=2, max_col=1):
+                    name = _txt(row[0].value) if row else ""
+                    if name:
+                        names.append(name)
+                return names
+        return None
+
     return {"items": items, "allocs": allocs, "records": records,
-            "expenses": expenses, "warnings": warnings}
+            "expenses": expenses, "warnings": warnings,
+            "rooms_extra": _names_sheet("分组"),
+            "categories_extra": _names_sheet("分类")}
 
 
 # ---------------------------------------------------------------- 入库
@@ -445,6 +500,23 @@ def _get_or_create_room(db, name, rooms_cache, report, list_id):
     return room
 
 
+def _split_rooms(raw, rooms_cache):
+    """把采购记录「分组」列拆成分组名列表。
+
+    **先整体匹配已有分组名，匹配不到才按分隔符拆**：分组名本身可能含顿号或
+    斜杠（「客厅/餐厅」「客厅、过道」），无脑拆会把一个分组拆成两个，来回导一次
+    数据就散了。导出时这些名字是原样写进去的，导入时整串能对上，就说明它本来
+    就是**一个**分组名。落库前「分组」页里的名字已经先建好了，所以自己导出的
+    文件这里必定命中；老文件没有「分组」页时，能命中现有分组名也行。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return []
+    if text in rooms_cache:
+        return [text]
+    return [s.strip() for s in re.split(r"[、,，/]", text) if s.strip()]
+
+
 def _get_or_create_category(db, name, cats_cache, report, list_id):
     if not name:
         return None
@@ -463,17 +535,22 @@ def _get_or_create_category(db, name, cats_cache, report, list_id):
 
 
 def _clear_list_items(db, list_id):
-    """清掉这份清单下的全部条目（连同布点与采购记录），别的清单不动。"""
+    """清掉这份清单下的全部条目（连同布点与采购记录），别的清单不动。
+
+    删除用 `synchronize_session="fetch"`：删完紧接着会重插，SQLite 会把行 id 从
+    头分配，session 里若还留着同主键的旧对象，identity map 会判定冲突（数据是对的，
+    但 session 状态不干净，后续读到的可能是旧对象）。
+    """
     from ..models import Allocation, Item, PurchaseRecord
     ids = [row[0] for row in db.query(Item.id)
            .filter(Item.list_id == list_id, Item.alive()).all()]
     if not ids:
         return
     db.query(PurchaseRecord).filter(PurchaseRecord.item_id.in_(ids)) \
-        .delete(synchronize_session=False)
+        .delete(synchronize_session="fetch")
     db.query(Allocation).filter(Allocation.item_id.in_(ids)) \
-        .delete(synchronize_session=False)
-    db.query(Item).filter(Item.id.in_(ids)).delete(synchronize_session=False)
+        .delete(synchronize_session="fetch")
+    db.query(Item).filter(Item.id.in_(ids)).delete(synchronize_session="fetch")
     db.commit()
 
 
@@ -635,6 +712,14 @@ def _apply_flat(db, parsed, mode, report, list_id):
             .order_by(Category.sort).all():
         cats_cache[cat.name] = cat
 
+    # 「分组」「分类」页列出的名字先全部建出来：没有物料的空分组/空分类只存在于
+    # 这里，光靠布点/记录反推会把它们丢掉（把一份清单导进一份空清单尤其明显）。
+    # 也正因为先建好了，采购记录「分组」列的整串匹配（_split_rooms）才能命中。
+    for name in (parsed.get("rooms_extra") or []):
+        _get_or_create_room(db, name, rooms_cache, report, list_id)
+    for name in (parsed.get("categories_extra") or []):
+        _get_or_create_category(db, name, cats_cache, report, list_id)
+
     rec_names = {_norm(r["item_name"]) for r in parsed.get("records", [])}
     # 导出文件里的「物料ID」→ 这次导入之后的物料对象。
     # 不能拿那个 ID 直接当主键查库：它是导出时那份清单里的行号，导入到另一份
@@ -729,7 +814,7 @@ def _apply_flat(db, parsed, mode, report, list_id):
         record_rooms = [
             RecordRoom(room_id=_get_or_create_room(
                 db, room_name, rooms_cache, report, list_id).id)
-            for room_name in (r.get("room_names") or [])
+            for room_name in _split_rooms(r.get("room_raw"), rooms_cache)
         ]
         item.records.append(PurchaseRecord(
             qty=r["qty"] or 0, amount=r["amount"] or 0,
@@ -786,10 +871,11 @@ def import_original(db, file_bytes: bytes, mode: str = "replace", list_id=None) 
 def import_template(db, file_bytes: bytes, mode: str = "replace", list_id=None) -> dict:
     """按系统模板（物料汇总+布点明细平表）导入；格式不符时抛 ValueError。"""
     list_id = _resolve_list_id(db, list_id)
+    parsed = _parse_flat(file_bytes)
+    # 解析阶段的提示要带出来（哪一格没解析成数字之类），否则用户在界面上看不到
     report = {"mode": mode, "items_created": 0, "items_matched": 0,
               "allocations": 0, "records": 0, "rooms_created": 0, "categories_created": 0,
-              "expenses": 0, "warnings": [], "format": "flat"}
-    parsed = _parse_flat(file_bytes)
+              "expenses": 0, "warnings": list(parsed["warnings"]), "format": "flat"}
     _apply_flat(db, parsed, mode, report, list_id)
     return report
 
@@ -860,6 +946,21 @@ def export_xlsx(db, list_id=None) -> bytes:
         ws4.append([e.kind or "", e.amount or 0, e.date or "",
                     e.vendor or "", e.order_no or "", e.note or ""])
 
+    # 分组与分类单独成页：上面几页里它们只以「用到的名字」形式出现，没有任何
+    # 物料的分组/分类就会在搬运中消失（导进一份空清单时尤其明显）。全量列出来
+    # 才搬得完整，也让采购记录「分组」列的名字有处可查（见 _split_rooms）。
+    ws5 = wb.create_sheet("分组")
+    ws5.append(["分组名称"])
+    for r in (db.query(Room).filter(Room.list_id == list_id)
+              .order_by(Room.sort, Room.id).all()):
+        ws5.append([r.name])
+
+    ws6 = wb.create_sheet("分类")
+    ws6.append(["分类名称"])
+    for c in (db.query(Category).filter(Category.list_id == list_id)
+              .order_by(Category.sort, Category.id).all()):
+        ws6.append([c.name])
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -880,8 +981,10 @@ def build_template() -> bytes:
                None, None, None, None, None, None, None, None, None, "实付见「采购记录」页", None])
 
     ws2 = wb.create_sheet("布点明细")
-    ws2.append(["物料名称", "房间", "数量", "单价", "实付数量", "备注", "物料ID"])
-    ws2.append(["示例筒灯（导入前请删除本行）", "客厅", 2, 1199, 0,
+    # 表头与导出**逐列一致**（这里从前多一列「实付数量」）：模板和导出文件长得
+    # 一样，用户才不会以为自己少了哪一列
+    ws2.append(["物料名称", "房间", "数量", "单价", "备注", "物料ID"])
+    ws2.append(["示例筒灯（导入前请删除本行）", "客厅", 2, 1199,
                 "单价留空=用物料单价；填了布点的物料，总量以布点合计为准", None])
 
     ws3 = wb.create_sheet("采购记录")
@@ -895,6 +998,14 @@ def build_template() -> bytes:
     ws5.append(["类型", "金额", "日期", "商家", "订单号", "备注"])
     ws5.append(["运费", 120, "2026-09-14", "京东", "JD20260914001",
                 "示例行，导入前请删除"])
+
+    ws6 = wb.create_sheet("分组")
+    ws6.append(["分组名称"])
+    ws6.append(["客厅（导入前请删除本行）"])
+
+    ws7 = wb.create_sheet("分类")
+    ws7.append(["分类名称"])
+    ws7.append(["照明（导入前请删除本行）"])
 
     ws4 = wb.create_sheet("填写说明")
     for line in [
@@ -910,6 +1021,8 @@ def build_template() -> bytes:
         "10. 「商家」「订单号」是选填的：填了方便对账和售后，留空不影响任何金额计算。",
         "11. 「额外费用」页记运费、安装费这类钱：它们不掺进物料的金额合计，"
         "在总览里单独汇总。有了这页，运费不用再摊进单价。",
+        "12. 「分组」「分类」两页列出清单里的全部名字（含暂时没有物料的）："
+        "想在导入时把某个空分组也建出来，就填在这里。",
     ]:
         ws4.append([line])
 

@@ -312,38 +312,38 @@ async function save() {
 
       <el-divider content-position="left">采购记录（每笔付款一行，可多笔）</el-divider>
       <div class="table-wrap">
-        <el-table :data="form.records" size="small" style="min-width: 1030px">
-          <el-table-column label="实付数量" width="100">
+        <el-table :data="form.records" size="small" style="min-width: 950px">
+          <el-table-column label="实付数量" width="86">
             <template #default="{ row }">
               <el-input-number v-model="row.qty" :min="0" size="small" controls-position="right"
                                style="width: 100%" />
             </template>
           </el-table-column>
-          <el-table-column label="实付金额" width="110">
+          <el-table-column label="实付金额" width="94">
             <template #default="{ row }">
               <el-input-number v-model="row.amount" :min="0" :precision="2" size="small"
                                controls-position="right" style="width: 100%" />
             </template>
           </el-table-column>
-          <el-table-column label="实付单价" width="90" align="right">
+          <el-table-column label="实付单价" width="80" align="right">
             <template #default="{ row }">
               <span class="auto-price">{{ row.qty > 0 && row.amount ? money(Math.round(row.amount / row.qty * 100) / 100) : '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="日期" width="150">
+          <el-table-column label="日期" width="132">
             <template #default="{ row }">
               <el-date-picker v-model="row.date" type="date" value-format="YYYY-MM-DD"
                               placeholder="选择日期" size="small" style="width:100%" />
             </template>
           </el-table-column>
           <!-- 什么时候记的（服务端盖的时间戳，只读）；悬停能看到完整时间 -->
-          <el-table-column label="记录于" width="96">
+          <el-table-column label="记录于" width="84">
             <template #default="{ row }">
               <span class="rec-stamp" :title="stampTitle(row)">{{ shortStamp(row.created_at) }}</span>
             </template>
           </el-table-column>
           <!-- 涉及分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 -->
-          <el-table-column label="涉及分组" width="186">
+          <el-table-column label="涉及分组" width="150">
             <template #default="{ row }">
               <el-select v-model="row.room_ids" multiple collapse-tags size="small"
                          placeholder="不指定" style="width: 100%">
@@ -352,17 +352,17 @@ async function save() {
               </el-select>
             </template>
           </el-table-column>
-          <el-table-column label="商家" width="100">
+          <el-table-column label="商家" width="84">
             <template #default="{ row }">
               <el-input v-model="row.vendor" size="small" placeholder="如 京东" />
             </template>
           </el-table-column>
-          <el-table-column label="订单号" width="126">
+          <el-table-column label="订单号" width="104">
             <template #default="{ row }">
               <el-input v-model="row.order_no" size="small" placeholder="选填" />
             </template>
           </el-table-column>
-          <el-table-column label="备注" min-width="110">
+          <el-table-column label="备注" min-width="90">
             <template #default="{ row }">
               <el-input v-model="row.note" size="small" placeholder="如 定金/尾款" />
             </template>
@@ -386,7 +386,7 @@ async function save() {
       <el-divider content-position="left">按分组分配（选填，总量以分配合计为准）</el-divider>
       <div class="table-wrap">
         <el-table :data="form.allocations" size="small" style="min-width: 560px">
-          <el-table-column label="分组" width="140">
+          <el-table-column label="分组" width="132">
             <template #default="{ row }">
               <el-select v-model="row.room_id" style="width: 100%">
                 <el-option v-for="r in rooms" :key="r.id" :label="r.name" :value="r.id"
@@ -435,6 +435,9 @@ async function save() {
 </template>
 
 <style scoped>
+/* 这两张表列多，窄屏上可能塞不下：留个横向滚动兜底，
+   不然右边几列会被弹窗直接裁掉、连滚都滚不到 */
+.table-wrap { overflow-x: auto; }
 .price-summary {
   display: flex;
   align-items: center;

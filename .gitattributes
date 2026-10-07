@@ -9,3 +9,5 @@
 *.png binary
 *.jpg binary
 *.ico binary
+# 安卓签名密钥（让 git 别做换行符转换）
+*.jks binary

@@ -55,11 +55,25 @@ jobs:
             type=sha,format=short
             type=ref,event=tag
 
+      # 构建时间戳给「检查更新」用：网页拿它跟 GitHub 上最新构建的时间比，
+      # 判断这台服务器该不该 docker compose pull
+      - name: 记下构建时间
+        id: stamp
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # 版本号统一在仓库根的 VERSION 文件里，安卓端也读它，三端一致
+      - name: 读版本号
+        id: ver
+        run: echo "v=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
+          build-args: |
+            RENOVATION_VERSION=${{ steps.ver.outputs.v }}
+            RENOVATION_BUILT_AT=${{ steps.stamp.outputs.at }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

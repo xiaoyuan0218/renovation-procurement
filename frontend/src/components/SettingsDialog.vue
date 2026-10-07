@@ -6,7 +6,12 @@ import { PAGE_SIZE, pagedSlice } from '../paging'
 import MiniPager from './MiniPager.vue'
 import { auth, changePassword, loadAuthState } from '../auth'
 import { deleteList, lists, updateList } from '../lists'
+import { donateEnabled, setDonateEnabled } from '../donate'
+import { openGuide } from '../guide'
+import { openHelp } from '../help'
 import NewListDialog from './NewListDialog.vue'
+import DonateCodes from './DonateCodes.vue'
+import ServerPanel from './ServerPanel.vue'
 
 const visible = defineModel({ type: Boolean, default: false })
 const emit = defineEmits(['imported', 'switched'])
@@ -39,6 +44,7 @@ watch(visible, (open) => {
     loadTrash()
     loadApiKeys()
     loadLogs()
+    loadVersion()
   }
 })
 
@@ -315,6 +321,66 @@ const pagedRooms = pagedSlice(rooms, roomPage)
 const pagedCategories = pagedSlice(categories, categoryPage)
 const pagedTrash = pagedSlice(trash, trashPage)
 // 密钥列表的分页跟着 apiKeys 一起声明（它在下面才定义，不能提前引用）
+
+// ---------- 关于 ----------
+//
+// 版本信息来自后端（建镜像时 CI 注入的构建时间）。检查更新直接问 GitHub：
+// 滚动 release 的 tag 永远是 latest，比不了版本号，就比构建时间 —— 远端那批
+// 资产的更新时间比本机新，就说明该 pull 了。
+
+const version = ref({ version: '', built_at: '', repo: '' })
+const checking = ref(false)
+const updateState = ref('')   // '' | 'latest' | 'newer' | 'error'
+const updateInfo = ref('')
+
+/** GitHub 给的是 UTC，转成本地时间再看 */
+function localTime(s) {
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return s
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+    + `${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+async function loadVersion() {
+  try {
+    version.value = await api.get('/api/version')
+  } catch { /* 拿不到就显示未知，不影响别的功能 */ }
+}
+
+async function checkUpdate() {
+  checking.value = true
+  updateState.value = ''
+  updateInfo.value = ''
+  try {
+    const repo = version.value.repo || 'xiaoyuan0218/renovation-procurement'
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/releases/tags/latest`)
+    if (!res.ok) throw new Error(`GitHub 返回 ${res.status}`)
+    const data = await res.json()
+    const stamps = (data.assets || []).map((a) => a.updated_at).filter(Boolean).sort()
+    const remote = stamps[stamps.length - 1] || data.published_at
+    const local = version.value.built_at
+    if (!remote) throw new Error('读不到远端的构建时间')
+    if (!local) {
+      updateState.value = 'latest'
+      updateInfo.value = `本地是开发版（没有构建时间）。GitHub 上最新构建于 ${localTime(remote)}`
+    } else if (new Date(remote) > new Date(local)) {
+      updateState.value = 'newer'
+      updateInfo.value = `有新版本：GitHub 上 ${localTime(remote)} 的构建比本机`
+        + `（${localTime(local)}）新。在服务器上跑 docker compose pull && `
+        + 'docker compose up -d 就能升级'
+    } else {
+      updateState.value = 'latest'
+      updateInfo.value = `已是最新（本机构建于 ${localTime(local)}）`
+    }
+  } catch (e) {
+    updateState.value = 'error'
+    updateInfo.value = `检查失败：${e.message} —— 浏览器要能访问 GitHub 才查得到`
+  } finally {
+    checking.value = false
+  }
+}
 
 /** 新增一条后跳到最后一页：否则刚加的东西藏在下一页，看着像没加成功 */
 function gotoLast(count, pageRef) {
@@ -789,6 +855,50 @@ async function undoLog(row) {
           <span class="hint">回退仅限最近一次操作</span>
         </div>
       </el-tab-pane>
+
+      <!-- 连自己的服务端：同步之后本地内容会被重建，通知外层整体刷新 -->
+      <el-tab-pane label="服务器">
+        <ServerPanel @synced="emit('imported')" />
+      </el-tab-pane>
+
+      <el-tab-pane label="关于">
+        <div class="about-block">
+          <div class="about-line">
+            <span class="about-label">当前版本</span>
+            <span class="about-value">{{ version.version || '未知' }}</span>
+          </div>
+          <div class="about-line">
+            <span class="about-label">构建时间</span>
+            <span class="about-value">
+              {{ version.built_at ? localTime(version.built_at) : '本地开发版（没有构建时间）' }}
+            </span>
+          </div>
+          <div class="add-row">
+            <el-button size="small" :loading="checking" @click="checkUpdate">
+              检查更新
+            </el-button>
+            <el-button size="small" @click="openGuide">再看一次新手引导</el-button>
+            <el-button size="small" @click="openHelp">使用说明</el-button>
+          </div>
+          <el-alert v-if="updateState" :closable="false" class="mt12"
+                    :type="updateState === 'newer' ? 'warning'
+                           : (updateState === 'error' ? 'error' : 'success')"
+                    :title="updateInfo" />
+
+          <el-divider />
+
+          <div class="about-line">
+            <span class="about-label">打赏入口</span>
+            <el-switch :model-value="donateEnabled" size="small"
+                       @change="setDonateEnabled" />
+            <span class="hint">右下角那颗小圆钮；开着时每次打开都会弹一次</span>
+          </div>
+          <div class="donate-preview">
+            <DonateCodes />
+          </div>
+          <p class="hint">这套东西是自部署的，数据都在你自己的机器上</p>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog v-model="showKeyVisible" title="密钥已生成" width="520px"
@@ -905,6 +1015,12 @@ async function undoLog(row) {
 .doc-link { text-decoration: none; }
 .doc-link:hover { color: var(--ios-blue); }
 .fail-tag { margin-left: 6px; }
+.about-block { display: flex; flex-direction: column; }
+.donate-preview { max-width: 300px; margin: 12px 0 4px; }
+.about-line { display: flex; gap: 10px; padding: 6px 0; font-size: 13px; }
+.about-label { width: 72px; flex: none; color: var(--ios-label-2); }
+.about-value { color: var(--ios-label); }
+
 .log-foot {
   display: flex;
   align-items: center;

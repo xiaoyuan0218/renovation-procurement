@@ -114,7 +114,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat > /tmp/notes.md <<'EOF'
+          # 版本号写在说明最前面：安卓端「检查更新」就是读它跟自己比
+          VERSION=$(cat VERSION)
+          printf '**版本 %s**\n\n' "$VERSION" > /tmp/notes.md
+          cat >> /tmp/notes.md <<'EOF'
           手机点链接直接下载安装，不用登录：
 
           **网络版**（连服务器，数据存在服务器上）
