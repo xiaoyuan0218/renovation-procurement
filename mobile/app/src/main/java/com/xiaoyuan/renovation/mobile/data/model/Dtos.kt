@@ -52,6 +52,8 @@ data class RecordDto(
     @SerialName("item_id") val itemId: Int = 0,
     val qty: Double = 0.0,
     val amount: Double = 0.0,
+    /** 定金：钱先付、货没到（与后端 RecordOut 同名同义） */
+    @SerialName("is_deposit") val isDeposit: Boolean = false,
     @SerialName("unit_price") val unitPrice: Double? = null,
     val date: String = "",
     val note: String = "",
@@ -115,6 +117,8 @@ data class AllocInDto(
 data class RecordInDto(
     val qty: Double = 0.0,
     val amount: Double = 0.0,
+    /** 定金：钱先付、货没到（与后端 RecordIn 同名同义） */
+    @SerialName("is_deposit") val isDeposit: Boolean = false,
     val date: String = "",
     val note: String = "",
     val vendor: String = "",
@@ -126,6 +130,7 @@ data class RecordInDto(
 data class RecordPatchDto(
     val qty: Double? = null,
     val amount: Double? = null,
+    @SerialName("is_deposit") val isDeposit: Boolean? = null,
     val date: String? = null,
     val note: String? = null,
     val vendor: String? = null,
@@ -240,8 +245,9 @@ data class TotalsDto(
 ) {
     fun countOf(status: String): Int = statusCount[status] ?: 0
 
-    /** 未买齐 = 未买 + 部分已买 */
-    val pendingCount: Int get() = countOf(STATUS_UNBOUGHT) + countOf(STATUS_PARTIAL)
+    /** 未买齐 = 未买 + 已付定 + 部分已买 */
+    val pendingCount: Int get() = countOf(STATUS_UNBOUGHT) + countOf(STATUS_PARTIAL) +
+        countOf(STATUS_DEPOSIT)
 
     /** 已付占预算（原价合计）比例，0..1 */
     val paidRatioOfList: Float
@@ -380,12 +386,14 @@ data class HealthDto(val status: String = "")
 
 const val STATUS_DONE = "done"
 const val STATUS_PARTIAL = "partial"
+const val STATUS_DEPOSIT = "deposit"
 const val STATUS_UNBOUGHT = "unbought"
 const val STATUS_NONE = "none"
 
 fun statusLabel(status: String): String = when (status) {
     STATUS_DONE -> "已买完"
     STATUS_PARTIAL -> "部分已买"
+    STATUS_DEPOSIT -> "已付定"
     STATUS_UNBOUGHT -> "未买"
     else -> "无需采购"
 }

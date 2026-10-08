@@ -147,7 +147,7 @@ object Merger {
                 .map { AllocRow(it.roomId, it.qty, it.priceOverride, it.note) }
                 .sortedBy { it.toString() },
             records = item.records
-                .map { RecordRow(it.qty, it.amount, it.date, it.note, it.vendor, it.orderNo, it.roomIds.sorted()) }
+                .map { RecordRow(it.qty, it.amount, it.isDeposit, it.date, it.note, it.vendor, it.orderNo, it.roomIds.sorted()) }
                 .sortedBy { it.toString() },
         )
 
@@ -171,6 +171,7 @@ object Merger {
                     RecordRow(
                         qty = rec.qty,
                         amount = rec.amount,
+                        isDeposit = rec.isDeposit,
                         date = rec.date,
                         note = rec.note,
                         vendor = rec.vendor,
@@ -234,6 +235,7 @@ object Merger {
                     SyncRecord(
                         qty = r.qty,
                         amount = r.amount,
+                        isDeposit = r.isDeposit,
                         date = r.date,
                         note = r.note,
                         vendor = r.vendor,
@@ -379,6 +381,7 @@ object Merger {
                     SyncRecord(
                         qty = r.qty,
                         amount = r.amount,
+                        isDeposit = r.isDeposit,
                         date = r.date,
                         note = r.note,
                         vendor = r.vendor,
@@ -483,6 +486,7 @@ object Merger {
      */
     private fun sameRecord(original: SyncRecord, row: RecordRow): Boolean =
         original.qty == row.qty && original.amount == row.amount &&
+            original.isDeposit == row.isDeposit &&
             original.date == row.date && original.note == row.note &&
             original.vendor == row.vendor && original.orderNo == row.orderNo
 
@@ -614,6 +618,7 @@ object Merger {
     private data class RecordRow(
         val qty: Double,
         val amount: Double,
+        val isDeposit: Boolean,
         val date: String,
         val note: String,
         val vendor: String,

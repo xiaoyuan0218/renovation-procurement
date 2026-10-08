@@ -2,6 +2,7 @@ package com.xiaoyuan.renovation.mobile.domain
 
 import com.xiaoyuan.renovation.mobile.data.model.AllocInDto
 import com.xiaoyuan.renovation.mobile.data.model.RecordInDto
+import com.xiaoyuan.renovation.mobile.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_NONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_PARTIAL
@@ -37,22 +38,31 @@ object Compute {
     fun discountTotal(totalQty: Double, price: Double, discountPrice: Double?): Double =
         r2(totalQty * (discountPrice ?: price))
 
-    fun paidQty(records: List<RecordInDto>): Double = r2(records.sumOf { it.qty })
+    /** 已到货数量：定金不算（钱先付、货没到）。 */
+    fun paidQty(records: List<RecordInDto>): Double =
+        r2(records.filter { !it.isDeposit }.sumOf { it.qty })
 
     fun paidAmount(records: List<RecordInDto>): Double = r2(records.sumOf { it.amount })
 
+    /** 已付定金合计：抵扣未付用。 */
+    fun depositPaid(records: List<RecordInDto>): Double =
+        r2(records.filter { it.isDeposit }.sumOf { it.amount })
+
     fun unpaidQty(totalQty: Double, paidQty: Double): Double = r2(max(0.0, totalQty - paidQty))
 
-    fun unpaidAmount(totalQty: Double, paidQty: Double, price: Double): Double =
-        r2(unpaidQty(totalQty, paidQty) * price)
+    /** 未付 = 未到货部分按单价算的钱 − 已付定金（不足 0 按 0）。 */
+    fun unpaidAmount(totalQty: Double, paidQty: Double, price: Double,
+                     deposit: Double = 0.0): Double =
+        r2(max(0.0, unpaidQty(totalQty, paidQty) * price - deposit))
 
     fun paidUnitPrice(paidQty: Double, paidAmount: Double): Double? =
         if (paidQty > 0 && paidAmount > 0) r2(paidAmount / paidQty) else null
 
-    fun status(totalQty: Double, paidQty: Double): String = when {
+    fun status(totalQty: Double, paidQty: Double, deposit: Double = 0.0): String = when {
         totalQty <= 0 -> STATUS_NONE
         paidQty >= totalQty - 1e-9 -> STATUS_DONE
         paidQty > 0 -> STATUS_PARTIAL
+        deposit > 0 -> STATUS_DEPOSIT
         else -> STATUS_UNBOUGHT
     }
 }

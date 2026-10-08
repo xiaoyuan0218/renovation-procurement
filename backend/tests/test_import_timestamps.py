@@ -7,6 +7,7 @@
 """
 
 import io
+import re
 from datetime import datetime
 
 import openpyxl
@@ -86,17 +87,41 @@ def test_template_keeps_the_same_columns(db, seeded):
 
 
 def test_export_carries_timestamps(db, seeded):
-    """导出要带上两个时间，格式与接口一致（UTC、YYYY-MM-DD HH:MM:SS）。"""
+    """导出带上两个时间：写的是本地时间（后面跟时区偏移量），不是 UTC。
+
+    用户在 Excel 里对账，看到的要是自己的钟；服务器容器常跑在 UTC 上，直接写
+    UTC 会差一整圈。
+    """
     data = excel_io.export_xlsx(db, seeded["list_id"])
     _, items = _cells(data, "物料汇总")
-    assert items[0]["添加时间"] == "2026-03-04 05:06:07"
-    assert items[0]["修改时间"] == "2026-04-05 06:07:08"
+    raw = items[0]["添加时间"]
+    assert re.search(r"[+-]\d{2}:\d{2}$", raw), f"应带时区偏移量：{raw}"
+    # 读回来是同一时刻（本机时区可能是任意值，所以比时刻而不是比字符串）
+    assert excel_io._parse_stamp(raw) == seeded["made"]
+    assert excel_io._parse_stamp(items[0]["修改时间"]) == seeded["changed"]
 
     _, records = _cells(data, "采购记录")
-    assert records[0]["添加时间"] == "2026-03-04 05:06:07"
+    assert excel_io._parse_stamp(records[0]["添加时间"]) == seeded["made"]
 
     _, expenses = _cells(data, "额外费用")
-    assert expenses[0]["添加时间"] == "2026-03-04 05:06:07"
+    assert excel_io._parse_stamp(expenses[0]["添加时间"]) == seeded["made"]
+
+
+def test_legacy_timestamp_without_offset_is_read_as_utc(db, seeded):
+    """老文件的时间列不带偏移量 —— 必须仍按 UTC 读，否则历史时间会整体平移。"""
+    data = excel_io.export_xlsx(db, seeded["list_id"])
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    ws = wb["物料汇总"]
+    header = [c.value for c in ws[1]]
+    ws.cell(row=2, column=header.index("添加时间") + 1, value="2026-03-04 05:06:07")
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    excel_io.import_template(db, buf.getvalue(), mode="replace",
+                             list_id=seeded["list_id"])
+    db.expire_all()
+    item = db.query(Item).filter(Item.list_id == seeded["list_id"]).one()
+    assert item.created_at == datetime(2026, 3, 4, 5, 6, 7)
 
 
 def test_export_reimport_keeps_timestamps(db, seeded):

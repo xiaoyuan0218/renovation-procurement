@@ -158,12 +158,12 @@ function renderCharts() {
     }],
   })
 
-  // 3. 采购进度环形（按项数三态：已买完/部分已买/未买）
-  const sc = t.status_count || { done: 0, partial: 0, unbought: 0 }
+  // 3. 采购进度环形（按项数四态：已买完/部分已买/已付定/未买）
+  const sc = t.status_count || { done: 0, partial: 0, deposit: 0, unbought: 0 }
   makeChart(donutStatusEl.value, {
     tooltip: { trigger: 'item', valueFormatter: (v) => `${v} 项` },
     legend: { bottom: 0, left: 'center', itemWidth: 14, itemHeight: 10, textStyle: { fontSize: 12, color: '#3c3c43' } },
-    color: ['#0a84ff', '#ff9f0a', '#8e8e93'],
+    color: ['#0a84ff', '#ff9f0a', '#ffd60a', '#8e8e93'],
     title: {
       text: `${sc.done}/${t.item_count}`, subtext: '已买完（项）', left: 'center', top: '36%',
       textStyle: { fontSize: 20, fontWeight: 700, color: '#1c1c1e' },
@@ -176,6 +176,8 @@ function renderCharts() {
       data: [
         { name: '已买完', value: sc.done },
         { name: '部分已买', value: sc.partial },
+        // 已付定单列一色：钱付了货没到，和"什么都没发生"得区分开
+        { name: '已付定', value: sc.deposit || 0 },
         { name: '未买', value: sc.unbought + (sc.none || 0) },
       ],
     }],
@@ -289,7 +291,7 @@ function renderCharts() {
             <span class="stat-label">预算原价合计</span>
           </div>
           <div class="stat-value">￥{{ money(summary.totals.list_total) }}</div>
-          <div class="stat-sub">{{ summary.totals.item_count }} 项物料 · {{ summary.totals.status_count.unbought + summary.totals.status_count.partial }} 项未买齐</div>
+          <div class="stat-sub">{{ summary.totals.item_count }} 项物料 · {{ summary.totals.status_count.unbought + summary.totals.status_count.partial + (summary.totals.status_count.deposit || 0) }} 项未买齐</div>
         </el-card>
       </el-col>
       <el-col :span="6">
@@ -301,7 +303,7 @@ function renderCharts() {
             <span class="stat-label">日常价合计</span>
           </div>
           <div class="stat-value">￥{{ money(summary.totals.discount_total) }}</div>
-          <div class="stat-sub">已买完 {{ summary.totals.status_count.done }} 项 · 部分已买 {{ summary.totals.status_count.partial }} 项</div>
+          <div class="stat-sub">已买完 {{ summary.totals.status_count.done }} 项 · 部分已买 {{ summary.totals.status_count.partial }} 项<template v-if="summary.totals.status_count.deposit"> · 已付定 {{ summary.totals.status_count.deposit }} 项</template></div>
         </el-card>
       </el-col>
       <el-col :span="6">
@@ -438,8 +440,11 @@ function renderCharts() {
               <el-table-column prop="name" label="物料" min-width="150" />
               <el-table-column label="状态" width="84">
                 <template #default="{ row }">
-                  <el-tag size="small" :type="row.status === 'partial' ? 'primary' : 'info'" effect="light">
-                    {{ row.status === 'partial' ? '部分' : '未买' }}
+                  <el-tag size="small" effect="light"
+                          :type="row.status === 'partial' ? 'primary'
+                            : (row.status === 'deposit' ? 'warning' : 'info')">
+                    {{ row.status === 'partial' ? '部分'
+                      : (row.status === 'deposit' ? '已付定' : '未买') }}
                   </el-tag>
                 </template>
               </el-table-column>

@@ -256,6 +256,7 @@ class LocalRepository(
                 record.copy(
                     qty = body.qty ?: record.qty,
                     amount = body.amount ?: record.amount,
+                    isDeposit = body.isDeposit ?: record.isDeposit,
                     date = if (body.date != null) LocalCompute.cleanDate(body.date) else record.date,
                     note = body.note ?: record.note,
                     vendor = body.vendor ?: record.vendor,
@@ -551,6 +552,7 @@ class LocalRepository(
                 itemId = itemId,
                 qty = body.qty,
                 amount = body.amount,
+                isDeposit = body.isDeposit,
                 date = LocalCompute.cleanDate(body.date),
                 note = body.note,
                 vendor = body.vendor,

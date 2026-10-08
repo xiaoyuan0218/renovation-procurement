@@ -6,12 +6,14 @@ import androidx.test.core.app.ApplicationProvider
 import com.xiaoyuan.renovation.mobile.data.db.AppDatabase
 import com.xiaoyuan.renovation.mobile.data.db.ItemListEntity
 import com.xiaoyuan.renovation.mobile.data.db.STAMP
+import com.xiaoyuan.renovation.mobile.data.db.normalizeStamp
 import com.xiaoyuan.renovation.mobile.data.db.parseStamp
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -87,16 +89,38 @@ class TimestampRoundTripTest {
     }
 
     @Test
-    fun `导出的表里带着时间，读回来还是一样`() = runBlocking {
+    fun `导出的表里带着时间，读回来还是同一时刻`() = runBlocking {
         SheetMapping.fromSheets(db, listId, sheetsWithTime(), mode = "merge")
 
-        // 导出 → 读回来，时间列必须还在且值不变（导出这一环不能把它漏掉）
+        // 导出写的是**本地时间带偏移量**（用户在表格里看到的是自己的钟），
+        // 但按偏移量换回来必须是同一时刻 —— 否则来回一趟时间就漂了
         val rows = SheetMapping.toSheets(db, listId)
             .toMap()["物料汇总"]!!
         val header = rows[0].map { it.toString() }
         val row = rows[1].map { it.toString() }
-        assertEquals(created, row[header.indexOf("添加时间")])
-        assertEquals(updated, row[header.indexOf("修改时间")])
+        val exportedCreated = row[header.indexOf("添加时间")]
+        val exportedUpdated = row[header.indexOf("修改时间")]
+        assertTrue("导出的时间要带时区偏移量：$exportedCreated",
+            Regex("[+-]\\d{2}:\\d{2}$").containsMatchIn(exportedCreated))
+        assertEquals(created, normalizeStamp(exportedCreated))
+        assertEquals(updated, normalizeStamp(exportedUpdated))
+    }
+
+    @Test
+    fun `带偏移量的时间按偏移量换回 UTC，不是当成本地时间`() = runBlocking {
+        val table = mapOf(
+            "物料汇总" to listOf(
+                listOf("物料ID", "物料名称", "单位", "数量", "单价", "添加时间", "修改时间"),
+                listOf("1", "筒灯", "个", "6", "30.0",
+                    "2026-03-04 13:06:07+08:00", "2026-03-04 05:06:07+00:00"),
+            ),
+        )
+        SheetMapping.fromSheets(db, listId, table, mode = "merge")
+
+        val item = db.items().all(listId).single()
+        // +08:00 的 13:06:07 就是 UTC 的 05:06:07，两个写法落到同一时刻
+        assertEquals(LocalDateTime.of(2026, 3, 4, 5, 6, 7), parseStamp(item.createdAt))
+        assertEquals(parseStamp(item.createdAt), parseStamp(item.updatedAt))
     }
 
     @Test

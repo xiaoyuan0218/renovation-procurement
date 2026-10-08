@@ -13,7 +13,7 @@
 import io
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from openpyxl import Workbook, load_workbook
 
@@ -31,35 +31,52 @@ ITEM_HEADER = ["物料ID", "类目", "物料名称", "品牌", "型号", "单位
                "日常价未付", "实际优惠", "日常价优惠", "已购", "备注",
                "添加时间", "修改时间"]
 ALLOC_HEADER = ["物料ID", "物料名称", "房间", "数量", "单价", "备注"]
-RECORD_HEADER = ["物料ID", "物料名称", "实付数量", "实付金额", "付款日期", "分组",
+RECORD_HEADER = ["物料ID", "物料名称", "实付数量", "实付金额", "定金", "付款日期", "分组",
                  "商家", "订单号", "备注", "添加时间", "修改时间"]
 EXPENSE_HEADER = ["类型", "金额", "日期", "商家", "订单号", "备注",
                   "添加时间", "修改时间"]
 
 
 def _stamp_out(value) -> str:
-    """库里存的时间 → 表格里的写法（`YYYY-MM-DD HH:MM:SS`，UTC）。
+    """库里存的时间（UTC）→ 表格里的写法：**本地时间 + 时区偏移量**。
 
-    与接口、手机端同一把尺子：全端都存 UTC，显示时才各自转本地。
+    为什么不是直接写 UTC：用户在 Excel 里对账，看到的得是自己的钟。服务器（NAS
+    容器）常跑在 UTC 上，直接写 UTC 会与用户的钟差一整圈 —— 就像界面上的日志
+    时间那样，看着像"刚刚操作的事记成了早上七点半"。
+
+    为什么带偏移量：这样导入时能精确换回 UTC，换台机器、在别的时区导入都不会
+    平移。老文件里不带偏移量的值仍按 UTC 读（见 `_parse_stamp`）。
     """
-    return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
+    if not value:
+        return ""
+    local = value.replace(tzinfo=timezone.utc).astimezone()
+    text = local.strftime("%Y-%m-%d %H:%M:%S")
+    if local.microsecond:                # 手机端的时间戳带微秒，原样保留
+        text += f".{local.microsecond:06d}"
+    offset = local.strftime("%z")        # +0800
+    return f"{text}{offset[:3]}:{offset[3:]}" if offset else text
 
 
 def _parse_stamp(value):
     """表格里的时间 → datetime（UTC）。缺失或认不出来都返回 None。
 
+    认三种写法：
+      - 带偏移量（本系统导出的 `2026-10-08 15:30:42+08:00`）→ 精确换回 UTC；
+      - 不带偏移量（老文件、手填）→ **按 UTC 读**：老文件里存的就是 UTC，
+        按本地读会把历史时间整体平移一个时区；
+      - 带微秒的（手机端导出）同样认，微秒一并保留，"同一时刻"才不会被改写。
+
     宁可不写也不拿"现在"冒充：这列是同步判"谁改得更近"的依据，编一个时间出来
     会让较旧的改动被当成新的，反把对方的更新盖掉。认不出来就交给数据库默认值。
-
-    两种写法都要认：电脑端导出的是 `YYYY-MM-DD HH:MM:SS`，手机端带微秒
-    （`...05:06:07.123456`）—— 微秒一并保留，"同一时刻"才不会因为精度被改写。
     """
     if value is None:
         return None
     if isinstance(value, datetime):
+        # Excel 的日期单元格是 naive 的，按老规矩当 UTC
         return value.replace(tzinfo=None)
     text = str(value).strip().replace("T", " ")
-    m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.(\d{1,6})\d*)?$", text)
+    m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.(\d{1,6})\d*)?"
+                 r"(Z|[+-]\d{2}:?\d{2})?$", text)
     if not m:
         return None
     try:
@@ -68,7 +85,14 @@ def _parse_stamp(value):
         return None
     if m.group(2):
         parsed = parsed.replace(microsecond=int(m.group(2).ljust(6, "0")))
-    return parsed
+    zone = m.group(3)
+    if not zone or zone == "Z":
+        return parsed                    # 没写偏移量的按 UTC 算
+    sign = 1 if zone[0] == "+" else -1
+    digits = zone[1:].replace(":", "")
+    shift = timedelta(hours=int(digits[:2]), minutes=int(digits[2:4]))
+    return parsed - sign * shift         # 本地时刻 → UTC
+
 
 
 def _v(ws, row, col):
@@ -447,7 +471,7 @@ def _parse_flat(path_or_bytes):
     if ws_rec is not None:
         # 商家 / 订单号是后加的列：老文件里没有，_vo 会安全地返回 None
         rcols = {t: col_of(ws_rec, t) for t in
-                 ("物料ID", "物料名称", "实付数量", "实付金额", "付款日期",
+                 ("物料ID", "物料名称", "实付数量", "实付金额", "定金", "付款日期",
                   "分组", "商家", "订单号", "备注", "添加时间", "修改时间")}
         for r in range(2, ws_rec.max_row + 1):
             name = _txt(_v(ws_rec, r, rcols["物料名称"]))
@@ -466,6 +490,9 @@ def _parse_flat(path_or_bytes):
                 "item_name": name,
                 "qty": qty,
                 "amount": amount,
+                # 定金：钱先付、货没到。老文件没有这一列 → 都不是定金（老行为）
+                "is_deposit": _txt(_vo(ws_rec, r, rcols.get("定金")))
+                in ("是", "TRUE", "True", "1"),
                 # Excel 的日期单元格读出来是 datetime，直接 str 会变成
                 # "2026-09-14 00:00:00" 这种脏值，这里统一成 YYYY-MM-DD
                 "date": dates.for_read(_vo(ws_rec, r, rcols.get("付款日期"))),
@@ -882,6 +909,7 @@ def _apply_flat(db, parsed, mode, report, list_id):
         ]
         record = PurchaseRecord(
             qty=r["qty"] or 0, amount=r["amount"] or 0,
+            is_deposit=bool(r.get("is_deposit")),
             date=r["date"] or "", note=r["note"] or "",
             vendor=r.get("vendor") or "", order_no=r.get("order_no") or "",
             rooms=record_rooms)
@@ -1015,7 +1043,8 @@ def export_xlsx(db, list_id=None) -> bytes:
             # 涉及多个分组时用顿号连起来，导入时按分隔符拆回
             room_names = "、".join(rooms[rr.room_id] for rr in r.rooms
                                    if rr.room_id in rooms)
-            ws3.append([i.id, i.name, r.qty or 0, r.amount or 0, r.date or "",
+            ws3.append([i.id, i.name, r.qty or 0, r.amount or 0,
+                        "是" if r.is_deposit else "否", r.date or "",
                         room_names, r.vendor or "", r.order_no or "",
                         r.note or "",
                         _stamp_out(r.created_at), _stamp_out(r.updated_at)])
@@ -1074,7 +1103,7 @@ def build_template() -> bytes:
 
     ws3 = wb.create_sheet("采购记录")
     ws3.append(RECORD_HEADER)
-    ws3.append([None, "示例网线（导入前请删除本行）", 150, 661.2, "2026-09-14",
+    ws3.append([None, "示例网线（导入前请删除本行）", 150, 661.2, "否", "2026-09-14",
                 "客厅", "京东", "JD20260914001",
                 "一笔可覆盖多个物料，分批买就分多行", None, None])
 
@@ -1108,7 +1137,11 @@ def build_template() -> bytes:
         "在总览里单独汇总。有了这页，运费不用再摊进单价。",
         "12. 「分组」「分类」两页列出清单里的全部名字（含暂时没有物料的）："
         "想在导入时把某个空分组也建出来，就填在这里。",
-        "13. 「添加时间」「修改时间」由系统填写（UTC），导出时一并带出、导入时照原样写回，"
+        "13. 「采购记录」页的「定金」列：填「是」表示这笔是定金 —— 钱先付了、货还没到，"
+        "所以它只算进已付金额、不推进「已买数量」，状态不会变成买完；等货到了再记一笔"
+        "尾款（定金列填「否」）就结清了。定金的钱会从「未付」里扣掉。留空按「否」算。",
+        "14. 「添加时间」「修改时间」由系统填写，写的是**本地时间**（后面带着时区偏移量，"
+        "如 2026-10-08 15:30:42+08:00），导出时一并带出、导入时照原样换回去，"
         "所以导出再导入不会改动任何时间。手填无效，认不出来会忽略。",
     ]:
         ws4.append([line])

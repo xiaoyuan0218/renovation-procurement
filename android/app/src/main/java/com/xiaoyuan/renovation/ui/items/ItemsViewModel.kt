@@ -20,6 +20,7 @@ enum class StatusFilter(val label: String) {
     All("全部"),
     Pending("未买齐"),
     Unbought("未买"),
+    Deposit("已付定"),
     Partial("部分已买"),
     Done("已买完"),
 }
@@ -122,8 +123,10 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
                 val matchCategory = categoryId == null || item.categoryId == categoryId
                 val matchStatus = when (filter) {
                     StatusFilter.All -> true
-                    StatusFilter.Pending -> item.status == "unbought" || item.status == "partial"
+                    StatusFilter.Pending -> item.status == "unbought" ||
+                        item.status == "partial" || item.status == "deposit"
                     StatusFilter.Unbought -> item.status == "unbought"
+                    StatusFilter.Deposit -> item.status == "deposit"
                     StatusFilter.Partial -> item.status == "partial"
                     StatusFilter.Done -> item.status == "done"
                 }

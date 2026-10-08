@@ -23,6 +23,8 @@ data class DraftRecord(
     val key: Long,
     val qty: String = "",
     val amount: String = "",
+    /** 定金：钱先付、货还没到。只算已付金额，不推进"已到货"，并从「未付」里扣掉 */
+    val isDeposit: Boolean = false,
     val date: String = Fmt.today(),
     val note: String = "",
     val vendor: String = "",
@@ -144,6 +146,7 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
                                     key = nextKey++,
                                     qty = Fmt.qty(it.qty),
                                     amount = if (it.amount > 0) Fmt.qty(it.amount) else "",
+                                    isDeposit = it.isDeposit,
                                     date = it.date,
                                     note = it.note,
                                     vendor = it.vendor,
@@ -187,6 +190,11 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
         _form.update { form -> form.copy(records = form.records.filterNot { it.key == key }) }
     }
 
+    /** 切换某条记录的定金：定金不看数量，勾上时顺带把数量清掉。 */
+    fun toggleRecordDeposit(key: Long, deposit: Boolean) {
+        updateRecordRow(key) { it.copy(isDeposit = deposit, qty = if (deposit) "" else it.qty) }
+    }
+
     fun updateRecordRow(key: Long, transform: (DraftRecord) -> DraftRecord) {
         _form.update { form ->
             form.copy(records = form.records.map { if (it.key == key) transform(it) else it })
@@ -221,6 +229,7 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
         val discountTotal = Compute.discountTotal(totalQty, price, Fmt.parseNumber(form.discountPrice))
         val paidQty = Compute.paidQty(records)
         val paid = Compute.paidAmount(records)
+        val deposit = Compute.depositPaid(records)
         val unpaidQty = Compute.unpaidQty(totalQty, paidQty)
 
         return ItemPreview(
@@ -230,8 +239,8 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
             paidQty = paidQty,
             paid = paid,
             unpaidQty = unpaidQty,
-            unpaid = Compute.unpaidAmount(totalQty, paidQty, price),
-            status = Compute.status(totalQty, paidQty),
+            unpaid = Compute.unpaidAmount(totalQty, paidQty, price, deposit),
+            status = Compute.status(totalQty, paidQty, deposit),
             paidUnitPrice = Compute.paidUnitPrice(paidQty, paid),
         )
     }
@@ -252,8 +261,10 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
     private fun toRecordInputs(form: ItemForm): List<RecordInDto> =
         form.records.map { row ->
             RecordInDto(
-                qty = Fmt.parseNumberOrZero(row.qty),
+                // 定金不看数量：勾了就按 0 存，跟网页端一致
+                qty = if (row.isDeposit) 0.0 else Fmt.parseNumberOrZero(row.qty),
                 amount = Fmt.parseNumberOrZero(row.amount),
+                isDeposit = row.isDeposit,
                 date = row.date.trim(),
                 note = row.note.trim(),
                 vendor = row.vendor.trim(),

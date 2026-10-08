@@ -172,6 +172,7 @@ def apply_payload(db: Session, lst: ItemList, payload: dict) -> dict:
                 amount=record.get("amount") or 0, date=record.get("date") or "",
                 note=record.get("note") or "", vendor=record.get("vendor") or "",
                 order_no=record.get("order_no") or "",
+                is_deposit=bool(record.get("is_deposit")),
                 created_at=_ts_or_now(record.get("created_at")),
                 updated_at=_ts_or_now(record.get("updated_at")),
             )

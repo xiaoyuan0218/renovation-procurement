@@ -62,6 +62,8 @@ data class SyncRecord(
     val id: Int? = null,
     val qty: Double = 0.0,
     val amount: Double = 0.0,
+    /** 定金：钱先付、货没到（与后端 list_transfer 的字段同名同义） */
+    @SerialName("is_deposit") val isDeposit: Boolean = false,
     val date: String = "",
     val note: String = "",
     val vendor: String = "",

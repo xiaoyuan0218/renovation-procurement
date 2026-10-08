@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xiaoyuan.renovation.mobile.data.model.MatrixDto
 import com.xiaoyuan.renovation.mobile.data.model.MatrixItemDto
+import com.xiaoyuan.renovation.mobile.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.mobile.data.repo.ApiResult
 import com.xiaoyuan.renovation.mobile.data.repo.LocalRepository
 import com.xiaoyuan.renovation.mobile.ui.common.LoadState
@@ -106,12 +107,13 @@ class MatrixViewModel(private val repo: LocalRepository) : ViewModel() {
         }
     }
 
-    /** 只看未买齐：与网页版一致，未买 + 部分已买。 */
+    /** 只看未买齐：与网页版一致，未买 + 部分已买 + 已付定。 */
     fun filter(items: List<MatrixItemDto>, query: String, onlyPending: Boolean): List<MatrixItemDto> {
         val keyword = query.trim()
         return items.filter { item ->
             val matchKeyword = keyword.isEmpty() || item.name.contains(keyword, ignoreCase = true)
-            val matchPending = !onlyPending || item.status == "unbought" || item.status == "partial"
+            val matchPending = !onlyPending || item.status == "unbought" || item.status == "partial" ||
+                item.status == STATUS_DEPOSIT
             matchKeyword && matchPending
         }
     }

@@ -1,6 +1,7 @@
 package com.xiaoyuan.renovation.mobile.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import com.xiaoyuan.renovation.mobile.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_NONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_PARTIAL
@@ -47,10 +48,12 @@ object Ink {
     val DangerGradient = listOf(Color(0xFFE11D48), Color(0xFFFB7185))
 }
 
-/** 采购状态配色：未买=蓝、部分=金、已买完=青绿、无需采购=蓝灰。 */
+/** 采购状态配色：未买=蓝、已付定=橙、部分=金、已买完=青绿、无需采购=蓝灰。 */
 fun statusColor(status: String): Color = when (status) {
     STATUS_DONE -> Ink.Mint
     STATUS_PARTIAL -> Ink.Amber
+    // 已付定与"部分已买"同属警示系，用偏橙的一档区分"钱付了、货没到"
+    STATUS_DEPOSIT -> Color(0xFFFB923C)
     STATUS_NONE -> Ink.TextMuted
     else -> Ink.Blue
 }

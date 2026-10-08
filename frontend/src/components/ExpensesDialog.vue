@@ -20,6 +20,16 @@ const itemLabel = (i) => (i.model ? `${i.name} · ${i.model}` : i.name)
 const loading = ref(false)
 const busy = ref(false)
 
+// 费用表最多这么高（超出在表内滚，表头钉住）。宽裕时按"一页 10 条能整页看完"给
+// （10 行 × 33 + 表头 33 ≈ 363），屏幕矮了才往里滚 —— 分页器与内滚不会打架。
+const tableMaxH = ref(380)
+function calcTableHeight() {
+  const h = window.innerHeight || 800
+  tableMaxH.value = Math.max(240, Math.min(460, Math.round(h * 0.52)))
+}
+window.addEventListener('resize', calcTableHeight)
+calcTableHeight()
+
 function blank(kind = '运费') {
   return { kind, amount: null, date: '', vendor: '', order_no: '', note: '',
            item_id: null }
@@ -112,7 +122,8 @@ const total = computed(() =>
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="额外费用" width="960px" :close-on-click-modal="false">
+  <el-dialog v-model="visible" title="额外费用" width="960px"
+             :close-on-click-modal="false" class="expenses-dialog">
     <div class="hint">
       运费、安装费、辅料这类不进物料单价的支出记在这里。它们不参与「原价合计 / 日常价合计」
       的拆分，只在总览单独汇总 —— 所以不用再把运费摊进单价。
@@ -139,7 +150,7 @@ const total = computed(() =>
       <el-button type="primary" :loading="busy" @click="add">添加</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="pagedRows" size="small" max-height="380">
+    <el-table v-loading="loading" :data="pagedRows" size="small" :max-height="tableMaxH">
       <el-table-column label="类型" width="96">
         <template #default="{ row }">
           <el-select v-model="row.kind" size="small" filterable allow-create
@@ -236,4 +247,8 @@ const total = computed(() =>
   color: var(--ios-label-2);
 }
 .foot b { color: var(--ios-label); font-size: 15px; }
+/* 内容再多也不让弹窗高过屏幕：正文区自己滚，底部的合计与按钮始终看得见。
+   要挂在弹窗自己的类名上：弹窗是 teleport 到 body 的，裸写 .el-dialog__body
+   会被作用域选择器挡在外面，匹配不上。 */
+.expenses-dialog :deep(.el-dialog__body) { max-height: 78vh; overflow-y: auto; }
 </style>

@@ -75,6 +75,10 @@ def _add_missing_columns():
         if "room_id" not in rcols:
             conn.execute(text("ALTER TABLE purchase_records ADD COLUMN room_id INTEGER "
                               "REFERENCES rooms(id) ON DELETE SET NULL"))
+        # 定金标记：钱付了货没到。旧库里全是 0（都不是定金），行为与从前一致
+        if "is_deposit" not in rcols:
+            conn.execute(text("ALTER TABLE purchase_records ADD COLUMN is_deposit "
+                              "BOOLEAN NOT NULL DEFAULT 0"))
         lcols = [row[1] for row in conn.execute(text("PRAGMA table_info(lists)"))]
         if "code" not in lcols:
             conn.execute(text("ALTER TABLE lists ADD COLUMN code VARCHAR(12)"))

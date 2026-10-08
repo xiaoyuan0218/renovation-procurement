@@ -430,6 +430,7 @@
       "status_count": {
         "done": 3,
         "partial": 4,
+        "deposit": 0,
         "unbought": 1,
         "none": 1
       },

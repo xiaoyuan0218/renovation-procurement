@@ -122,9 +122,12 @@ def test_restore_brings_it_back_intact(client):
     r = client.post(f"/api/trash/{item['id']}/restore", headers=_hdr(client))
     assert r.status_code == 200, r.text
     after = client.get(f"/api/items/{item['id']}", headers=_hdr(client)).json()
-    # 除了 rev（恢复会顶高它），其余一字不差
-    assert {k: v for k, v in after.items() if k != "rev"} == \
-           {k: v for k, v in before.items() if k != "rev"}
+    # 除了 rev 与修改时间（恢复本身是一次改动，这两样本来就该往前/往上走），
+    # 其余一字不差。时间戳只比会偶发失败：删+恢复跨过整整一秒时它就变了，
+    # 那是正常行为，不是数据被改动 —— 这条测试盯的是内容，不是时间戳。
+    ignored = {"rev", "updated_at"}
+    assert {k: v for k, v in after.items() if k not in ignored} == \
+           {k: v for k, v in before.items() if k not in ignored}
     assert after["rev"] > before["rev"]
     assert client.get("/api/trash", headers=_hdr(client)).json() == []
 

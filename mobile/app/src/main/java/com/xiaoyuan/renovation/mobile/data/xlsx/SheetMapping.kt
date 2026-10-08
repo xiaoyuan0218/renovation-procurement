@@ -11,6 +11,7 @@ import com.xiaoyuan.renovation.mobile.data.db.RecordRoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.RoomEntity
 import com.xiaoyuan.renovation.mobile.data.db.nowStamp
 import com.xiaoyuan.renovation.mobile.data.db.normalizeStamp
+import com.xiaoyuan.renovation.mobile.data.db.toExportStamp
 import com.xiaoyuan.renovation.mobile.domain.LocalCompute
 
 /**
@@ -116,10 +117,10 @@ object SheetMapping {
                 LocalCompute.dailyDiscount(item, mine, bundle.records),
                 if (dto.bought) "是" else "否",
                 item.note,
-                // 时间跟着一起走：不然导出再导回来，所有「修改时间」都变成刚刚，
-                // 同步还会把每条都当成新改动推一遍
-                item.createdAt,
-                item.updatedAt,
+                // 时间跟着一起走（写成本地时间带偏移量）：不然导出再导回来，
+                // 所有「修改时间」都变成刚刚，同步还会把每条都当成新改动推一遍
+                toExportStamp(item.createdAt),
+                toExportStamp(item.updatedAt),
             )
 
             mine.forEach { alloc ->
@@ -144,14 +145,16 @@ object SheetMapping {
                     item.name,
                     record.qty,
                     record.amount,
+                    // 定金列与后端 excel_io 同位（实付金额之后）：是/否
+                    if (record.isDeposit) "是" else "否",
                     record.date,
                     // 多选用顿号连起来，导入时按分隔符拆回
                     names.joinToString("、"),
                     record.vendor,
                     record.orderNo,
                     record.note,
-                    record.createdAt,
-                    record.updatedAt,
+                    toExportStamp(record.createdAt),
+                    toExportStamp(record.updatedAt),
                 )
             }
         }
@@ -159,7 +162,7 @@ object SheetMapping {
         val expenseRows: MutableList<List<Any?>> = mutableListOf(EXPENSE_HEADERS)
         db.expenses().byList(listId).forEach { e ->
             expenseRows += listOf(e.kind, e.amount, e.date, e.vendor, e.orderNo, e.note,
-                e.createdAt, e.updatedAt)
+                toExportStamp(e.createdAt), toExportStamp(e.updatedAt))
         }
 
         // 分组与分类单独成页：上面几页里它们只以「用到的名字」出现，没有任何物料
@@ -379,11 +382,16 @@ object SheetMapping {
                 db.records().deleteRecordRoomsOfItem(itemId)
                 db.records().deleteOfItem(itemId)
             }
+            // 定金列按「是/否」认（与后端 excel_io 同规则）；老文件没有这列时读空串，按否处理
+            val isDeposit = recordTable.cell(row, "定金").trim() in
+                setOf("是", "TRUE", "True", "1")
             val id = db.records().insert(
                 PurchaseRecordEntity(
                     itemId = itemId,
-                    qty = recordTable.number(row, "实付数量") ?: 0.0,
+                    // 定金不看数量：勾了就按 0 存（与网页端一致）
+                    qty = if (isDeposit) 0.0 else (recordTable.number(row, "实付数量") ?: 0.0),
                     amount = recordTable.number(row, "实付金额") ?: 0.0,
+                    isDeposit = isDeposit,
                     date = LocalCompute.forRead(recordTable.cell(row, "付款日期")),
                     note = recordTable.cell(row, "备注"),
                     vendor = recordTable.cell(row, "商家"),

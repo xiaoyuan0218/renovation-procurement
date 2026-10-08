@@ -3,6 +3,7 @@ package com.xiaoyuan.renovation.ui.theme
 import androidx.compose.ui.graphics.Color
 import com.xiaoyuan.renovation.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.data.model.STATUS_NONE
+import com.xiaoyuan.renovation.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.data.model.STATUS_PARTIAL
 
 /** 蓝色调霓虹：深海军蓝底 + 蓝/青玻璃层，保留参考图的层次与发光质感。 */
@@ -47,10 +48,11 @@ object Ink {
     val DangerGradient = listOf(Color(0xFFE11D48), Color(0xFFFB7185))
 }
 
-/** 采购状态配色：未买=蓝、部分=金、已买完=青绿、无需采购=蓝灰。 */
+/** 采购状态配色：未买=蓝、已付定=亮黄、部分=金、已买完=青绿、无需采购=蓝灰。 */
 fun statusColor(status: String): Color = when (status) {
     STATUS_DONE -> Ink.Mint
     STATUS_PARTIAL -> Ink.Amber
+    STATUS_DEPOSIT -> Ink.Sky
     STATUS_NONE -> Ink.TextMuted
     else -> Ink.Blue
 }

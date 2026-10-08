@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         // 本地专有：与服务器的绑定关系与上次同步的基线，不进服务端 schema
         SyncBindingEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -75,6 +75,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 加了 is_deposit（定金标记）。老行全是 0（都不是定金），行为与从前一致。 */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `purchase_records` ADD COLUMN `is_deposit` " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         /** v2 加了 sync_bindings（绑定与同步基线）。老库升级时只多这一张表。 */
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -103,7 +113,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .addCallback(object : Callback() {
                     override fun onOpen(db: SupportSQLiteDatabase) {
                         // 外键靠 DDL 里的 ON DELETE 动作兜底，但删除一律走显式事务，

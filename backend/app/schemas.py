@@ -95,6 +95,8 @@ class AllocOut(BaseModel):
 class RecordIn(BaseModel):
     qty: float = 0
     amount: float = 0
+    # 定金：钱先付、货没到。数量不计入已到货（状态不会变成买完），金额照算已付
+    is_deposit: bool = False
     date: str = ""
     note: str = ""
     vendor: str = Field(default="", max_length=50)      # 商家（选填）
@@ -117,6 +119,7 @@ class RecordIn(BaseModel):
 class RecordPatchIn(BaseModel):
     qty: Optional[float] = None
     amount: Optional[float] = None
+    is_deposit: Optional[bool] = None
     date: Optional[str] = None
     note: Optional[str] = None
     vendor: Optional[str] = Field(default=None, max_length=50)
@@ -142,6 +145,7 @@ class RecordOut(Timestamped):
     item_id: int
     qty: float
     amount: float
+    is_deposit: bool = False
     unit_price: Optional[float] = None
     date: str = ""
     note: str = ""
@@ -395,6 +399,8 @@ class SyncRecordIn(SyncRowTimestamps):
     id: Optional[int] = None
     qty: float = 0
     amount: float = 0
+    # 定金：钱先付、货没到。跟着同步一起搬，否则一合并就被抹平
+    is_deposit: bool = False
     date: str = ""
     note: str = Field(default="", max_length=200)
     vendor: str = Field(default="", max_length=50)

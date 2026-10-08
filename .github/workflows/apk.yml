@@ -117,6 +117,14 @@ jobs:
           # 版本号写在说明最前面：安卓端「检查更新」就是读它跟自己比
           VERSION=$(cat VERSION)
           printf '**版本 %s**\n\n' "$VERSION" > /tmp/notes.md
+          # 把「更新记录」里这一版的内容也带上：用户在下载页就能看到这次改了什么。
+          # 没这一版的内容时留空，不报错（发版时忘了写记录也不该拦住发布）。
+          awk -v v="$VERSION" '
+            $0 ~ "^## " v { show=1; next }
+            show && /^## / { exit }
+            show { print }
+          ' CHANGELOG.md >> /tmp/notes.md || true
+          printf '\n' >> /tmp/notes.md
           cat >> /tmp/notes.md <<'EOF'
           手机点链接直接下载安装，不用登录：
 

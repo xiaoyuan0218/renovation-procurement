@@ -20,8 +20,23 @@ const form = ref(blank())
 const formRef = ref(null)
 const saving = ref(false)
 
+// 采购记录表最多这么高（超出在表内滚，表头钉住）。按屏幕高度算：大约占三分之一，
+// 剩下的留给上面的信息与汇总、下面的分配表和底部按钮 —— 记录再多也不会把
+// 「保存 / 取消」顶出屏幕。窗口大小变了要重算，所以监听 resize。
+const recordMaxH = ref(260)
+const allocMaxH = ref(200)
+function calcRecordHeight() {
+  const h = window.innerHeight || 800
+  // 采购记录占约三分之一、分配表约四分之一，两张表各自滚，弹窗整体压得住
+  recordMaxH.value = Math.max(170, Math.min(460, Math.round(h * 0.36)))
+  allocMaxH.value = Math.max(120, Math.min(340, Math.round(h * 0.26)))
+}
+window.addEventListener('resize', calcRecordHeight)
+calcRecordHeight()
+
 watch(visible, (v) => {
   if (!v) return
+  calcRecordHeight()   // 弹窗打开时按当前窗口再算一次
   if (props.item) {
     form.value = {
       ...props.item,
@@ -35,6 +50,7 @@ watch(visible, (v) => {
         qty: r.qty || 0, amount: r.amount || 0, date: r.date || '', note: r.note || '',
         vendor: r.vendor || '', order_no: r.order_no || '',
         room_ids: [...(r.room_ids || [])],
+        is_deposit: !!r.is_deposit,
         // 服务端盖的时间戳：只读展示，保存时不回传（回传由服务端自己维护）
         created_at: r.created_at || '', updated_at: r.updated_at || '',
       })),
@@ -68,10 +84,25 @@ const stampTitle = (row) => {
   return `记录于 ${toLocalStamp(row.created_at)}${updated}`
 }
 
+/** 每一笔的实付单价（金额 ÷ 数量），鼠标停在金额上才显示；定金没有数量，不显示 */
+const unitTip = (row) => {
+  const qty = Number(row.qty) || 0
+  const amount = Number(row.amount) || 0
+  if (row.is_deposit || qty <= 0 || !amount) return ''
+  return `单价 ￥${money(Math.round(amount / qty * 100) / 100)}`
+}
+
+// 到货数量：定金是"钱先付、货没到"，不能算进来 —— 否则一填定金就显示买完
 const recordsQtySum = computed(() =>
-  form.value.records.reduce((s, r) => s + (Number(r.qty) || 0), 0))
+  form.value.records.reduce(
+    (s, r) => s + (r.is_deposit ? 0 : (Number(r.qty) || 0)), 0))
+// 已付金额：定金也算付出去的钱
 const recordsAmountSum = computed(() =>
   form.value.records.reduce((s, r) => s + (Number(r.amount) || 0), 0))
+// 已付的定金：用来抵扣未付（和后端口径一致）
+const depositSum = computed(() =>
+  form.value.records.reduce(
+    (s, r) => s + (r.is_deposit ? (Number(r.amount) || 0) : 0), 0))
 const recordsPrice = computed(() => {
   const qty = recordsQtySum.value
   return qty > 0 && recordsAmountSum.value
@@ -82,7 +113,8 @@ const recordsPrice = computed(() => {
 const unpaidQty = computed(() =>
   Math.max(0, maxBoughtQty.value - recordsQtySum.value))
 const unpaidMoney = computed(() =>
-  Math.round(unpaidQty.value * (Number(form.value.price) || 0) * 100) / 100)
+  Math.round(Math.max(0, unpaidQty.value * (Number(form.value.price) || 0)
+    - depositSum.value) * 100) / 100)
 
 const statusText = computed(() => {
   const b = recordsQtySum.value
@@ -105,7 +137,7 @@ const discTotal = computed(() => {
 
 function addRecord() {
   form.value.records.push({ qty: 0, amount: null, date: '', note: '',
-                            vendor: '', order_no: '', room_ids: [] })
+                            vendor: '', order_no: '', room_ids: [], is_deposit: false })
 }
 
 function removeRecord(idx) {
@@ -155,8 +187,10 @@ async function save() {
         note: a.note || '',
       })),
       records: form.value.records.map((r) => ({
-        qty: Number(r.qty) || 0,
+        // 定金不看数量：勾了定金就按 0 存，免得导出的表里挂着一个不参与计算的数量
+        qty: r.is_deposit ? 0 : (Number(r.qty) || 0),
         amount: Number(r.amount) || 0,
+        is_deposit: !!r.is_deposit,
         date: r.date || '',
         note: r.note || '',
         vendor: r.vendor || '',
@@ -312,34 +346,46 @@ async function save() {
 
       <el-divider content-position="left">采购记录（每笔付款一行，可多笔）</el-divider>
       <div class="table-wrap">
-        <el-table :data="form.records" size="small" style="min-width: 950px">
-          <el-table-column label="实付数量" width="86">
+        <!-- 条目多了只让表体自己滚（表头钉住）：不然弹窗被越撑越高，
+             底部「保存 / 取消」直接被顶出屏幕 -->
+        <el-table :data="form.records" size="small" :max-height="recordMaxH"
+                  style="min-width: 1000px">
+          <el-table-column label="实付数量" width="112">
             <template #default="{ row }">
-              <el-input-number v-model="row.qty" :min="0" size="small" controls-position="right"
-                               style="width: 100%" />
-            </template>
-          </el-table-column>
-          <el-table-column label="实付金额" width="94">
-            <template #default="{ row }">
-              <el-input-number v-model="row.amount" :min="0" :precision="2" size="small"
+              <!-- 定金不看数量：灰掉它，省得填了数字却发现进度不动 -->
+              <el-input-number v-model="row.qty" :min="0" size="small"
+                               :disabled="!!row.is_deposit"
                                controls-position="right" style="width: 100%" />
             </template>
           </el-table-column>
-          <el-table-column label="实付单价" width="80" align="right">
+          <el-table-column label="实付金额" width="124">
             <template #default="{ row }">
-              <span class="auto-price">{{ row.qty > 0 && row.amount ? money(Math.round(row.amount / row.qty * 100) / 100) : '-' }}</span>
+              <!-- 单价收进悬停：行内再挂一行小字会把格子撑高，两个数字框就不在同一
+                   水平线上了。单价本来也是顺带看一眼的数，不值得占行高。 -->
+              <span :title="unitTip(row)" class="cell-tip">
+                <el-input-number v-model="row.amount" :min="0" :precision="2" size="small"
+                                 controls-position="right" style="width: 100%" />
+              </span>
             </template>
           </el-table-column>
+          <!-- 定金：钱先付、货还没到。只记钱、不推进「已买数量」，并从「未付」里扣掉 -->
+          <el-table-column width="66" align="center">
+            <template #header>
+              <el-tooltip placement="top" content="勾上＝定金：钱先付、货还没到。只算已付金额，不推进「已买数量」（状态不会变成「已买完」，而是「已付定」），并从「未付」里扣掉；等货到了再记一笔尾款就结清">
+                <span class="th-tip">定金</span>
+              </el-tooltip>
+            </template>
+            <template #default="{ row }">
+              <el-checkbox v-model="row.is_deposit" />
+            </template>
+          </el-table-column>
+          <!-- 记录于收进悬停：它是只读的辅助信息，不值得占一列 -->
           <el-table-column label="日期" width="132">
             <template #default="{ row }">
-              <el-date-picker v-model="row.date" type="date" value-format="YYYY-MM-DD"
-                              placeholder="选择日期" size="small" style="width:100%" />
-            </template>
-          </el-table-column>
-          <!-- 什么时候记的（服务端盖的时间戳，只读）；悬停能看到完整时间 -->
-          <el-table-column label="记录于" width="84">
-            <template #default="{ row }">
-              <span class="rec-stamp" :title="stampTitle(row)">{{ shortStamp(row.created_at) }}</span>
+              <span :title="stampTitle(row)" class="cell-tip">
+                <el-date-picker v-model="row.date" type="date" value-format="YYYY-MM-DD"
+                                placeholder="选择日期" size="small" style="width:100%" />
+              </span>
             </template>
           </el-table-column>
           <!-- 涉及分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 -->
@@ -362,9 +408,9 @@ async function save() {
               <el-input v-model="row.order_no" size="small" placeholder="选填" />
             </template>
           </el-table-column>
-          <el-table-column label="备注" min-width="90">
+          <el-table-column label="备注" min-width="160">
             <template #default="{ row }">
-              <el-input v-model="row.note" size="small" placeholder="如 定金/尾款" />
+              <el-input v-model="row.note" size="small" placeholder="如 尾款/批次" />
             </template>
           </el-table-column>
           <el-table-column width="66">
@@ -378,6 +424,7 @@ async function save() {
         <el-button size="small" @click="addRecord">+ 添加采购记录</el-button>
         <span v-if="form.records.length" class="alloc-hint">
           合计 {{ recordsQtySum }}{{ form.unit || '' }} · 已付 ￥{{ money(recordsAmountSum) }}
+          <template v-if="depositSum"> （含定金 ￥{{ money(depositSum) }}）</template>
           <template v-if="recordsPrice"> · 均价 ￥{{ money(recordsPrice) }}</template>
         </span>
         <span v-else class="alloc-hint">没填记录则视为未买</span>
@@ -385,7 +432,9 @@ async function save() {
 
       <el-divider content-position="left">按分组分配（选填，总量以分配合计为准）</el-divider>
       <div class="table-wrap">
-        <el-table :data="form.allocations" size="small" style="min-width: 560px">
+        <!-- 同理：分组多的物料，这张表也在自己区域内滚，不把弹窗撑高 -->
+        <el-table :data="form.allocations" size="small" :max-height="allocMaxH"
+                  style="min-width: 560px">
           <el-table-column label="分组" width="132">
             <template #default="{ row }">
               <el-select v-model="row.room_id" style="width: 100%">
@@ -438,6 +487,8 @@ async function save() {
 /* 这两张表列多，窄屏上可能塞不下：留个横向滚动兜底，
    不然右边几列会被弹窗直接裁掉、连滚都滚不到 */
 .table-wrap { overflow-x: auto; }
+/* 内容再多也不让弹窗高过屏幕：正文区自己滚，底部「保存 / 取消」永远在视野里 */
+.item-dialog :deep(.el-dialog__body) { max-height: 76vh; overflow-y: auto; }
 .price-summary {
   display: flex;
   align-items: center;
@@ -462,6 +513,9 @@ async function save() {
 .alloc-hint { color: var(--ios-label-2); font-size: 12px; }
 .field-hint { font-size: 11px; color: var(--ios-label-2); line-height: 1.6; margin-top: 2px; }
 .rec-stamp { font-size: 11px; color: var(--ios-label-3); font-variant-numeric: tabular-nums; }
-.auto-price { color: var(--ios-label-2); font-variant-numeric: tabular-nums; }
+/* 悬停才显示的辅助信息（比如「记录于 …」「单价 ￥x」）：给个提示，不然没人知道能停上去 */
+.cell-tip { display: block; cursor: help; }
+/* 表头带说明的列：虚线下划线提示"这里能悬停看解释"，不然没人知道能停上去 */
+.th-tip { border-bottom: 1px dashed var(--ios-label-3); cursor: help; }
 :global(.item-dialog) { max-width: 94vw; }
 </style>

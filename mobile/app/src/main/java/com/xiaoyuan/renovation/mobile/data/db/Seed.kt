@@ -3,6 +3,7 @@ package com.xiaoyuan.renovation.mobile.data.db
 import androidx.room.withTransaction
 import com.xiaoyuan.renovation.mobile.util.ListCodes
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -41,19 +42,44 @@ fun parseStamp(text: String): LocalDateTime? =
 /**
  * 表格里的时间戳 → 本机存储格式（`STAMP`，UTC）。认不出来返回 null。
  *
- * 电脑端导出的表格里是 `YYYY-MM-DD HH:MM:SS`（不带小数秒），手机自己写的是带
- * 微秒的，两种都要认。归一成同一格式之后，库里、同步比较、界面上才是同一把尺子。
+ * 认三种写法：
+ *   - 带时区偏移量（本系统导出的 `2026-10-08 15:30:42+08:00`）→ 按偏移量精确换回 UTC；
+ *   - 带微秒、不带偏移（手机自己的老写法）→ 就是 UTC；
+ *   - 不带微秒、不带偏移（电脑端老文件、手填）→ 也按 UTC 读：老文件里存的就是
+ *     UTC，按本地读会把历史时间整体平移一个时区。
+ *
  * 认不出来就返回 null —— 调用方保持原有时间不动，宁可留旧的也不要编一个。
  */
 fun normalizeStamp(text: String): String? {
     val raw = text.trim()
     if (raw.isEmpty()) return null
     parseStamp(raw)?.let { return it.format(STAMP) }
-    val plain = raw.replace('T', ' ')
+    val iso = raw.replace(' ', 'T')
+    runCatching {
+        OffsetDateTime.parse(iso).withOffsetSameInstant(ZoneOffset.UTC)
+            .toLocalDateTime().format(STAMP)
+    }.getOrNull()?.let { return it }
     return runCatching {
-        LocalDateTime.parse(plain, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        LocalDateTime.parse(iso, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"))
             .format(STAMP)
     }.getOrNull()
+}
+
+/**
+ * 导出到表格时的写法：**本地时间 + 时区偏移量**（如 `2026-10-08 15:30:42+08:00`）。
+ *
+ * 用户在表格里看到的是自己的钟；导入时凭偏移量精确换回 UTC，换台机器、换个时区
+ * 导回来也不会平移。原值读不出来（老数据格式不对）时原样返回，不编时间。
+ */
+fun toExportStamp(stored: String): String {
+    val utc = parseStamp(stored) ?: return stored
+    val local = utc.atOffset(ZoneOffset.UTC).atZoneSameInstant(ZoneId.systemDefault())
+    val base = if (local.nano != 0) {
+        local.toLocalDateTime().format(STAMP)
+    } else {
+        local.toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+    }
+    return base + local.offset.id
 }
 
 /**

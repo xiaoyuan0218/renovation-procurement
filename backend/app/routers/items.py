@@ -46,7 +46,10 @@ def _apply_records(db: Session, item: Item, records, lst: ItemList):
     item.records.clear()
     for r in records:
         item.records.append(PurchaseRecord(
-            qty=r.qty or 0, amount=r.amount or 0, date=r.date or "", note=r.note or "",
+            qty=r.qty or 0, amount=r.amount or 0,
+            # 定金字要一起写：漏了它「勾了定金」等于没勾（钱算了、进度也照涨）
+            is_deposit=bool(getattr(r, "is_deposit", False)),
+            date=r.date or "", note=r.note or "",
             vendor=r.vendor or "", order_no=r.order_no or "",
             rooms=_record_rooms(db, r, lst)))
     item.bought = compute.item_status(item) == "done"
@@ -178,7 +181,7 @@ def add_record(item_id: int, data: RecordIn, request: Request,
     request.state.audit_undo = {"kind": "item_restore",
                                 "data": audit.snapshot_item(db, item_id)}
     item.records.append(PurchaseRecord(
-        qty=data.qty or 0, amount=data.amount or 0,
+        qty=data.qty or 0, amount=data.amount or 0, is_deposit=bool(data.is_deposit),
         date=data.date or datetime.date.today().isoformat(),
         note=data.note or "", vendor=data.vendor or "", order_no=data.order_no or "",
         rooms=_record_rooms(db, data, lst)))
@@ -188,7 +191,11 @@ def add_record(item_id: int, data: RecordIn, request: Request,
     db.refresh(item)
     qty_s = f"{data.qty:g}" if data.qty else "0"
     amount_s = f"{data.amount:g}" if data.amount else "0"
-    request.state.audit_subject = f"物料「{item.name}」买 {qty_s} {item.unit} 花 {amount_s} 元"
+    if data.is_deposit:
+        # 定金只记钱、不推进到货进度，日志里说清楚，免得以为是普通采购
+        request.state.audit_subject = f"物料「{item.name}」付定金 {amount_s} 元"
+    else:
+        request.state.audit_subject = f"物料「{item.name}」买 {qty_s} {item.unit} 花 {amount_s} 元"
     return compute.item_dict(item)
 
 

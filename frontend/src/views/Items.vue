@@ -22,6 +22,7 @@ const brands = computed(() => {
 const STATUS = {
   done: { label: '已买完', type: 'success' },
   partial: { label: '部分已买', type: 'primary' },
+  deposit: { label: '已付定', type: 'warning' },
   unbought: { label: '未买', type: 'info' },
   none: { label: '无需采购', type: 'info' },
 }
@@ -84,7 +85,7 @@ watch([q, categoryId, brand, statusFilter], () => { page.value = 1 })
 
 // 采购状态有业务顺序（未买 → 部分已买 → 已买完），照字母序排会变成
 // done < partial < unbought，正好反着
-const STATUS_RANK = { unbought: 0, partial: 1, done: 2, none: 3 }
+const STATUS_RANK = { unbought: 0, deposit: 1, partial: 2, done: 3, none: 4 }
 
 // 数字按数比，其余按字符串比：名称与分类走中文拼音，时间戳是等宽的
 // "YYYY-MM-DD HH:MM:SS"，字典序就是时间序。**不能统一用 Number()** ——
@@ -187,6 +188,10 @@ function openPay(row) {
     paid: row.paid || 0,
     qty: Math.max(0, (row.total_qty || 0) - (row.paid_qty || 0)),
     amount: 0,
+    // 定金：钱先付、货没到。勾上则只记金额，不推进已买数量
+    is_deposit: false,
+    depositPaid: (row.records || [])
+      .filter((r) => r.is_deposit).reduce((s, r) => s + (Number(r.amount) || 0), 0),
     date: today,
     vendor: '',
     order_no: '',
@@ -203,22 +208,29 @@ function _applyPay(updated) {
 
 async function addRecord() {
   const f = payForm.value
-  if (!Number(f.qty) && !Number(f.amount)) {
+  // 定金只记钱，不看数量；普通采购至少要有一个数
+  if (!f.is_deposit && !Number(f.qty) && !Number(f.amount)) {
     ElMessage.warning('请填写实付数量或实付金额')
+    return
+  }
+  if (f.is_deposit && !Number(f.amount)) {
+    ElMessage.warning('定金要填金额')
     return
   }
   payBusy.value = true
   try {
     const updated = await api.post(`/api/items/${f.id}/records`, {
-      qty: Number(f.qty) || 0,
+      // 定金不推进已买数量，数量直接写 0（服务端也不认它的数量）
+      qty: f.is_deposit ? 0 : (Number(f.qty) || 0),
       amount: Number(f.amount) || 0,
+      is_deposit: !!f.is_deposit,
       date: f.date || today,
       vendor: f.vendor || '',
       order_no: f.order_no || '',
       room_ids: f.room_ids || [],
     })
     _applyPay(updated)
-    ElMessage.success('已记录一笔采购')
+    ElMessage.success(f.is_deposit ? '已记录定金' : '已记录一笔采购')
   } catch (e) {
     ElMessage.error(e.message)
   } finally { payBusy.value = false }
@@ -319,6 +331,7 @@ function onSaved() {
       <el-radio-group v-model="statusFilter">
         <el-radio-button value="all">全部</el-radio-button>
         <el-radio-button value="unbought">未买</el-radio-button>
+        <el-radio-button value="deposit">已付定</el-radio-button>
         <el-radio-button value="partial">部分已买</el-radio-button>
         <el-radio-button value="done">已买完</el-radio-button>
       </el-radio-group>
@@ -456,12 +469,21 @@ function onSaved() {
       <div class="pay-sum">
         <span>共 <b>{{ fmtQty(payForm.totalQty) }}{{ payForm.unit }}</b></span>
         <span>已付 <b class="t-green">￥{{ money(payForm.paid) }}</b></span>
+        <span v-if="payForm.depositPaid">含定金 <b>￥{{ money(payForm.depositPaid) }}</b></span>
         <span>已记 {{ payForm.recordCount }} 笔</span>
       </div>
 
       <el-form label-width="76px">
+        <el-form-item label="定金">
+          <el-switch v-model="payForm.is_deposit" active-text="这笔是定金" />
+          <div class="pay-hint">
+            定金＝钱先付、货还没到：只算已付、不推进「已买数量」（状态显示「已付定」），
+            并从「未付」里扣掉。货到了再记一笔尾款就结清。
+          </div>
+        </el-form-item>
         <el-form-item label="实付数量">
           <el-input-number v-model="payForm.qty" :min="0" :max="payForm.totalQty"
+                           :disabled="payForm.is_deposit"
                            controls-position="right" style="width: 100%" />
         </el-form-item>
         <el-form-item label="实付金额">
@@ -561,4 +583,11 @@ function onSaved() {
   margin-bottom: 14px;
 }
 .pay-sum b { color: var(--ios-label); font-weight: 600; }
+/* 定金开关下面那句解释：字小一点、淡一点，别抢表单的视线 */
+.pay-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ios-label-3);
+}
 </style>

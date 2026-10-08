@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xiaoyuan.renovation.mobile.data.model.ItemDto
+import com.xiaoyuan.renovation.mobile.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_NONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_PARTIAL
@@ -162,6 +163,7 @@ private fun DashboardBody(data: DashboardData, onGoItems: () -> Unit) {
                         values = listOf(
                             totals.countOf(STATUS_DONE).toFloat(),
                             totals.countOf(STATUS_PARTIAL).toFloat(),
+                            totals.countOf(STATUS_DEPOSIT).toFloat(),
                             totals.countOf(STATUS_UNBOUGHT).toFloat(),
                         ),
                         color = Ink.Mint,
@@ -266,6 +268,7 @@ private fun DashboardBody(data: DashboardData, onGoItems: () -> Unit) {
                 slices = listOf(
                     DonutSlice("已买完", totals.countOf(STATUS_DONE).toDouble(), Ink.Mint),
                     DonutSlice("部分已买", totals.countOf(STATUS_PARTIAL).toDouble(), Ink.Amber),
+                    DonutSlice("已付定", totals.countOf(STATUS_DEPOSIT).toDouble(), DepositColor),
                     DonutSlice("未买", totals.countOf(STATUS_UNBOUGHT).toDouble(), Ink.Blue),
                     DonutSlice("无需采购", totals.countOf(STATUS_NONE).toDouble(), Ink.TextMuted),
                 ),
@@ -414,3 +417,6 @@ private fun savingCaption(listTotal: Double, discountTotal: Double): String {
 
 /** 优惠是「省下的钱」，为负说明实付价高于原价/日常价，用警示色而非隐藏。 */
 private fun savingColor(amount: Double): Color = if (amount < 0) Ink.Amber else Ink.Mint
+
+/** 已付定状态的橙色，与 statusColor 里 deposit 的配色一致。 */
+private val DepositColor = Color(0xFFFB923C)

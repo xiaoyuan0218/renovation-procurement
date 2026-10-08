@@ -6,6 +6,7 @@ import com.xiaoyuan.renovation.mobile.data.model.CategoryDto
 import com.xiaoyuan.renovation.mobile.data.model.ItemDto
 import com.xiaoyuan.renovation.mobile.data.model.RecordInDto
 import com.xiaoyuan.renovation.mobile.data.model.RoomDto
+import com.xiaoyuan.renovation.mobile.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.mobile.data.repo.ApiResult
 import com.xiaoyuan.renovation.mobile.data.repo.LocalRepository
 import com.xiaoyuan.renovation.mobile.data.repo.okData
@@ -139,7 +140,9 @@ class ItemsViewModel(private val repo: LocalRepository) : ViewModel() {
                 val matchCategory = categoryId == null || item.categoryId == categoryId
                 val matchStatus = when (filter) {
                     StatusFilter.All -> true
-                    StatusFilter.Pending -> item.status == "unbought" || item.status == "partial"
+                    // 未买齐 = 未买 + 部分已买 + 已付定（钱付了货没到，也还没办完）
+                    StatusFilter.Pending -> item.status == "unbought" || item.status == "partial" ||
+                        item.status == STATUS_DEPOSIT
                     StatusFilter.Unbought -> item.status == "unbought"
                     StatusFilter.Partial -> item.status == "partial"
                     StatusFilter.Done -> item.status == "done"

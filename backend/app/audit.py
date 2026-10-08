@@ -230,6 +230,14 @@ def diff_item(db: Session, before: dict, after: dict) -> str:
         nb, na = len(before[key]), len(after[key])
         if nb != na:
             parts.append(f"{label} {nb} → {na} 条")
+    # 条数没变但内容变了（改金额、勾上/取消定金）也要说一句，否则明细一片空白，
+    # 用户看不出这次到底改了哪
+    if len(before["records"]) == len(after["records"]):
+        def _sig(row):
+            return f"{row.get('qty')}|{row.get('amount')}|{bool(row.get('is_deposit'))}"
+        if sorted(_sig(r) for r in before["records"]) != \
+                sorted(_sig(r) for r in after["records"]):
+            parts.append("采购记录有改动（数量、金额或定金标记）")
     return "；".join(parts)
 
 
@@ -374,6 +382,8 @@ def _restore_item(db: Session, snap: dict) -> str:
         rec = PurchaseRecord(id=r["id"], item_id=item.id, qty=r["qty"],
                              amount=r["amount"], date=r["date"], note=r["note"],
                              vendor=r["vendor"], order_no=r["order_no"],
+                             # 老快照里没有这一列，取默认值（不是定金）
+                             is_deposit=bool(r.get("is_deposit", False)),
                              created_at=_parse_maybe_datetime(r["created_at"]),
                              updated_at=_parse_maybe_datetime(r["updated_at"]))
         db.add(rec)

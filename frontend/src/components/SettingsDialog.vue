@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api, money } from '../api'
+import { api, money, toLocalStamp } from '../api'
 import { PAGE_SIZE, pagedSlice } from '../paging'
 import MiniPager from './MiniPager.vue'
 import { auth, changePassword, loadAuthState } from '../auth'
@@ -748,7 +748,9 @@ async function undoLog(row) {
               {{ row.paid ? `￥${money(row.paid)}` : '-' }}
             </template>
           </el-table-column>
-          <el-table-column prop="deleted_at" label="移入时间" width="130" />
+          <el-table-column label="移入时间" width="130">
+            <template #default="{ row }">{{ toLocalStamp(row.deleted_at) }}</template>
+          </el-table-column>
           <el-table-column label="操作" width="164">
             <template #default="{ row }">
               <el-button link type="primary" size="small"
@@ -811,10 +813,12 @@ async function undoLog(row) {
               <span class="list-code">{{ row.prefix }}…</span>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="生成时间" width="142" />
+          <el-table-column label="生成时间" width="142">
+            <template #default="{ row }">{{ toLocalStamp(row.created_at) }}</template>
+          </el-table-column>
           <el-table-column label="最后使用" width="142">
             <template #default="{ row }">
-              {{ row.last_used_at || '还没用过' }}
+              {{ row.last_used_at ? toLocalStamp(row.last_used_at) : '还没用过' }}
             </template>
           </el-table-column>
           <el-table-column label="操作" width="72">
@@ -852,7 +856,10 @@ async function undoLog(row) {
           <el-button size="small" :loading="logsLoading" @click="loadLogs">查询</el-button>
         </div>
         <el-table :data="logs" size="small" height="100%" class="pane-table" v-loading="logsLoading">
-          <el-table-column prop="at" label="时间" width="138" />
+          <!-- 接口给的是 UTC，显示前一律转本地时区，否则与用户的钟差一个时区 -->
+          <el-table-column label="时间" width="138">
+            <template #default="{ row }">{{ toLocalStamp(row.at) }}</template>
+          </el-table-column>
           <el-table-column label="来源" width="126" show-overflow-tooltip>
             <template #default="{ row }">{{ row.actor_name }}</template>
           </el-table-column>

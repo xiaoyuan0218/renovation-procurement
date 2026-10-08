@@ -30,8 +30,9 @@ def get_summary(lst: ItemList = Depends(current_list),
     totals["actual_discount_total"] = round(sum(v["actual_discount"] for v in views), 2)
     totals["daily_discount_total"] = round(sum(v["daily_discount"] for v in views), 2)
 
-    # 采购状态统计（数量维度）：done 已买完 / partial 部分已买 / unbought 未买 / none 无需采购
-    status_count = {"done": 0, "partial": 0, "unbought": 0, "none": 0}
+    # 采购状态统计（数量维度）：done 已买完 / partial 部分已买 / deposit 已付定 /
+    # unbought 未买 / none 无需采购
+    status_count = {"done": 0, "partial": 0, "deposit": 0, "unbought": 0, "none": 0}
     for v in views:
         status_count[v["status"]] = status_count.get(v["status"], 0) + 1
     totals["status_count"] = status_count
@@ -72,7 +73,8 @@ def get_summary(lst: ItemList = Depends(current_list),
         by_room.append({"id": r.id, "name": r.name,
                         "qty": round(qty, 2), "list_total": round(total, 2)})
 
-    unbought = [v for v in views if v["status"] in ("unbought", "partial")]
+    # 未买清单：货还没到齐的都算（含只付了定金的 —— 钱付了，东西还得盯着）
+    unbought = [v for v in views if v["status"] in ("unbought", "partial", "deposit")]
     unbought.sort(key=lambda v: -v["discount_total"])
 
     # 按月已付：采购是跨月推进的，付款记录里的日期就是时间线的原料。

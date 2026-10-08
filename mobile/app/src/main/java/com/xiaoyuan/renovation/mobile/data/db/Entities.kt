@@ -152,6 +152,8 @@ data class PurchaseRecordEntity(
     @ColumnInfo(name = "item_id") val itemId: Int,
     val qty: Double = 0.0,
     val amount: Double = 0.0,
+    /** 定金：钱先付、货没到。只算已付金额，不推进"已到货"，并从「未付」里扣掉 */
+    @ColumnInfo(name = "is_deposit") val isDeposit: Boolean = false,
     val date: String = "",
     val note: String = "",
     val vendor: String = "",

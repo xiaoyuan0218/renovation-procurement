@@ -197,10 +197,11 @@ def _alloc_row(alloc, translate) -> tuple:
 
 def _record_row(record, translate) -> tuple:
     room_ids = sorted(translate("room", rid) for rid in (record.get("room_ids") or []))
+    # 定金字放在最后：前面几个位置手机端也按序号读，动前面的会整体错位
     return (record.get("qty") or 0, record.get("amount") or 0,
             record.get("date") or "", record.get("note") or "",
             record.get("vendor") or "", record.get("order_no") or "",
-            tuple(room_ids))
+            tuple(room_ids), bool(record.get("is_deposit")))
 
 
 def _item_row(item, translate) -> tuple:
@@ -245,7 +246,8 @@ def _same_record(original, row: tuple) -> bool:
     """
     return (original.get("qty") or 0) == row[0] and (original.get("amount") or 0) == row[1] \
         and (original.get("date") or "") == row[2] and (original.get("note") or "") == row[3] \
-        and (original.get("vendor") or "") == row[4] and (original.get("order_no") or "") == row[5]
+        and (original.get("vendor") or "") == row[4] and (original.get("order_no") or "") == row[5] \
+        and bool(original.get("is_deposit")) == bool(row[7])
 
 
 # ---------------------------------------------------------------- 三方合并
@@ -393,6 +395,7 @@ def _rebuild_item(local_id, row, mine_rows, aligned):
         records.append({
             "qty": r[0], "amount": r[1], "date": r[2], "note": r[3],
             "vendor": r[4], "order_no": r[5], "room_ids": list(r[6]),
+            "is_deposit": bool(r[7]),
             "created_at": _pick_created(mine_rec.get("created_at") if mine_rec else None,
                                         remote_rec.get("created_at") if remote_rec else None),
             "updated_at": _pick_updated(mine_rec.get("updated_at") if mine_rec else None,
@@ -528,6 +531,7 @@ def merge_without_base(mine: dict, theirs: dict) -> dict:
                              "note": a.get("note") or ""}
                             for a in row.get("allocations", [])],
             "records": [{"qty": r.get("qty") or 0, "amount": r.get("amount") or 0,
+                         "is_deposit": bool(r.get("is_deposit")),
                          "date": r.get("date") or "", "note": r.get("note") or "",
                          "vendor": r.get("vendor") or "", "order_no": r.get("order_no") or "",
                          "room_ids": [x for x in (room_id_of(from_mine, rid)

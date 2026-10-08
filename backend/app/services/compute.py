@@ -2,14 +2,14 @@
 
 数量维度：
 - 总数量：有布点明细时 = Σ布点数量，否则用物料自身的总量字段
-- 实付数量 = Σ采购记录数量；采购状态由 实付数量 vs 总数量 推导
-  （done 已买完 / partial 部分已买 / unbought 未买 / none 无需采购）
+- 实付数量 = Σ采购记录数量（**定金不算**：钱先付、货没到）；采购状态由它 vs 总数量推导
+  （done 已买完 / partial 部分已买 / deposit 已付定 / unbought 未买 / none 无需采购）
 
 金额维度：
 - 原价小计 = Σ(布点数量 × (房间覆盖单价 ?? 物料单价))；无布点 = 总量 × 单价
 - 优惠小计 = 总数量 × (优惠单价 ?? 物料单价)
-- 已付金额 = Σ采购记录金额；实付单价（均价）= 已付金额 ÷ 实付数量
-- 未付金额 = 未付数量 × 单价（原价口径）
+- 已付金额 = Σ采购记录金额（含定金）；实付单价（均价）= 已付金额 ÷ 实付数量
+- 未付金额 = 未到货部分按单价算的钱 − 已付定金（定金先付了，欠款就该少这些）
 - 日常价未付 = 未付数量 × (优惠单价 ?? 物料单价)
 
 两个口径各自都能被拆成三段，且严格成立（到分）：
@@ -51,7 +51,17 @@ def item_discount_total(item) -> float:
 
 
 def item_paid_qty(item) -> float:
-    return r2(sum(r.qty or 0 for r in item.records))
+    """已到货数量 = 各笔记录的实付数量之和，**定金不算**。
+
+    定金是"钱先付了、货还没到"。算进数量会让状态直接变「已买完」—— 货还在路上，
+    进度不该动。
+    """
+    return r2(sum(r.qty or 0 for r in item.records if not r.is_deposit))
+
+
+def item_deposit_paid(item) -> float:
+    """已付的定金合计（用来抵扣未付；不参与"已到货"进度）。"""
+    return r2(sum(r.amount or 0 for r in item.records if r.is_deposit))
 
 
 def item_paid(item) -> float:
@@ -59,7 +69,12 @@ def item_paid(item) -> float:
 
 
 def item_paid_price(item):
-    """实付单价（均价）= 已付金额 ÷ 实付数量；数量为 0 时返回 None。"""
+    """实付单价（均价）= 已付金额 ÷ 已到货数量；数量为 0 时返回 None。
+
+    分子要含定金：定金也是为这批货付的钱，结清后（定金 1000 + 尾款 4099、
+    到货 1 台）均价必须等于实际单价 5099 —— 把定金排除出去会算成 4099，那是
+    个错的数。分次付款期间它会略偏高（钱先付、货后到），属正常。
+    """
     qty = item_paid_qty(item)
     amt = item_paid(item)
     if qty > 0 and amt:
@@ -72,14 +87,22 @@ def item_unpaid_qty(item) -> float:
 
 
 def item_unpaid(item) -> float:
-    """未付金额 = 未付数量 × 单价（原价口径）。"""
-    return r2(item_unpaid_qty(item) * (item.price or 0))
+    """未付金额 = 未到货部分按原价算的钱 − 已付的定金（不足 0 按 0）。
+
+    定金要抵扣：付了 1000 定金、货还没到时，"还差多少钱"就该少 1000 —— 否则
+    已付 1000、未付 6999，两个数对不上账。货到齐之后未到货数量为 0，抵扣自然
+    归零，所以「已付 + 实际优惠 + 未付 = 原价小计」这个关系仍然成立，优惠列
+    不会被定金搅乱。
+    """
+    owed = item_unpaid_qty(item) * (item.price or 0)
+    return r2(max(0.0, owed - item_deposit_paid(item)))
 
 
 def item_daily_unpaid(item) -> float:
-    """日常价未付 = 未付数量 × (优惠单价 ?? 物料单价)。"""
+    """日常价未付 = 未到货数量 × (优惠单价 ?? 物料单价) − 已付定金，口径同上。"""
     unit = item.discount_price if item.discount_price is not None else (item.price or 0)
-    return r2(item_unpaid_qty(item) * (unit or 0))
+    owed = item_unpaid_qty(item) * (unit or 0)
+    return r2(max(0.0, owed - item_deposit_paid(item)))
 
 
 def item_actual_discount(item) -> float:
@@ -108,6 +131,9 @@ def item_status(item) -> str:
         return "done"
     if paid > 0:
         return "partial"
+    if item_deposit_paid(item) > 0:
+        # 货一件没到、但定金付了：单列一态，免得看着像"什么都没发生"
+        return "deposit"
     return "unbought"
 
 
@@ -203,6 +229,7 @@ def item_dict(item) -> dict:
                 "item_id": r.item_id,
                 "qty": r.qty,
                 "amount": r.amount,
+                "is_deposit": bool(r.is_deposit),
                 "unit_price": (r2(r.amount / r.qty) if (r.qty or 0) > 0 and r.amount else None),
                 # 老数据里可能存着 "2026-09-14 00:00:00" 这类脏值，读出来时归一化
                 "date": dates.for_read(r.date),

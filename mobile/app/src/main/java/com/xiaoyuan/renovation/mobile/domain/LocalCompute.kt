@@ -10,6 +10,7 @@ import com.xiaoyuan.renovation.mobile.data.model.ItemDto
 import com.xiaoyuan.renovation.mobile.data.model.MatrixCellDto
 import com.xiaoyuan.renovation.mobile.data.model.MatrixItemDto
 import com.xiaoyuan.renovation.mobile.data.model.RecordDto
+import com.xiaoyuan.renovation.mobile.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_NONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_PARTIAL
@@ -117,7 +118,13 @@ object LocalCompute {
         if (allocations.isNotEmpty()) r2(allocations.sumOf { it.qty })
         else r2(item.qtyTotal)
 
-    fun paidQty(records: List<PurchaseRecordEntity>): Double = r2(records.sumOf { it.qty })
+    /** 已到货数量 = 各笔记录的实付数量之和，**定金不算**（钱先付、货还没到）。 */
+    fun paidQty(records: List<PurchaseRecordEntity>): Double =
+        r2(records.filter { !it.isDeposit }.sumOf { it.qty })
+
+    /** 已付的定金合计：用来抵扣未付，不参与"已到货"进度。 */
+    fun depositPaid(records: List<PurchaseRecordEntity>): Double =
+        r2(records.filter { it.isDeposit }.sumOf { it.amount })
 
     fun unpaidQty(totalQty: Double, paidQty: Double): Double = r2(maxOf(0.0, totalQty - paidQty))
 
@@ -146,12 +153,13 @@ object LocalCompute {
         return if (qty > 0 && amt != 0.0) r2(amt / qty) else null
     }
 
-    /** 未付金额 = 未付数量 × 原价单价。 */
-    fun unpaid(unpaidQty: Double, item: ItemEntity): Double = r2(unpaidQty * item.price)
+    /** 未付金额 = 未到货部分按原价算的钱 − 已付定金（不足 0 按 0）。 */
+    fun unpaid(unpaidQty: Double, item: ItemEntity, deposit: Double = 0.0): Double =
+        r2(maxOf(0.0, unpaidQty * item.price - deposit))
 
-    /** 日常价未付 = 未付数量 × 日常单价。 */
-    fun dailyUnpaid(unpaidQty: Double, item: ItemEntity): Double =
-        r2(unpaidQty * discountUnit(item))
+    /** 日常价未付 = 未到货部分按日常单价算的钱 − 已付定金，口径同上。 */
+    fun dailyUnpaid(unpaidQty: Double, item: ItemEntity, deposit: Double = 0.0): Double =
+        r2(maxOf(0.0, unpaidQty * discountUnit(item) - deposit))
 
     /** 实际优惠 = 原价小计 − 已付 − 未付（残差，保证三段闭合）。 */
     fun actualDiscount(
@@ -160,7 +168,8 @@ object LocalCompute {
         records: List<PurchaseRecordEntity>,
     ): Double = r2(
         listTotal(item, allocations) - paid(records) -
-            unpaid(unpaidQty(totalQty(item, allocations), paidQty(records)), item),
+            unpaid(unpaidQty(totalQty(item, allocations), paidQty(records)), item,
+                   depositPaid(records)),
     )
 
     /** 日常价优惠 = 日常价小计 − 已付 − 日常价未付（残差）。 */
@@ -170,13 +179,15 @@ object LocalCompute {
         records: List<PurchaseRecordEntity>,
     ): Double = r2(
         discountTotal(item, allocations) - paid(records) -
-            dailyUnpaid(unpaidQty(totalQty(item, allocations), paidQty(records)), item),
+            dailyUnpaid(unpaidQty(totalQty(item, allocations), paidQty(records)), item,
+                        depositPaid(records)),
     )
 
-    fun status(totalQty: Double, paidQty: Double): String = when {
+    fun status(totalQty: Double, paidQty: Double, deposit: Double = 0.0): String = when {
         totalQty <= 0 -> STATUS_NONE
         paidQty >= totalQty - 1e-9 -> STATUS_DONE
         paidQty > 0 -> STATUS_PARTIAL
+        deposit > 0 -> STATUS_DEPOSIT   // 货一件没到，但定金付了
         else -> STATUS_UNBOUGHT
     }
 
@@ -235,7 +246,8 @@ object LocalCompute {
         val qty = totalQty(item, b.allocations)
         val paidQty = paidQty(b.records)
         val unpaidQty = unpaidQty(qty, paidQty)
-        val st = status(qty, paidQty)
+        val deposit = depositPaid(b.records)
+        val st = status(qty, paidQty, deposit)
         return ItemDto(
             id = item.id,
             name = item.name,
@@ -256,7 +268,7 @@ object LocalCompute {
             paidPrice = paidPrice(b.records),
             paid = paid(b.records),
             unpaidQty = unpaidQty,
-            unpaid = unpaid(unpaidQty, item),
+            unpaid = unpaid(unpaidQty, item, deposit),
             status = st,
             records = b.records.map { toRecordDto(it, b.recordRooms[it.id] ?: emptyList()) },
             allocations = b.allocations.map { toDto(it) },

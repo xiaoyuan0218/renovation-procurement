@@ -20,6 +20,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -302,11 +304,14 @@ fun ItemEditScreen(
                             }
                             form.records.forEach { row ->
                                 GlassCard(corner = 16.dp, padding = 12.dp) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    // 定金行不填数量：置灰输入框，提示这句话
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         AppNumberField(
                                             value = row.qty,
                                             onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(qty = v) } },
                                             label = "实付数量",
+                                            enabled = !row.isDeposit,
+                                            supportingText = if (row.isDeposit) "定金不看数量" else null,
                                             modifier = Modifier.weight(1f),
                                         )
                                         AppNumberField(
@@ -315,6 +320,26 @@ fun ItemEditScreen(
                                             label = "实付金额",
                                             accent = Ink.Mint,
                                             modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    // 定金：钱先付、货没到。只进已付金额，不推进到货进度
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = row.isDeposit,
+                                            onCheckedChange = { on -> vm.toggleRecordDeposit(row.key, on) },
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = Ink.Amber,
+                                                uncheckedColor = Ink.TextMuted,
+                                                checkmarkColor = Color.White,
+                                            ),
+                                            modifier = Modifier.size(26.dp),
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "定金（预付款，货还没到）",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (row.isDeposit) Ink.Amber else Ink.TextSecondary,
                                         )
                                     }
                                     Spacer(Modifier.height(10.dp))
@@ -389,8 +414,12 @@ fun ItemEditScreen(
                                             tint = Ink.DangerSoft,
                                         )
                                     }
-                                    val rowUnitPrice = Fmt.parseNumber(row.amount)?.let { amount ->
-                                        Fmt.parseNumberOrZero(row.qty).takeIf { it > 0 }?.let { q -> amount / q }
+                                    val rowUnitPrice = if (!row.isDeposit) {
+                                        Fmt.parseNumber(row.amount)?.let { amount ->
+                                            Fmt.parseNumberOrZero(row.qty).takeIf { it > 0 }?.let { q -> amount / q }
+                                        }
+                                    } else {
+                                        null
                                     }
                                     if (rowUnitPrice != null) {
                                         Spacer(Modifier.height(8.dp))

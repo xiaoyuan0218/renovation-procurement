@@ -23,6 +23,8 @@ data class DraftRecord(
     val key: Long,
     val qty: String = "",
     val amount: String = "",
+    /** 定金：钱先付、货没到。保存时原样带回，不然一编辑就把定金抹平 */
+    val isDeposit: Boolean = false,
     val date: String = Fmt.today(),
     val note: String = "",
     val vendor: String = "",
@@ -144,6 +146,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
                                     key = nextKey++,
                                     qty = Fmt.qty(it.qty),
                                     amount = if (it.amount > 0) Fmt.qty(it.amount) else "",
+                                    isDeposit = it.isDeposit,
                                     date = it.date,
                                     note = it.note,
                                     vendor = it.vendor,
@@ -254,6 +257,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
             RecordInDto(
                 qty = Fmt.parseNumberOrZero(row.qty),
                 amount = Fmt.parseNumberOrZero(row.amount),
+                isDeposit = row.isDeposit,
                 date = row.date.trim(),
                 note = row.note.trim(),
                 vendor = row.vendor.trim(),

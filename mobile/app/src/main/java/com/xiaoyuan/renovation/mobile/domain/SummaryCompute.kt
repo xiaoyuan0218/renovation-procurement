@@ -8,6 +8,7 @@ import com.xiaoyuan.renovation.mobile.data.model.ExpenseKindDto
 import com.xiaoyuan.renovation.mobile.data.model.ItemDto
 import com.xiaoyuan.renovation.mobile.data.model.MonthPaidDto
 import com.xiaoyuan.renovation.mobile.data.model.RoomStatDto
+import com.xiaoyuan.renovation.mobile.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_PARTIAL
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_UNBOUGHT
@@ -35,12 +36,13 @@ object SummaryCompute {
         val paid = LocalCompute.paid(bundle.records)
         private val qty = LocalCompute.totalQty(bundle.item, bundle.allocations)
         private val paidQty = LocalCompute.paidQty(bundle.records)
+        private val deposit = LocalCompute.depositPaid(bundle.records)
         private val unpaidQty = LocalCompute.unpaidQty(qty, paidQty)
-        val unpaid = LocalCompute.unpaid(unpaidQty, bundle.item)
-        val dailyUnpaid = LocalCompute.dailyUnpaid(unpaidQty, bundle.item)
+        val unpaid = LocalCompute.unpaid(unpaidQty, bundle.item, deposit)
+        val dailyUnpaid = LocalCompute.dailyUnpaid(unpaidQty, bundle.item, deposit)
         val actualDiscount = r2(listTotal - paid - unpaid)
         val dailyDiscount = r2(discountTotal - paid - dailyUnpaid)
-        val status = LocalCompute.status(qty, paidQty)
+        val status = LocalCompute.status(qty, paidQty, deposit)
     }
 
     fun summary(
@@ -56,6 +58,7 @@ object SummaryCompute {
         val statusCount = linkedMapOf(
             STATUS_DONE to 0,
             STATUS_PARTIAL to 0,
+            STATUS_DEPOSIT to 0,
             STATUS_UNBOUGHT to 0,
             "none" to 0,
         )
@@ -112,7 +115,11 @@ object SummaryCompute {
 
         /* ---------- 未买齐（按日常价合计降序，先处理金额大的） ---------- */
         val pendingIds = rows
-            .filter { it.status == STATUS_UNBOUGHT || it.status == STATUS_PARTIAL }
+            // 未买清单：货没到齐的都算（含只付定金的 —— 钱付了，东西还得盯着）
+            .filter {
+                it.status == STATUS_UNBOUGHT || it.status == STATUS_PARTIAL ||
+                    it.status == STATUS_DEPOSIT
+            }
             .sortedByDescending { it.discountTotal }
             .map { it.id }
             .toSet()

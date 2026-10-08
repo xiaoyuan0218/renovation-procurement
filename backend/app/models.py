@@ -245,6 +245,9 @@ class PurchaseRecord(Base):
     item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
     qty = Column(Float, default=0)                 # 这笔实付数量
     amount = Column(Float, default=0)              # 这笔实付金额
+    # 定金：钱先付了、货还没到。金额照常算进「已付」，但数量**不计入已到货**，
+    # 所以状态不会因为它变成「已买完」；同时抵扣两个口径的「未付」。
+    is_deposit = Column(Boolean, default=False, nullable=False)
     date = Column(String(20), default="")          # 付款日期（选填）
     note = Column(String(200), default="")         # 备注
     vendor = Column(String(50), default="")        # 商家（选填，保价/退换/对账用）
