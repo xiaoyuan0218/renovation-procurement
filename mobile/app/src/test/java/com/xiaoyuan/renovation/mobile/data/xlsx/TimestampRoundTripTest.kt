@@ -8,6 +8,7 @@ import com.xiaoyuan.renovation.mobile.data.db.ItemListEntity
 import com.xiaoyuan.renovation.mobile.data.db.STAMP
 import com.xiaoyuan.renovation.mobile.data.db.normalizeStamp
 import com.xiaoyuan.renovation.mobile.data.db.parseStamp
+import com.xiaoyuan.renovation.mobile.data.db.toExportStamp
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -20,6 +21,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.time.LocalDateTime
+import java.util.TimeZone
 
 /**
  * 导入导出带着「添加时间 / 修改时间」走。
@@ -139,6 +141,20 @@ class TimestampRoundTripTest {
         val expectCreated = LocalDateTime.of(2026, 3, 4, 5, 6, 7)
         assertEquals(expectCreated, parseStamp(item.createdAt))
         assertEquals(expectCreated.format(STAMP), item.createdAt)
+    }
+
+    @Test
+    fun `设备时区恰好是 UTC 时，偏移量也写成加号零`() {
+        val saved = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+            // "Z" 与 "+00:00" 是同一时刻，但电脑端写的是后者。设备时区碰巧是 UTC 时
+            // （模拟器、把手机设成 UTC 的人）导出的文件要跟平时长得一样，
+            // 两边认的时候也少一种情况要防
+            assertEquals("2026-03-04 05:06:07+00:00", toExportStamp(created))
+        } finally {
+            TimeZone.setDefault(saved)
+        }
     }
 
     @Test

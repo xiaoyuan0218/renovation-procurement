@@ -20,6 +20,9 @@ private val DEFAULT_CATEGORIES = listOf("示例分类")
 internal val STAMP: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS")
 
+/** 导出时的时区偏移量写法。用小写 `xxx` 而不是 `XXX`：零偏移量要写 "+00:00"，不能写 "Z"。 */
+private val OFFSET_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("xxx")
+
 /**
  * 全端统一的时间戳：**UTC**。
  *
@@ -79,7 +82,10 @@ fun toExportStamp(stored: String): String {
     } else {
         local.toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
     }
-    return base + local.offset.id
+    // 偏移量固定写成 ±HH:MM。设备时区正好是 UTC 时（模拟器、把手机设成 UTC 的人），
+    // JDK 给的 id 是 "Z"，而电脑端写的是 "+00:00" —— 同一个文件在不同手机上导出
+    // 长得不一样，认的时候也容易漏。低位的秒用不上：电脑端的读法本来就只认到分。
+    return base + OFFSET_FORMAT.format(local.offset)
 }
 
 /**
