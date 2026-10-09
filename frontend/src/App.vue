@@ -25,6 +25,11 @@ const settingsVisible = ref(false)
 const newListVisible = ref(false)
 const reloadKey = ref(0)
 
+// 桌面端外壳发现"内置服务没更新成功"时会在地址里带一句说明（见 src-tauri/src/main.rs
+// 的 start_backend）；网页版不会有这个参数。显示成顶部一条提示，把原因和该做什么
+// 说清楚 —— 否则用户面对的是"新界面配旧内核"，新功能静默不生效，怎么点都不对。
+const serviceStale = ref(new URLSearchParams(window.location.search).get('service_stale') || '')
+
 // 先问后端登录态，再决定显示登录页还是主界面
 onMounted(loadAuthState)
 
@@ -88,6 +93,12 @@ async function onLogout() {
 </script>
 
 <template>
+  <!-- 内核没换成功（升级时旧进程占着文件）：把话说在明处，别让用户自己猜 -->
+  <div v-if="serviceStale" class="stale-banner">
+    <span class="stale-text">{{ serviceStale }}</span>
+    <button class="stale-close" type="button" @click="serviceStale = ''">知道了</button>
+  </div>
+
   <div v-if="auth.status === 'loading'" class="boot">
     <span class="spinner" aria-label="正在加载" />
   </div>
@@ -157,6 +168,33 @@ async function onLogout() {
 </template>
 
 <style scoped>
+/* 顶部那条"内核没更新成功"的提示：暖色常驻，不遮挡操作，点"知道了"收起 */
+.stale-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(90deg, #b45309, #d97706);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.stale-text {
+  flex: 1;
+}
+.stale-close {
+  flex: none;
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.stale-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
 .boot {
   height: 100vh;
   display: flex;

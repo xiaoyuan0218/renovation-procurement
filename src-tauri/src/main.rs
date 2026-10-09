@@ -25,8 +25,12 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             match start_backend(app) {
-                Ok(port) => {
-                    let url = format!("http://127.0.0.1:{port}");
+                Ok((port, stale_note)) => {
+                    let mut url = format!("http://127.0.0.1:{port}");
+                    if let Some(note) = stale_note {
+                        // 内核版本对不上时的说明交给界面显示（AppShell 读这个参数）
+                        url.push_str(&format!("/?service_stale={}", percent_encode(&note)));
+                    }
                     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                         .title("采知道")
                         .inner_size(1280.0, 860.0)
@@ -88,8 +92,12 @@ fn server_version(port: u16) -> Option<String> {
     Some(body[start..end].to_string())
 }
 
-/// 启动打包进来的后端，等它把实际端口写进数据目录，返回那个端口。
-fn start_backend(app: &tauri::App) -> Result<u16, Box<dyn std::error::Error>> {
+/// 启动打包进来的后端，等它把实际端口写进数据目录，返回端口与一条（可选的）提示。
+///
+/// 提示非空表示：刚起来的这份内核自报的版本与本程序对不上 —— 多半是升级安装时
+/// 旧进程占着文件、新内核没换成功（安装钩子会先结束旧进程，这里是兜底），界面
+/// 会把它显示出来，别让用户对着"新界面旧内核"干瞪眼。
+fn start_backend(app: &tauri::App) -> Result<(u16, Option<String>), Box<dyn std::error::Error>> {
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
     let port_file = data_dir.join("port");
@@ -109,7 +117,7 @@ fn start_backend(app: &tauri::App) -> Result<u16, Box<dyn std::error::Error>> {
                 match server_version(port) {
                     Some(found) if found == want => {
                         log_line(app, &format!("复用已在运行的内置服务，端口 {port}"));
-                        return Ok(port);
+                        return Ok((port, None));
                     }
                     Some(found) => log_line(
                         app,
@@ -144,7 +152,21 @@ fn start_backend(app: &tauri::App) -> Result<u16, Box<dyn std::error::Error>> {
         if let Ok(text) = std::fs::read_to_string(&port_file) {
             if let Ok(port) = text.trim().parse::<u16>() {
                 log_line(app, &format!("内置服务已就绪，端口 {port}"));
-                return Ok(port);
+                // 兜底自检：安装时若旧内核占着文件，替换会失败、磁盘上还是旧版本，
+                // 这一份起来后自报的版本就对不上。把话说清楚（界面顶部会显示），
+                // 否则用户面对的是一堆"改了没生效"，而且每次现象都不一样。
+                let want = app.package_info().version.to_string();
+                let stale = match server_version(port) {
+                    Some(found) if found != want => {
+                        log_line(app, &format!("内置服务版本不符：期望 {want}，实际 {found}"));
+                        Some(format!(
+                            "内置服务没有更新成功（内核 {found}，本程序 {want}）。\
+                             请重启一次电脑、再重新安装采知道；在此之前，新功能可能不会生效。"
+                        ))
+                    }
+                    _ => None,
+                };
+                return Ok((port, stale));
             }
         }
         std::thread::sleep(Duration::from_millis(200));

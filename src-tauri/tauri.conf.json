@@ -27,7 +27,9 @@
     "externalBin": ["binaries/caizhidao-server"],
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "languages": ["SimpChinese"],
+        "installerHooks": "windows/installer-hooks.nsh"
       }
     }
   }
