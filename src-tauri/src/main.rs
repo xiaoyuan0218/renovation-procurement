@@ -155,14 +155,29 @@ fn start_backend(app: &tauri::App) -> Result<(u16, Option<String>), Box<dyn std:
                 // 兜底自检：安装时若旧内核占着文件，替换会失败、磁盘上还是旧版本，
                 // 这一份起来后自报的版本就对不上。把话说清楚（界面顶部会显示），
                 // 否则用户面对的是一堆"改了没生效"，而且每次现象都不一样。
+                //
+                // 要带重试：内核是"先写端口文件、再去监听"的，刚读到文件时它多半
+                // 还没开始接受连接，一次探测必然是空的 —— 那会把"旧内核"漏过去。
                 let want = app.package_info().version.to_string();
-                let stale = match server_version(port) {
+                let mut found = server_version(port);
+                for _ in 0..12 {
+                    if found.is_some() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                    found = server_version(port);
+                }
+                let stale = match found {
                     Some(found) if found != want => {
                         log_line(app, &format!("内置服务版本不符：期望 {want}，实际 {found}"));
                         Some(format!(
                             "内置服务没有更新成功（内核 {found}，本程序 {want}）。\
                              请重启一次电脑、再重新安装采知道；在此之前，新功能可能不会生效。"
                         ))
+                    }
+                    None => {
+                        log_line(app, &format!("内置服务版本没问出来（端口 {port}）"));
+                        None
                     }
                     _ => None,
                 };
