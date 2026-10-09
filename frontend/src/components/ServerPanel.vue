@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { lists } from '../lists'
+import { lists, loadLists } from '../lists'
 
 /**
  * 「服务器」面板：把本机的清单同步到自己的服务端。
@@ -108,6 +108,9 @@ async function doLogout() {
 /** 同步/上传/拉取之后：本地内容可能被重建，通知外层刷新一遍。 */
 async function afterChange() {
   await loadState()
+  // 本地清单可能因此变多（拉下来一份、另存一份）或换了编号 —— 顶部的清单
+  // 下拉要跟着重读，否则新拉下来的那份要关掉重开才看得见
+  await loadLists()
   emit('synced')
 }
 
