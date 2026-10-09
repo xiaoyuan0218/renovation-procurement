@@ -142,6 +142,39 @@ def test_desktop_apply_keeps_deposit_when_payload_has_no_field(db, item):
     assert db.query(PurchaseRecord).one().is_deposit is True
 
 
+def test_desktop_merge_with_old_server_keeps_deposit(db, item):
+    """PC 端场景：本地勾了定金，服务器还是旧版（payload 里没这个字段）。
+
+    一轮「拉取 → 合并 → 落地」之后标记必须还在。合并那一步不能把"没带这个
+    信息"归一成"不是定金" —— 归一了，落地前的回填就认不出来，用户刚勾的
+    定金会被无声抹掉（桌面端连旧服务器时就是这样）。
+    """
+    from app.services import local_apply, merge, record_keys, list_transfer
+    lst = db.query(ItemList).filter(ItemList.id == item.list_id).one()
+    _add(db, item, 0, 1000, deposit=True)
+
+    mine = list_transfer.export_list(db, lst)
+    mine["items"][0]["updated_at"] = "2026-10-08 05:30:00"
+    theirs = _strip_deposit(list_transfer.export_list(db, lst))
+    theirs["items"][0]["updated_at"] = "2026-10-08 06:00:00"   # 服务器改得更新
+    base_payload = _strip_deposit(list_transfer.export_list(db, lst))
+    base_payload["items"][0]["updated_at"] = "2026-10-08 05:00:00"
+    # 两边都改过、服务器更新 → 行级胜负判给服务器，合并会去取"服务器的那一行"，
+    # 而那条记录没有 is_deposit 字段
+    base = merge.Baseline(payload=base_payload,
+                          local_map={f"item:{item.id}": item.id})
+
+    merged = merge.merge(base, mine, theirs)
+    assert merged.payload["items"][0]["records"][0].get("is_deposit") is not False, \
+        "合并不能替老服务器说「不是定金」—— 归一成 False 会把回填挡掉"
+
+    record_keys.fill_missing_deposit(db, lst.id, merged.payload)
+    local_apply.apply_payload(db, lst, merged.payload)
+
+    db.expire_all()
+    assert db.query(PurchaseRecord).one().is_deposit is True
+
+
 def test_sync_http_with_old_payload_keeps_deposit(client):
     """走接口的老客户端推送（body 里没有 is_deposit 字段）同样不能抹平。"""
     h = _hdr(client)
