@@ -238,11 +238,16 @@ def _expense_key(expense) -> str:
         expense.vendor or "", expense.order_no or "")
 
 
-def create_list_from_payload(db: Session, payload: dict, name: str) -> tuple:
+def create_list_from_payload(db: Session, payload: dict, name: str,
+                             fresh_code: bool = False) -> tuple:
     """在本地新建一份清单并灌入内容。
 
     返回 `(清单, 服务器 id → 本地 id 映射)` —— 映射要给绑定关系留着，下次同步
     靠它认出「哪一行是同一行」。
+
+    `fresh_code=True` 时强制分配新编号：用于"这份编号本地已经有人用了"的场合
+    （拉取撞车时把服务器那份另存到本地），直接沿用会撞唯一索引，也会让
+    "哪份是哪份"乱掉。
     """
     list_meta = payload.get("list", {})
     created = _parse_dt_ts(list_meta.get("created_at"))
@@ -250,7 +255,8 @@ def create_list_from_payload(db: Session, payload: dict, name: str) -> tuple:
     lst = ItemList(
         name=(name or list_meta.get("name") or "未命名清单").strip()[:50],
         note=list_meta.get("note") or "", sort=list_meta.get("sort") or 0,
-        code=codes.normalize(list_meta.get("code")) or codes.new_code(),
+        code=codes.new_code() if fresh_code
+        else (codes.normalize(list_meta.get("code")) or codes.new_code()),
         created_at=created or _ts_or_now(None),
         updated_at=updated or _ts_or_now(None),
     )

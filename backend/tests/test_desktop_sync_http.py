@@ -337,6 +337,59 @@ def test_resolve_create_new_keeps_both_sides(ctx, remote_server):
     assert _remote_names(remote_server, token, remote_id) == {"筒灯", "服务器加的"}
 
 
+def test_resolve_create_new_on_pull_saves_remote_as_local_copy(ctx, remote_server):
+    """拉取撞车时选「另存一份」：把服务器那份另存成本地的一份新清单，两份都留。"""
+    lst = _first_list(ctx)
+    _add_item(ctx, lst, "筒灯", qty=2, price=10)
+    ctx.commit()
+    desktop_sync.login(ctx, remote_server, USER, PASSWORD)
+    remote_id = desktop_sync.upload(ctx, lst.id)["created_list_id"]
+    desktop_sync.unbind(ctx, lst.id)
+
+    _add_item(ctx, lst, "本地新加的", qty=1, price=5)     # 本地改过
+    ctx.commit()
+    token = _remote_token(remote_server)
+    _remote_add_item(remote_server, token, remote_id, "服务器加的", qty=3, price=7)
+
+    decision = desktop_sync.pull_as_new(ctx, remote_id, "不管叫什么")["needs_upload_decision"]
+    assert decision["direction"] == "pull"
+
+    out = desktop_sync.resolve_upload(ctx, decision["list_id"],
+                                     decision["remote_list_id"],
+                                     choice="create_new", direction="pull")
+    copy_id = out["created_list_id"]
+    assert copy_id != lst.id
+
+    # 本地两份都在：原来那份没动，新份是服务器那份的副本
+    assert _names(ctx, lst.id) == {"筒灯", "本地新加的"}
+    assert _names(ctx, copy_id) == {"筒灯", "服务器加的"}
+    # 副本编号换新（不跟原来那份撞），也没有绑定（独立副本）
+    assert ctx.get(ItemList, copy_id).code != ctx.get(ItemList, lst.id).code
+    assert ctx.get(SyncBinding, copy_id) is None
+
+
+def test_resolve_upload_route_accepts_create_new():
+    """路由层的白名单要认得 create_new。
+
+    只改服务层、忘了路由白名单的话，用户在界面上选「另存一份」会被 400 挡掉 ——
+    服务层的用例直接调函数，抓不到这种漏。
+    """
+    from fastapi.testclient import TestClient
+    from app.main import app as local_app
+
+    with TestClient(local_app) as client:
+        client.post("/api/auth/setup", json={"username": USER, "password": PASSWORD})
+        token = client.post("/api/auth/login",
+                            json={"username": USER, "password": PASSWORD}).json()["token"]
+        response = client.post(
+            "/api/desktop/resolve-upload",
+            json={"list_id": 1, "remote_list_id": 1,
+                  "choice": "create_new", "direction": "pull"},
+            headers={"Authorization": f"Bearer {token}"})
+
+    assert "choice 只能是" not in response.text, response.text
+
+
 def test_pull_creates_local_copy_and_binds(ctx, remote_server):
     """本地没有这份（同编号）时，拉取就新建一份并绑定。"""
     lst = _first_list(ctx)

@@ -178,7 +178,8 @@ class SyncViewModel(
         val decision = _state.value.uploadDecision ?: return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, uploadDecision = null)
-            val result = engine.resolveUpload(decision.localListId, decision.remoteListId, choice)
+            val result = engine.resolveUpload(decision.localListId, decision.remoteListId,
+                choice, decision.fromPull)
             report(
                 result,
                 when (choice) {

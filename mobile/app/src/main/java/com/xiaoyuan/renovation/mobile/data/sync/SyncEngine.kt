@@ -86,6 +86,11 @@ data class UploadDecision(
     val local: SideSummary,
     /** 服务器上那份有多少内容 */
     val remote: SideSummary,
+    /**
+     * 是不是从「拉到本地」进来的。「另存一份」在两边含义相反：上传撞车是把本机
+     * 这份存到服务器，拉取撞车是把服务器那份存到本地 —— 界面与引擎都要按它分。
+     */
+    val fromPull: Boolean = false,
 )
 
 /**
@@ -286,6 +291,7 @@ class SyncEngine(
         listId: Int,
         remoteListId: Int,
         choice: UploadChoice,
+        fromPull: Boolean = false,
     ): ApiResult<SyncOutcome> {
         val local = db.lists().byId(listId) ?: return ApiResult.Err("清单不存在")
         val mine = Snapshot.capture(db, listId).copy(
@@ -305,9 +311,21 @@ class SyncEngine(
         val theirs = Snapshot.fillMissingDeposit(db, listId, snapshot.payload)
 
         if (choice == UploadChoice.CreateNew) {
-            // 两边都留：把本机这份作为一份新清单传到服务器（编号由服务器分配，
-            // 不会跟原来那份撞），本机跟着改用新编号并绑定它；服务器原来那份原样
-            // 不动，两份从此各走各的
+            if (fromPull) {
+                // 拉取撞车时的「另存一份」：把**服务器那份**另存成本地的一份新清单
+                // （编号自动换新，本地已有那份原样不动），两边的内容都留着。新份是
+                // 独立副本，不建立绑定 —— 它和服务器那份编号不同，绑了反而让
+                // "哪份是哪份"乱掉。
+                val copyId = Snapshot.createList(
+                    db, snapshot.payload,
+                    snapshot.payload.list.name.ifEmpty { "副本" },
+                    freshCode = true,
+                )
+                return ApiResult.Ok(SyncOutcome(createdListId = copyId))
+            }
+            // 上传撞车时的「另存一份」：把本机这份作为一份新清单传到服务器（编号由
+            // 服务器分配，不会跟原来那份撞），本机跟着改用新编号并绑定它；服务器
+            // 原来那份原样不动，两份从此各走各的
             return when (val created = api().createList(mine)) {
                 is ApiResult.Ok -> {
                     adopt(
@@ -416,6 +434,7 @@ class SyncEngine(
                         remoteListId = remoteListId,
                         local = summarize(Snapshot.capture(db, existing.id)),
                         remote = summarize(snapshot.payload),
+                        fromPull = true,
                     ),
                 ),
             )

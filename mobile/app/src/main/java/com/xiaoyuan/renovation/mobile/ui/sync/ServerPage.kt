@@ -435,7 +435,11 @@ private fun UploadDecisionDialog(
                 Spacer(Modifier.height(6.dp))
                 ChoiceRow(
                     title = "另存一份（两份都留）",
-                    caption = "手机这份作为一份新清单传到服务器，两边内容都不动",
+                    caption = if (decision.fromPull) {
+                        "服务器那份另存为手机上一份新清单（编号换新），两边都不动"
+                    } else {
+                        "手机这份作为一份新清单传到服务器，两边内容都不动"
+                    },
                     onClick = { onChoose(UploadChoice.CreateNew) },
                 )
             }

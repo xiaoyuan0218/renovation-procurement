@@ -46,7 +46,10 @@ class UploadIn(BaseModel):
 class ResolveUploadIn(BaseModel):
     list_id: int
     remote_list_id: int
-    choice: str          # merge_both / overwrite_remote / keep_remote
+    choice: str          # merge_both / overwrite_remote / keep_remote / create_new
+    # 从哪个入口进来的（前端把 decision 里的方向原样带回）：「另存一份」在两边含义
+    # 相反 —— 上传撞车是存到服务器，拉取撞车是存到本地
+    direction: str = "push"
 
 
 class PullIn(BaseModel):
@@ -106,10 +109,14 @@ def upload(data: UploadIn, db: Session = Depends(get_db)):
 
 @router.post("/resolve-upload")
 def resolve_upload(data: ResolveUploadIn, db: Session = Depends(get_db)):
-    if data.choice not in ("merge_both", "overwrite_remote", "keep_remote"):
-        raise HTTPException(400, "choice 只能是 merge_both / overwrite_remote / keep_remote")
+    if data.choice not in ("merge_both", "overwrite_remote", "keep_remote", "create_new"):
+        raise HTTPException(
+            400, "choice 只能是 merge_both / overwrite_remote / keep_remote / create_new")
+    if data.direction not in ("push", "pull"):
+        raise HTTPException(400, "direction 只能是 push / pull")
     with _as_http_error():
-        return desktop_sync.resolve_upload(db, data.list_id, data.remote_list_id, data.choice)
+        return desktop_sync.resolve_upload(db, data.list_id, data.remote_list_id,
+                                           data.choice, data.direction)
 
 
 @router.post("/pull")

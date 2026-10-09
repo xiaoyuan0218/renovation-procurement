@@ -669,6 +669,38 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `拉取撞车选另存一份：把服务器那份存成本地新清单，两份都留`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("采购清单", code)
+        db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "本地新加的", price = 5.0,
+                updatedAt = "2026-09-19 13:30:00",
+            ),
+        )
+
+        server.enqueue(response(200, snapshotWithItem("fp-remote", code, price = 20.0)))
+        val decision = engine.pullAsNewList(remoteListId = 5, name = "采购清单")
+            .okData?.needsUploadDecision ?: error("应当弹选择框")
+        assertTrue("要标出这是从「拉到本地」来的", decision.fromPull)
+
+        // 执行「另存一份」时要再取一次服务器快照（副本的内容来源）
+        server.enqueue(response(200, snapshotWithItem("fp-remote", code, price = 20.0)))
+        val resolved = engine.resolveUpload(decision.localListId, decision.remoteListId,
+            UploadChoice.CreateNew, fromPull = true).okData ?: error("另存一份应当成功")
+
+        val copyId = resolved.createdListId!!
+        assertTrue("副本是新的一份", copyId != listId)
+        assertEquals("副本是服务器那份的内容", listOf("筒灯"),
+            db.items().all(copyId).map { it.name })
+        assertEquals("本地原来那份不动", listOf("本地新加的"),
+            db.items().all(listId).map { it.name })
+        assertNull("独立副本不绑定", db.sync().byList(copyId))
+        assertTrue("副本编号要换新",
+            db.lists().byId(copyId)!!.code != db.lists().byId(listId)!!.code)
+    }
+
+    @Test
     fun `自动同步在内容没变时不刷新界面`() = runBlocking {
         val code = "ABCDEFGH"
         val listId = newList("装修采购", code)

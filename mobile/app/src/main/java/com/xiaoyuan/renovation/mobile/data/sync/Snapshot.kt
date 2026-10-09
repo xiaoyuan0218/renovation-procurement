@@ -328,7 +328,15 @@ object Snapshot {
     }
 
     /** 在本地新建一份清单并灌入内容，返回新清单 id。 */
-    suspend fun createList(db: AppDatabase, payload: SyncPayload, name: String): Int {
+    /**
+     * 在本地新建一份清单并灌入内容。
+     *
+     * `freshCode = true` 时强制分配新编号：用于"这份编号本地已经有人用了"的场合
+     * （拉取撞车时把服务器那份另存到本地），直接沿用会撞唯一约束，也会让
+     * "哪份是哪份"乱掉。
+     */
+    suspend fun createList(db: AppDatabase, payload: SyncPayload, name: String,
+                           freshCode: Boolean = false): Int {
         val listId = db.lists().insert(
             ItemListEntity(
                 name = name,
@@ -338,10 +346,18 @@ object Snapshot {
                 createdAt = payload.list.createdAt.ifEmpty { nowStamp() },
                 updatedAt = payload.list.updatedAt.ifEmpty { nowStamp() },
                 // 服务器那份有编号就用它的：两边一致，一眼认得出是同一份
-                code = ListCodes.normalize(payload.list.code).ifEmpty { ListCodes.new() },
+                code = if (freshCode) ListCodes.new()
+                else ListCodes.normalize(payload.list.code).ifEmpty { ListCodes.new() },
             ),
         ).toInt()
         apply(db, listId, payload)
+        if (freshCode) {
+            // apply 会把编号跟成 payload 那份（同一份要对上号）；「另存一份」要的是
+            // 独立副本，编号必须换新，所以最后再盖一次
+            db.lists().byId(listId)?.let {
+                db.lists().update(it.copy(code = ListCodes.new()))
+            }
+        }
         return listId
     }
 

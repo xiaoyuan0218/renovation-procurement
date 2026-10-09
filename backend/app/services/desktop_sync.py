@@ -219,11 +219,12 @@ def upload(db: Session, list_id: int, remote_list_id: int | None = None,
 
 
 def resolve_upload(db: Session, list_id: int, remote_list_id: int,
-                   choice: str) -> dict:
-    """用户在「上传撞上同一份」里选完之后真正执行。
+                   choice: str, direction: str = "push") -> dict:
+    """用户在两份撞上同一编号的选择框里选完之后真正执行。
 
-    三种选法：整份覆盖上去、按名字合并两边、或者反过来把服务器那份拿下来。
-    前两种会在服务器上写，第三种只动本地。
+    `direction` 是入口：上传撞车（push）还是拉取撞车（pull）。四种选法里只有
+    「另存一份」两边含义相反 —— 上传时把**本机**这份存到服务器，拉取时把
+    **服务器**那份存到本地；其余三种（合并、以某边为准）方向无关。
     """
     lst = db.get(ItemList, list_id)
     if lst is None:
@@ -238,9 +239,22 @@ def resolve_upload(db: Session, list_id: int, remote_list_id: int,
         return {"notice": "已改用服务器上的内容"}
 
     if choice == "create_new":
-        # 两边都留：把本机这份作为**一份新清单**传到服务器（编号由服务器分配，不会
-        # 跟原来那份撞），本机跟着改用新编号并与它绑定；服务器原来那份原样不动，
-        # 两份从此各走各的。用于"同一编号但内容已经分家、哪边都不想丢"的场合。
+        if direction == "pull":
+            # 拉取撞车时的「另存一份」：把**服务器那份**另存成本地的一份新清单
+            # （编号自动换新，本地已有那份原样不动），两边的内容都留着。新份是
+            # 独立副本，不建立绑定 —— 它和服务器那份编号不同，绑了反而让
+            # "哪份是哪份"乱掉。
+            remote_payload = snapshot["payload"]
+            copy_name = (remote_payload.get("list", {}).get("name")
+                         or lst.name or "副本")
+            copy, _local_map = local_apply.create_list_from_payload(
+                db, remote_payload, copy_name, fresh_code=True)
+            db.commit()
+            return {"created_list_id": copy.id,
+                    "notice": "已把服务器那份另存为本地的一份新清单（编号自动换新），两份都留着"}
+        # 上传撞车时的「另存一份」：把本机这份作为一份新清单传到服务器（编号由
+        # 服务器分配，不会跟原来那份撞），本机跟着改用新编号并与它绑定；服务器
+        # 原来那份原样不动，两份从此各走各的
         created = client.create_list(mine)
         _adopt(db, lst, created["list_id"], created)
         return {"notice": "已另存为服务器上的一份新清单，两边的内容都留着"}
@@ -289,6 +303,8 @@ def pull_as_new(db: Session, remote_list_id: int, name: str) -> dict:
         return {"needs_upload_decision": {
             "list_id": existing.id,
             "remote_list_id": remote_list_id,
+            # 从拉取入口进来的：「另存一份」在两边含义相反，前端要把它带回来
+            "direction": "pull",
             "local": _summarize(list_transfer.export_list(db, existing)),
             "remote": _summarize(payload),
         }}

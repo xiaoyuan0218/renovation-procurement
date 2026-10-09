@@ -128,6 +128,8 @@ async function resolveUpload(choice) {
     list_id: pending.list_id,
     remote_list_id: pending.remote_list_id,
     choice,
+    // 「另存一份」在上传与拉取两个入口下含义相反，把方向带回去
+    direction: pending.direction || 'push',
   }))
   if (result) await afterChange()
 }
@@ -317,7 +319,9 @@ onMounted(loadState)
       </div>
       <div class="choice-row" @click="resolveUpload('create_new')">
         <strong>另存一份（两份都留）</strong>
-        <span>本机这份作为一份新清单传到服务器，两边内容都不动</span>
+        <span>{{ uploadDecision?.direction === 'pull'
+          ? '服务器那份另存为本机的一份新清单（编号换新），两边都不动'
+          : '本机这份作为一份新清单传到服务器，两边内容都不动' }}</span>
       </div>
     </el-dialog>
   </div>
