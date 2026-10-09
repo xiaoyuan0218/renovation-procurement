@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -73,6 +75,8 @@ fun PurchaseSheet(
     var vendor by remember(item.id) { mutableStateOf("") }
     var orderNo by remember(item.id) { mutableStateOf("") }
     var roomIds by remember(item.id) { mutableStateOf<Set<Int>>(emptySet()) }
+    // 定金：钱先付、货没到。只进已付金额，不推进已买数量
+    var isDeposit by remember(item.id) { mutableStateOf(false) }
 
     // 只能勾这条物料实际分到的分组 —— 归到一个它没分到的分组没有意义
     val allocRooms = remember(item.id, rooms) {
@@ -88,7 +92,11 @@ fun PurchaseSheet(
     }
 
     fun recordInput(q: Double, a: Double) = RecordInDto(
-        qty = q, amount = a, date = date, note = note.trim(),
+        // 定金不看数量：勾了就按 0 存（与网页端、编辑页一致）
+        qty = if (isDeposit) 0.0 else q,
+        amount = a,
+        isDeposit = isDeposit,
+        date = date, note = note.trim(),
         vendor = vendor.trim(), orderNo = orderNo.trim(),
         roomIds = roomIds.toList(),
     )
@@ -119,6 +127,7 @@ fun PurchaseSheet(
                     onValueChange = { qty = it },
                     label = "实付数量",
                     placeholder = "本次买了几件",
+                    enabled = !isDeposit,
                     modifier = Modifier.weight(1f),
                 )
                 AppNumberField(
@@ -129,6 +138,31 @@ fun PurchaseSheet(
                     modifier = Modifier.weight(1f),
                     accent = Ink.Mint,
                 )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            // 定金：钱先付、货没到。只进已付金额，不推进到货进度
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = isDeposit,
+                    onCheckedChange = { isDeposit = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Ink.Amber,
+                        uncheckedColor = Ink.TextMuted,
+                        checkmarkColor = Color.White,
+                    ),
+                    modifier = Modifier.size(26.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "定金（预付款，货还没到）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDeposit) Ink.Amber else Ink.TextSecondary,
+                )
+            }
+            if (isDeposit) {
+                Spacer(Modifier.height(4.dp))
+                HintText("只算已付金额，不推进已买数量；货到了再记一笔尾款就结清。")
             }
 
             Spacer(Modifier.height(12.dp))
@@ -198,7 +232,7 @@ fun PurchaseSheet(
                         }
                     },
                     icon = Icons.Filled.RestartAlt,
-                    enabled = !busy,
+                    enabled = !busy && !isDeposit,
                 )
                 GhostButton(
                     text = "清零",
@@ -212,7 +246,8 @@ fun PurchaseSheet(
                         val q = Fmt.parseNumberOrZero(qty)
                         val a = Fmt.parseNumberOrZero(amount)
                         error = when {
-                            q <= 0 && a <= 0 -> "数量和金额不能同时为 0"
+                            isDeposit && a <= 0 -> "定金要填金额"
+                            !isDeposit && q <= 0 && a <= 0 -> "数量和金额不能同时为 0"
                             q < 0 || a < 0 -> "不能填负数"
                             else -> null
                         }

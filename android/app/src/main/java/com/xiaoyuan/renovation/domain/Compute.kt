@@ -2,6 +2,7 @@ package com.xiaoyuan.renovation.domain
 
 import com.xiaoyuan.renovation.data.model.AllocInDto
 import com.xiaoyuan.renovation.data.model.RecordInDto
+import com.xiaoyuan.renovation.data.model.STATUS_DEPOSIT
 import com.xiaoyuan.renovation.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.data.model.STATUS_NONE
 import com.xiaoyuan.renovation.data.model.STATUS_PARTIAL
@@ -37,22 +38,32 @@ object Compute {
     fun discountTotal(totalQty: Double, price: Double, discountPrice: Double?): Double =
         r2(totalQty * (discountPrice ?: price))
 
-    fun paidQty(records: List<RecordInDto>): Double = r2(records.sumOf { it.qty })
+    fun paidQty(records: List<RecordInDto>): Double =
+        r2(records.filter { !it.isDeposit }.sumOf { it.qty })
 
     fun paidAmount(records: List<RecordInDto>): Double = r2(records.sumOf { it.amount })
 
+    /** 定金已付的金额：只算钱，不推进已买数量（与后端 compute.deposit_paid 同口径） */
+    fun depositPaid(records: List<RecordInDto>): Double =
+        r2(records.filter { it.isDeposit }.sumOf { it.amount })
+
     fun unpaidQty(totalQty: Double, paidQty: Double): Double = r2(max(0.0, totalQty - paidQty))
 
-    fun unpaidAmount(totalQty: Double, paidQty: Double, price: Double): Double =
-        r2(unpaidQty(totalQty, paidQty) * price)
+    fun unpaidAmount(
+        totalQty: Double,
+        paidQty: Double,
+        price: Double,
+        depositPaid: Double = 0.0,
+    ): Double = r2(max(0.0, unpaidQty(totalQty, paidQty) * price - depositPaid))
 
     fun paidUnitPrice(paidQty: Double, paidAmount: Double): Double? =
         if (paidQty > 0 && paidAmount > 0) r2(paidAmount / paidQty) else null
 
-    fun status(totalQty: Double, paidQty: Double): String = when {
+    fun status(totalQty: Double, paidQty: Double, depositPaid: Double = 0.0): String = when {
         totalQty <= 0 -> STATUS_NONE
         paidQty >= totalQty - 1e-9 -> STATUS_DONE
         paidQty > 0 -> STATUS_PARTIAL
+        depositPaid > 0 -> STATUS_DEPOSIT
         else -> STATUS_UNBOUGHT
     }
 }

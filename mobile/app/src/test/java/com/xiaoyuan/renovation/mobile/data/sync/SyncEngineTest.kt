@@ -462,7 +462,8 @@ class SyncEngineTest {
         // 不该原样返回让界面再弹一遍 —— 从前用户得对着同一个弹窗选两次
         server.enqueue(response(200, serverSnap))       // 第二轮 GET
         server.enqueue(response(200, snapshotWithItemAt("fp-after", code, price = 111.0, updated = "2026-09-19 13:29:43")))
-        val second = engine.sync(listId, preferLocal = true).okData ?: error("第二轮应当成功")
+        val second = engine.sync(listId, preferLocal = true, resolved = true).okData
+            ?: error("第二轮应当成功")
         assertFalse("用户已裁决，不该再弹", second.hasConflicts)
         val firstGet = server.next()
         val secondGet = server.next()
@@ -471,6 +472,127 @@ class SyncEngineTest {
         assertEquals("/api/sync/lists/5", secondGet.path)
         assertEquals("裁决后要走 force 推送", "PUT", push.method)
         assertTrue("推的是手机的价格 111", push.body.readUtf8().contains("\"price\":111.0"))
+    }
+
+    @Test
+    fun `以电脑为准也要落地：冲突不再弹、本地换成服务器的内容`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("装修采购", code)
+        // 本地改了价格（111）、基线还是 10.0 —— 两边都改过
+        db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "筒灯", price = 111.0, updatedAt = "2026-09-19 13:29:43",
+            ),
+        )
+        db.sync().upsert(
+            binding(listId, remoteListId = 5).copy(
+                fingerprint = "fp-old",
+                baseline = baselineJson(code, itemPrice = 10.0),
+            ),
+        )
+        currentList.set(listId)
+        awaitUntil("当前清单就位") { currentList.flow.value == listId }
+        // 服务器也改成 222、同一秒 —— 判不出来，第一轮返回冲突
+        val serverSnap = snapshotWithItemAt("fp-server", code, price = 222.0, updated = "2026-09-19 13:29:43")
+        server.enqueue(response(200, serverSnap))
+
+        val first = engine.sync(listId).okData ?: error("第一轮应当成功")
+        assertTrue("同一秒判不出来，要弹冲突框", first.hasConflicts)
+
+        // 用户选了"以电脑为准"：这一轮要把服务器那份落地、冲突清掉。
+        // 从前这一步什么都没做（不推送、不落库、基线也不更新）—— 同一个冲突
+        // 一遍遍弹，数据一步不动，用户只能反复点。
+        server.enqueue(response(200, serverSnap))       // 第二轮 GET
+        server.enqueue(response(200, snapshotWithItemAt("fp-after", code, price = 222.0, updated = "2026-09-19 13:29:43")))
+        val second = engine.sync(listId, preferLocal = false, resolved = true).okData
+            ?: error("第二轮应当成功")
+
+        assertFalse("用户已裁决，不该再弹", second.hasConflicts)
+        assertEquals("本地要变成电脑（服务器）那份的值", 222.0,
+            db.items().all(listId).single().price, 1e-9)
+        val firstGet = server.next()
+        val secondGet = server.next()
+        val push = server.next()
+        assertEquals("/api/sync/lists/5", firstGet.path)
+        assertEquals("/api/sync/lists/5", secondGet.path)
+        assertEquals("合并结果要推给服务器，两边才一致", "PUT", push.method)
+        assertTrue("推的是电脑那份的 222", push.body.readUtf8().contains("\"price\":222.0"))
+    }
+
+    @Test
+    fun `老服务器没带定金字段时，本地勾的定金不被抹掉`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("装修采购", code)
+        val itemId = db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "壁挂炉", unit = "台", qtyTotal = 1.0, price = 6999.0,
+                updatedAt = "2026-09-19 13:30:00",
+            ),
+        ).toInt()
+        db.records().insert(
+            com.xiaoyuan.renovation.mobile.data.db.PurchaseRecordEntity(
+                itemId = itemId, qty = 0.0, amount = 1000.0, isDeposit = true,
+                createdAt = "2026-09-19 13:30:00", updatedAt = "2026-09-19 13:30:00",
+            ),
+        )
+        // 基线是上次同步存下来的（含定金）；服务器那份还是老格式（没有这个字段），
+        // 而且它在物料上改过别的东西（时间更新）—— 于是这一轮以服务器为准合并
+        db.sync().upsert(
+            binding(listId, remoteListId = 5).copy(
+                fingerprint = "fp-old",
+                baseline = depositBaselineJson(code, withDepositField = true),
+            ),
+        )
+        currentList.set(listId)
+        awaitUntil("当前清单就位") { currentList.flow.value == listId }
+        val serverSnap = depositSnapshotJson("fp-server", code, withDepositField = false,
+            itemUpdated = "2026-09-19 13:40:00")
+        server.enqueue(response(200, serverSnap))
+        server.enqueue(response(200, serverSnap))
+
+        val outcome = engine.sync(listId).okData ?: error("同步应当成功")
+
+        assertFalse("这是普通合并（时间戳分得出来），不该弹冲突", outcome.hasConflicts)
+        val record = db.records().ofItem(db.items().all(listId).single().id).single()
+        assertTrue("老服务器没说这个字段，本地勾的定金必须留着", record.isDeposit)
+    }
+
+    @Test
+    fun `只改定金也要推给服务器（指纹要认它）`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("装修采购", code)
+        val itemId = db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "壁挂炉", unit = "台", qtyTotal = 1.0, price = 6999.0,
+                updatedAt = "2026-09-19 13:30:00",
+            ),
+        ).toInt()
+        db.records().insert(
+            com.xiaoyuan.renovation.mobile.data.db.PurchaseRecordEntity(
+                itemId = itemId, qty = 0.0, amount = 1000.0, isDeposit = true,
+                createdAt = "2026-09-19 13:30:00", updatedAt = "2026-09-19 13:30:00",
+            ),
+        )
+        // 基线里这条还不是定金；服务器也没动过（指纹一致）—— 唯一的区别就是定金
+        db.sync().upsert(
+            binding(listId, remoteListId = 5).copy(
+                baseline = depositBaselineJson(code, withDepositField = false),
+            ),
+        )
+        currentList.set(listId)
+        awaitUntil("当前清单就位") { currentList.flow.value == listId }
+        val serverSnap = depositSnapshotJson("fp-server", code, withDepositField = false)
+        server.enqueue(response(200, serverSnap))
+        server.enqueue(response(200, serverSnap))
+
+        val outcome = engine.sync(listId).okData ?: error("同步应当成功")
+
+        assertFalse(outcome.hasConflicts)
+        val get = server.next()
+        assertEquals("GET", get.method)
+        val push = server.next()
+        assertEquals("只改定金也要推送 —— 指纹漏了它会判成「没变」、永远不推", "PUT", push.method)
+        assertTrue("推上去的载荷要带定金", push.body.readUtf8().contains("\"is_deposit\":true"))
     }
 
     @Test
@@ -776,6 +898,53 @@ class SyncEngineTest {
                      "allocations":[],"records":[]}],
            "expenses":[]}}
     """.trimIndent()
+
+    /**
+     * 一条物料 + 一笔定金记录。`withDepositField = false` 模拟老服务器（1.2.2
+     * 之前）：payload 里根本没有 is_deposit 这个字段 —— 那是"不知道有这回事"，
+     * 不是"不是定金"。
+     */
+    private fun depositSnapshotJson(
+        fingerprint: String,
+        code: String,
+        withDepositField: Boolean,
+        itemUpdated: String = "2026-09-19 13:30:00",
+    ): String {
+        val deposit = if (withDepositField) "\"is_deposit\":true," else ""
+        return """
+        {"fingerprint":"$fingerprint",
+         "payload":{"version":1,
+           "list":{"name":"装修采购","note":"","sort":0,"code":"$code",
+                   "created_at":"2026-09-01 10:00:00","updated_at":"2026-09-01 10:00:00"},
+           "rooms":[],"categories":[],
+           "items":[{"id":101,"name":"壁挂炉","unit":"台","price":6999.0,"qty_total":1.0,
+                     "created_at":"2026-09-19 13:30:00","updated_at":"$itemUpdated",
+                     "allocations":[],
+                     "records":[{"qty":0.0,"amount":1000.0,$deposit"date":"",
+                                 "note":"","vendor":"","order_no":"","room_ids":[],
+                                 "created_at":"2026-09-19 13:30:00","updated_at":"2026-09-19 13:30:00"}]}],
+           "expenses":[]}}
+        """.trimIndent()
+    }
+
+    /** 同上那份的老版本基线（本地 map 里把 101 对上）。 */
+    private fun depositBaselineJson(code: String, withDepositField: Boolean): String {
+        val deposit = if (withDepositField) "\"is_deposit\":true," else ""
+        return """
+        {"fingerprint":"fp-old",
+         "payload":{"version":1,
+           "list":{"name":"装修采购","note":"","sort":0,"code":"$code"},
+           "rooms":[],"categories":[],
+           "items":[{"id":101,"name":"壁挂炉","unit":"台","price":6999.0,"qty_total":1.0,
+                     "created_at":"2026-09-19 13:30:00","updated_at":"2026-09-19 13:30:00",
+                     "allocations":[],
+                     "records":[{"qty":0.0,"amount":1000.0,$deposit"date":"",
+                                 "note":"","vendor":"","order_no":"","room_ids":[],
+                                 "created_at":"2026-09-19 13:30:00","updated_at":"2026-09-19 13:30:00"}]}],
+           "expenses":[]},
+         "localMap":{"item:101":1}}
+        """.trimIndent()
+    }
 
     /** 服务器那份带两条**同名**物料，价格不同 —— 用来验落地重建时 id 不会串位。 */
     private fun twoLampsJson(fingerprint: String, code: String) = """

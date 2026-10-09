@@ -15,7 +15,7 @@ import json
 from sqlalchemy.orm import Session
 
 from ..models import ItemList, RemoteSession, SyncBinding, utcnow
-from . import codes, list_transfer, local_apply, merge
+from . import codes, list_transfer, local_apply, merge, record_keys
 from .remote_sync import RemoteClient, RemoteError
 
 
@@ -138,7 +138,14 @@ def _save_binding(db: Session, list_id: int, remote_list_id: int, remote_name: s
 
 
 def _adopt(db: Session, lst: ItemList, remote_list_id: int, snapshot: dict) -> None:
-    """把推送/拉取回来的结果落到本地，并记下新的基线（含 id 映射）。"""
+    """把推送/拉取回来的结果落到本地，并记下新的基线（含 id 映射）。
+
+    兼容层：服务器还是 1.2.2 之前的老版本时，返回的 payload 里没有 is_deposit ——
+    "没带这个字段"不等于"这条不是定金"，落地前先按业务键把本地旧值填进去
+    （填在 payload 本身，基线也照它存），否则本地刚勾的定金会在同步回落时被抹掉，
+    而且基线会与本地内容不一致，每轮都被当成"本地有新改动"反复推送。
+    """
+    record_keys.fill_missing_deposit(db, lst.id, snapshot["payload"])
     local_map = local_apply.apply_payload(db, lst, snapshot["payload"])
     db.commit()
     _save_binding(db, lst.id, remote_list_id,

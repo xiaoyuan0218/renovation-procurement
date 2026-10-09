@@ -243,8 +243,9 @@ class SyncEngine(
             else -> {
                 val existing = db.sync().byList(listId)
                 if (existing != null && existing.baseline.isNotBlank()) {
-                    // 绑过、有基线：常规三方合并
-                    sync(listId, preferLocal = force)
+                    // 绑过、有基线：常规三方合并。force=true 是"以我为准"的覆盖
+                    // （用户已经明确选过），当成已裁决直接执行，不再拿冲突去问
+                    sync(listId, preferLocal = force, resolved = force)
                 } else {
                     // 从没同步过：问用户怎么对齐
                     when (val remote = api.exportList(target)) {
@@ -290,6 +291,8 @@ class SyncEngine(
         val exported = api().exportList(remoteListId)
         if (exported is ApiResult.Err) return exported
         val snapshot = (exported as ApiResult.Ok).data
+        // 老服务器的 payload 缺 is_deposit：合并前按业务键补上本地旧值
+        val theirs = Snapshot.fillMissingDeposit(db, listId, snapshot.payload)
 
         if (choice == UploadChoice.KeepRemote) {
             // 听服务器的：本地换成它那份。这条不推送，服务器上原样不动
@@ -298,14 +301,14 @@ class SyncEngine(
                 remoteListId = remoteListId,
                 remoteName = snapshot.payload.list.name,
                 fingerprint = snapshot.fingerprint,
-                payload = snapshot.payload,
+                payload = theirs,
             )
             return ApiResult.Ok(SyncOutcome())
         }
 
         val toPush = when (choice) {
             UploadChoice.OverwriteRemote -> mine
-            else -> Merger.mergeWithoutBase(mine, snapshot.payload)
+            else -> Merger.mergeWithoutBase(mine, theirs)
         }
         // 覆盖是用户明确要的"以我为准"，带 force 跳过指纹校验；合并则是基于刚
         // 取到的服务器内容算出来的，带上它的指纹 —— 万一这中间服务器又变了，
@@ -410,14 +413,21 @@ class SyncEngine(
      * 和服务器对齐。
      *
      * [preferLocal] 只在"两边都改过同一行"时起作用：false 听服务器的、true 听手机的。
-     * 有冲突且用户还没表态时不会推送，先把冲突列出来让界面问。
+     * [resolved] 表示"用户已经在冲突框里拍过板"。为 false（默认）时，遇到冲突先不
+     * 推送，把冲突列出来让界面问；为 true 时按 [preferLocal] 指的方向把合并结果
+     * 执行掉 —— 少了这个标志，"以电脑为准"（preferLocal=false）和首次检测长得
+     * 一模一样，会被当成"还没表态"，同一个冲突一遍遍弹、数据一步都不动。
      */
-    suspend fun sync(listId: Int, preferLocal: Boolean = false): ApiResult<SyncOutcome> {
+    suspend fun sync(
+        listId: Int,
+        preferLocal: Boolean = false,
+        resolved: Boolean = false,
+    ): ApiResult<SyncOutcome> {
         val binding = db.sync().byList(listId)
             ?: return ApiResult.Err("这份清单还没绑定服务器")
 
         return when (val remote = api().exportList(binding.remoteListId)) {
-            is ApiResult.Ok -> syncWith(binding, remote.data, preferLocal)
+            is ApiResult.Ok -> syncWith(binding, remote.data, preferLocal, resolved)
 
             // 服务器上那份被删了（多半是在电脑上删的）：直接解除绑定，本地数据原样留着，
             // 变回一份纯本地清单。要不要再传上去由用户自己决定 —— 弹窗问"重新传还是留本地"
@@ -469,10 +479,14 @@ class SyncEngine(
         binding: SyncBindingEntity,
         snapshot: SyncSnapshot,
         preferLocal: Boolean,
+        resolved: Boolean,
     ): ApiResult<SyncOutcome> {
         val listId = binding.listId
         val mine = Snapshot.capture(db, listId)
         val base = readBaseline(binding)
+        // 老服务器的 payload 缺 is_deposit：合并前按业务键补上本地旧值，
+        // 否则合并会把"服务器没说"当成"服务器说是非定金"、把本地标记带走
+        val theirs = Snapshot.fillMissingDeposit(db, listId, snapshot.payload)
 
         // 服务器没动过：把本地推上去。
         //
@@ -484,8 +498,9 @@ class SyncEngine(
         val payload: SyncPayload
         val conflicts: List<MergeConflict>
         if (remoteChanged) {
-            val merged = Merger.merge(base, mine, snapshot.payload, preferLocal)
-            if (merged.hasConflicts && !preferLocal) {
+            val merged = Merger.merge(base, mine, theirs, preferLocal)
+            // 用户还没在冲突框里表态：先别动任何东西，把冲突交给界面问
+            if (merged.hasConflicts && !resolved) {
                 return ApiResult.Ok(SyncOutcome(conflicts = merged.conflicts))
             }
             payload = merged.payload
@@ -513,11 +528,13 @@ class SyncEngine(
                     fingerprint = pushed.data.fingerprint,
                     payload = pushed.data.payload,
                 )
-                // preferLocal 的这轮推送是用户在冲突框里拍板后的执行 —— merge 返回
-                // 的冲突列表只是"判不出时选了哪边"的记录，已经按用户的意愿解决了。
-                // 照样塞回去的话，同一个冲突会立刻再弹一遍，用户得对着它选两次。
+                // 这轮推送是用户在冲突框里拍板后的执行 —— merge 返回的冲突列表只是
+                // "判不出时选了哪边"的记录，已经按用户的意愿解决了。照样塞回去的话，
+                // 同一个冲突会立刻再弹一遍，用户得对着它选两次。"以手机为准"与
+                // "以电脑为准"都是裁决，两个方向都要清（原来只清了 preferLocal 一边，
+                // 于是"以电脑为准"那一侧反复弹、数据还一步不动）。
                 ApiResult.Ok(
-                    SyncOutcome(conflicts = if (preferLocal) emptyList() else conflicts),
+                    SyncOutcome(conflicts = if (resolved || preferLocal) emptyList() else conflicts),
                 )
             }
 
@@ -556,8 +573,10 @@ class SyncEngine(
                 .sorted()
             val records = item.records.map { rec ->
                 val where = rec.roomIds.map { roomName[it].orEmpty() }.sorted()
-                "${rec.qty}\u0000${rec.amount}\u0000${rec.date}\u0000${rec.note}\u0000" +
-                    "${rec.vendor}\u0000${rec.orderNo}\u0000${where}"
+                // 定金字也要进指纹：漏了它，只改定金会被判成"内容没变"，
+                // 两边都不动、改动永远不推给服务器
+                "${rec.qty}\u0000${rec.amount}\u0000${rec.isDeposit}\u0000${rec.date}\u0000" +
+                    "${rec.note}\u0000${rec.vendor}\u0000${rec.orderNo}\u0000${where}"
             }.sorted()
             listOf(
                 item.name, categoryName[item.categoryId ?: 0].orEmpty(), item.unit,
@@ -591,8 +610,11 @@ class SyncEngine(
         fingerprint: String,
         payload: SyncPayload,
     ) {
-        val localMap = Snapshot.apply(db, listId, payload)
-        saveBinding(listId, remoteListId, remoteName, fingerprint, payload, localMap, db.sync().byList(listId))
+        // 兼容层：老服务器（1.2.2 之前）的 payload 里没有 is_deposit，落地前先按
+        // 业务键把本地旧值填进去（基线也照填后的存），否则本地刚勾的定金会被抹掉
+        val filled = Snapshot.fillMissingDeposit(db, listId, payload)
+        val localMap = Snapshot.apply(db, listId, filled)
+        saveBinding(listId, remoteListId, remoteName, fingerprint, filled, localMap, db.sync().byList(listId))
     }
 
     private suspend fun saveBinding(

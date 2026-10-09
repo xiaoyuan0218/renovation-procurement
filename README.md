@@ -263,7 +263,7 @@ curl -H "Authorization: Bearer xk_xxxxxxxx" http://<服务器IP>:8000/api/lists
 ## 版本、更新与打赏
 
 **版本号**统一在仓库根的 `VERSION` 文件里，后端、网页、两个安卓 App 都读它 ——
-发版只改这一个文件（安卓的 versionCode 由版本号换算，1.2.2 对应 10202，只增不减）。
+发版只改这一个文件（安卓的 versionCode 由版本号换算，1.2.3 对应 10203，只增不减）。
 
 **检查更新**在网页「设置 / 数据 → 关于」里，拿本机的构建时间和 GitHub 上最新一批构建的
 时间比（滚动 release 的 tag 永远是 latest，比不了版本号）。这个时间由 CI 建镜像时注入

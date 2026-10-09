@@ -280,6 +280,9 @@ object LocalCompute {
         itemId = r.itemId,
         qty = r.qty,
         amount = r.amount,
+        // 定金字必须跟着回读：漏了它界面永远读回"未勾选"，用户再保存一次
+        // （整批替换）就把库里真实的 true 抹成 false —— 看起来就是"勾了没用"
+        isDeposit = r.isDeposit,
         unitPrice = if (r.qty > 0 && r.amount != 0.0) r2(r.amount / r.qty) else null,
         date = forRead(r.date),
         note = r.note,

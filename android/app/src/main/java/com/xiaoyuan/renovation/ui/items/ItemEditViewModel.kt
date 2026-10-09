@@ -190,6 +190,11 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
         _form.update { form -> form.copy(records = form.records.filterNot { it.key == key }) }
     }
 
+    fun toggleRecordDeposit(key: Long, deposit: Boolean) {
+        // 定金不看数量：勾上把数量清掉（与网页端、单机版一致）
+        updateRecordRow(key) { it.copy(isDeposit = deposit, qty = if (deposit) "" else it.qty) }
+    }
+
     fun updateRecordRow(key: Long, transform: (DraftRecord) -> DraftRecord) {
         _form.update { form ->
             form.copy(records = form.records.map { if (it.key == key) transform(it) else it })
@@ -224,6 +229,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
         val discountTotal = Compute.discountTotal(totalQty, price, Fmt.parseNumber(form.discountPrice))
         val paidQty = Compute.paidQty(records)
         val paid = Compute.paidAmount(records)
+        val deposit = Compute.depositPaid(records)
         val unpaidQty = Compute.unpaidQty(totalQty, paidQty)
 
         return ItemPreview(
@@ -233,8 +239,8 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
             paidQty = paidQty,
             paid = paid,
             unpaidQty = unpaidQty,
-            unpaid = Compute.unpaidAmount(totalQty, paidQty, price),
-            status = Compute.status(totalQty, paidQty),
+            unpaid = Compute.unpaidAmount(totalQty, paidQty, price, deposit),
+            status = Compute.status(totalQty, paidQty, deposit),
             paidUnitPrice = Compute.paidUnitPrice(paidQty, paid),
         )
     }

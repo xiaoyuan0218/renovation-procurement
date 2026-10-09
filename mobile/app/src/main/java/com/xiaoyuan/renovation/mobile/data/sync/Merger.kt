@@ -147,6 +147,9 @@ object Merger {
                 .map { AllocRow(it.roomId, it.qty, it.priceOverride, it.note) }
                 .sortedBy { it.toString() },
             records = item.records
+                // isDeposit 可空：老 payload 没这个字段（null），比较时当"非定金"，
+                // 取用时保留 null —— 落地前 Snapshot.fillMissingDeposit 会按业务键
+                // 把本地旧值填回来；这里要是归一成 false，回填就认不出来了
                 .map { RecordRow(it.qty, it.amount, it.isDeposit, it.date, it.note, it.vendor, it.orderNo, it.roomIds.sorted()) }
                 .sortedBy { it.toString() },
         )
@@ -171,6 +174,7 @@ object Merger {
                     RecordRow(
                         qty = rec.qty,
                         amount = rec.amount,
+                        // 老 payload 没这个字段时保留 null（落地前会回填本地旧值）
                         isDeposit = rec.isDeposit,
                         date = rec.date,
                         note = rec.note,
@@ -486,7 +490,7 @@ object Merger {
      */
     private fun sameRecord(original: SyncRecord, row: RecordRow): Boolean =
         original.qty == row.qty && original.amount == row.amount &&
-            original.isDeposit == row.isDeposit &&
+            (original.isDeposit ?: false) == (row.isDeposit ?: false) &&
             original.date == row.date && original.note == row.note &&
             original.vendor == row.vendor && original.orderNo == row.orderNo
 
@@ -618,7 +622,8 @@ object Merger {
     private data class RecordRow(
         val qty: Double,
         val amount: Double,
-        val isDeposit: Boolean,
+        /** 可空：老 payload 没有这个字段。比较时按"非定金"，取用时保留 null 等回填 */
+        val isDeposit: Boolean?,
         val date: String,
         val note: String,
         val vendor: String,

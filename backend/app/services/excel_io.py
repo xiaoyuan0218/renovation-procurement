@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from openpyxl import Workbook, load_workbook
 
-from . import compute, dates
+from . import compute, dates, record_keys
 
 PRODUCT_HEADER = {"灯具", "面板", "物料", "产品"}
 
@@ -35,6 +35,10 @@ RECORD_HEADER = ["物料ID", "物料名称", "实付数量", "实付金额", "�
                  "商家", "订单号", "备注", "添加时间", "修改时间"]
 EXPENSE_HEADER = ["类型", "金额", "日期", "商家", "订单号", "备注",
                   "添加时间", "修改时间"]
+
+# 「定金」列认这些写法为真，其余（空、"否"、"不"…）都是否。手机端 SheetMapping
+# 认的是同一份，手填表格时写成 true 或打个勾也认。
+DEPOSIT_YES = {"是", "TRUE", "True", "true", "1", "√"}
 
 
 def _stamp_out(value) -> str:
@@ -490,9 +494,12 @@ def _parse_flat(path_or_bytes):
                 "item_name": name,
                 "qty": qty,
                 "amount": amount,
-                # 定金：钱先付、货没到。老文件没有这一列 → 都不是定金（老行为）
-                "is_deposit": _txt(_vo(ws_rec, r, rcols.get("定金")))
-                in ("是", "TRUE", "True", "1"),
+                # 定金：钱先付、货没到。「定金」列不存在（1.2.2 之前导出的老文件、
+                # 手写的备份）时给 None —— 那是"这份文件没带这个信息"，不是"都不是
+                # 定金"，落库时按业务键沿用旧值，别把清单里已有的标记抹掉。
+                # 注意判的是列号：rcols 里所有键都在，找不到的列值是 None。
+                "is_deposit": (_txt(_vo(ws_rec, r, rcols.get("定金"))) in DEPOSIT_YES)
+                if rcols.get("定金") else None,
                 # Excel 的日期单元格读出来是 datetime，直接 str 会变成
                 # "2026-09-14 00:00:00" 这种脏值，这里统一成 YYYY-MM-DD
                 "date": dates.for_read(_vo(ws_rec, r, rcols.get("付款日期"))),
@@ -790,6 +797,15 @@ def _apply_flat(db, parsed, mode, report, list_id):
                           Room)
 
     db.expire_all()  # 同 session 二次导入时避免关系集合缓存过期不失效
+
+    # 兼容层：老文件（1.2.2 之前导出的、手写的备份）没有「定金」列，解析出来的
+    # is_deposit 是 None —— 那不是"不是定金"，而是"这份文件没带这个信息"。按
+    # 业务键先把旧值记下来，落库时回填。replace 会先清空整份清单，索引必须在
+    # 清空之前建好，否则什么都捞不着。
+    inherit: dict = {}
+    if record_keys.misses_deposit(parsed.get("records", [])):
+        inherit = record_keys.deposit_index(db, list_id)
+
     if mode == "replace":
         _clear_list_items(db, list_id)
     rooms_cache, cats_cache = {}, {}
@@ -902,6 +918,12 @@ def _apply_flat(db, parsed, mode, report, list_id):
         if not item:
             report["warnings"].append(f"采购记录中的物料「{r['item_name']}」不存在，已跳过")
             continue
+        deposit = r.get("is_deposit")
+        if deposit is None:
+            # 老文件没带这个信息：按业务键沿用覆盖前的值，找不到才当非定金
+            deposit = inherit.get(record_keys.record_key(
+                r["item_name"], r["qty"], r["amount"], r["date"], r["note"],
+                r.get("vendor"), r.get("order_no")), False)
         record_rooms = [
             RecordRoom(room_id=_get_or_create_room(
                 db, room_name, rooms_cache, report, list_id).id)
@@ -909,7 +931,7 @@ def _apply_flat(db, parsed, mode, report, list_id):
         ]
         record = PurchaseRecord(
             qty=r["qty"] or 0, amount=r["amount"] or 0,
-            is_deposit=bool(r.get("is_deposit")),
+            is_deposit=bool(deposit),
             date=r["date"] or "", note=r["note"] or "",
             vendor=r.get("vendor") or "", order_no=r.get("order_no") or "",
             rooms=record_rooms)

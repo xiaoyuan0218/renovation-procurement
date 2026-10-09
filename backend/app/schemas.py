@@ -399,8 +399,10 @@ class SyncRecordIn(SyncRowTimestamps):
     id: Optional[int] = None
     qty: float = 0
     amount: float = 0
-    # 定金：钱先付、货没到。跟着同步一起搬，否则一合并就被抹平
-    is_deposit: bool = False
+    # 定金：钱先付、货没到。跟着同步一起搬，否则一合并就被抹平。
+    # None 表示"推送方没带这个字段"（1.2.2 之前的老客户端）—— 那不是"不是定金"，
+    # 落地时要按业务键沿用覆盖前的值，别让一台老手机把整份清单的标记抹平。
+    is_deposit: Optional[bool] = None
     date: str = ""
     note: str = Field(default="", max_length=200)
     vendor: str = Field(default="", max_length=50)

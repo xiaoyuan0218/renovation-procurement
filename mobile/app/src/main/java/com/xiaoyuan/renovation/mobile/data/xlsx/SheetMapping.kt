@@ -57,9 +57,16 @@ object SheetMapping {
         "已购", "备注", "添加时间", "修改时间",
     )
     private val ALLOC_HEADERS = listOf("物料ID", "物料名称", "房间", "数量", "单价", "备注")
+
+    /** 「定金」列认这些写法为真，其余（空、否、不…）都是否。与后端 excel_io 的 YES 保持一份。 */
+    private val DEPOSIT_YES = setOf("是", "TRUE", "True", "true", "1", "√")
     private val RECORD_HEADERS = listOf(
-        "物料ID", "物料名称", "实付数量", "实付金额", "付款日期", "分组", "商家",
-        "订单号", "备注", "添加时间", "修改时间",
+        // 「定金」的位置与后端 excel_io.RECORD_HEADER 对齐（实付金额之后）。数据行
+        // 一直是按后端列序写的（见下面 recordRows），表头以前少了这一列，导出的
+        // 文件表头 11 列、数据 12 列 —— 在 Excel 里看「付款日期」列是"是/否"，
+        // 导回来整列错位、定金也丢了。
+        "物料ID", "物料名称", "实付数量", "实付金额", "定金", "付款日期", "分组",
+        "商家", "订单号", "备注", "添加时间", "修改时间",
     )
     private val EXPENSE_HEADERS = listOf(
         "类型", "金额", "日期", "商家", "订单号", "备注", "添加时间", "修改时间",
@@ -382,9 +389,8 @@ object SheetMapping {
                 db.records().deleteRecordRoomsOfItem(itemId)
                 db.records().deleteOfItem(itemId)
             }
-            // 定金列按「是/否」认（与后端 excel_io 同规则）；老文件没有这列时读空串，按否处理
-            val isDeposit = recordTable.cell(row, "定金").trim() in
-                setOf("是", "TRUE", "True", "1")
+            // 定金列按「是/否」认（与后端 excel_io 同一份写法表）；老文件没有这列时读空串，按否处理
+            val isDeposit = recordTable.cell(row, "定金").trim() in DEPOSIT_YES
             val id = db.records().insert(
                 PurchaseRecordEntity(
                     itemId = itemId,

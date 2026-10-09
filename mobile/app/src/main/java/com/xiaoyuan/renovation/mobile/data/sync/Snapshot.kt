@@ -23,6 +23,60 @@ import com.xiaoyuan.renovation.mobile.util.ListCodes
  */
 object Snapshot {
 
+    /**
+     * 兼容层：老服务器（1.2.2 之前）发来的 payload 里没有 is_deposit —— 那不是
+     * "这条不是定金"，而是"它不知道有这回事"。落地前按业务键把本地旧值填进去，
+     * 免得本地刚勾的定金在同步回落时被抹掉。
+     *
+     * 填的是 payload 本身：调用方随后会拿它存基线，基线跟落地内容一致，下一轮
+     * 才不会把"其实没变"再判成本地有新改动、反复推送。
+     */
+    suspend fun fillMissingDeposit(
+        db: AppDatabase,
+        listId: Int,
+        payload: SyncPayload,
+    ): SyncPayload {
+        val all = payload.items.flatMap { it.records }
+        if (all.isEmpty() || all.none { it.isDeposit == null }) return payload
+
+        val known = mutableSetOf<String>()
+        db.items().all(listId).forEach { item ->
+            db.records().ofItem(item.id).forEach { r ->
+                if (r.isDeposit) {
+                    known += recordKey(item.name, r.qty, r.amount, r.date,
+                        r.note, r.vendor, r.orderNo)
+                }
+            }
+        }
+        return payload.copy(items = payload.items.map { item ->
+            item.copy(records = item.records.map { rec ->
+                if (rec.isDeposit != null) {
+                    rec
+                } else {
+                    rec.copy(
+                        isDeposit = recordKey(item.name, rec.qty, rec.amount, rec.date,
+                            rec.note, rec.vendor, rec.orderNo) in known,
+                    )
+                }
+            })
+        })
+    }
+
+    /**
+     * 记录的业务键：缺 is_deposit 的 payload 靠它认出"覆盖前那条记录"。
+     * 与后端 record_keys.record_key 是同一套字段 —— 行 id 覆盖后会重排，指望不上。
+     */
+    private fun recordKey(
+        itemName: String,
+        qty: Double,
+        amount: Double,
+        date: String,
+        note: String,
+        vendor: String,
+        orderNo: String,
+    ): String = listOf(itemName.trim(), qty, amount, date.trim(), note.trim(),
+        vendor.trim(), orderNo.trim()).joinToString("\u0000")
+
     /** 把本地一份清单整份读成 payload。 */
     suspend fun capture(db: AppDatabase, listId: Int): SyncPayload {
         val list = db.lists().byId(listId) ?: error("清单不存在")
@@ -213,7 +267,7 @@ object Snapshot {
                         itemId = newId,
                         qty = record.qty,
                         amount = record.amount,
-                        isDeposit = record.isDeposit,
+                        isDeposit = record.isDeposit ?: false,
                         date = record.date,
                         note = record.note,
                         vendor = record.vendor,

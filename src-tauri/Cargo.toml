@@ -1,6 +1,6 @@
 [package]
 name = "caizhidao-desktop"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2021"
 description = "采知道 桌面端"
 

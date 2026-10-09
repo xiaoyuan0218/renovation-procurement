@@ -62,8 +62,14 @@ data class SyncRecord(
     val id: Int? = null,
     val qty: Double = 0.0,
     val amount: Double = 0.0,
-    /** 定金：钱先付、货没到（与后端 list_transfer 的字段同名同义） */
-    @SerialName("is_deposit") val isDeposit: Boolean = false,
+    /**
+     * 定金：钱先付、货没到（与后端 list_transfer 的字段同名同义）。
+     *
+     * 可空是为了区分"没说"与"不是"：1.2.2 之前的老服务器发出的 payload 里没有
+     * 这个字段，反序列化出来是 null —— 落地前按业务键把本地旧值填回去
+     * （见 Snapshot.fillMissingDeposit）。直接当 false 会把用户勾的定金抹掉。
+     */
+    @SerialName("is_deposit") val isDeposit: Boolean? = null,
     val date: String = "",
     val note: String = "",
     val vendor: String = "",

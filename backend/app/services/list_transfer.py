@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (Allocation, Category, ExtraExpense, Item, ItemList,
                       PurchaseRecord, RecordRoom, Room, utcnow)
+from .record_keys import fill_missing_deposit
 from . import codes
 
 FORMAT_VERSION = 1
@@ -277,6 +278,10 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
         db.add(target)
         db.flush()
     else:
+        # 兼容层：老客户端（≤1.2.1）的 payload 里没有 is_deposit，"没带这个字段"
+        # 不等于"这条不是定金" —— 覆盖成 False 的话，一台老手机推一次就把整份
+        # 清单的定金标记抹平。先按业务键把旧值填进 payload，再照它覆盖重建。
+        payload = fill_missing_deposit(db, target.id, payload)
         _clear(db, target)
         target.note = payload["list"].get("note", "")
         target.sort = payload["list"].get("sort", 0)

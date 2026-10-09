@@ -213,11 +213,11 @@ class SyncViewModel(
 
     /* ---------------- 同步 ---------------- */
 
-    fun syncNow(listId: Int, preferLocal: Boolean = false) {
+    fun syncNow(listId: Int, preferLocal: Boolean = false, resolved: Boolean = false) {
         pendingListId = listId
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, conflicts = emptyList())
-            when (val result = engine.sync(listId, preferLocal)) {
+            when (val result = engine.sync(listId, preferLocal, resolved)) {
                 is ApiResult.Ok -> {
                     val outcome = result.data
                     _state.value = _state.value.copy(
@@ -249,11 +249,16 @@ class SyncViewModel(
         }
     }
 
-    /** 用户在冲突提示里选了"以手机为准"（true）或"以电脑为准"（false）。 */
+    /**
+     * 用户在冲突提示里选了"以手机为准"（true）或"以电脑为准"（false）。
+     *
+     * 两个方向都要带上 resolved 标志：它跟"首次检测"的区别只在于冲突处听谁的，
+     * 合并与落地照常做。少了它，"以电脑为准"与首次检测完全一样，会一直弹。
+     */
     fun resolveConflicts(preferLocal: Boolean) {
         val listId = pendingListId ?: return
         _state.value = _state.value.copy(conflicts = emptyList())
-        syncNow(listId, preferLocal = preferLocal)
+        syncNow(listId, preferLocal = preferLocal, resolved = true)
     }
 
     fun unbind(listId: Int, keepRemote: Boolean = true) {

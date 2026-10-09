@@ -353,7 +353,7 @@ private fun ConflictDialog(
                 Spacer(Modifier.height(6.dp))
                 HintText("比如：$first")
                 Spacer(Modifier.height(6.dp))
-                HintText("选以哪边为准，另一边的这次改动会被覆盖。")
+                HintText("选以哪边为准：冲突的这一处按你选的来，其它没有冲突的改动两边都会保留。")
             }
         },
         confirmButton = {
