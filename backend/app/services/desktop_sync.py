@@ -237,6 +237,14 @@ def resolve_upload(db: Session, list_id: int, remote_list_id: int,
         _adopt(db, lst, remote_list_id, snapshot)
         return {"notice": "已改用服务器上的内容"}
 
+    if choice == "create_new":
+        # 两边都留：把本机这份作为**一份新清单**传到服务器（编号由服务器分配，不会
+        # 跟原来那份撞），本机跟着改用新编号并与它绑定；服务器原来那份原样不动，
+        # 两份从此各走各的。用于"同一编号但内容已经分家、哪边都不想丢"的场合。
+        created = client.create_list(mine)
+        _adopt(db, lst, created["list_id"], created)
+        return {"notice": "已另存为服务器上的一份新清单，两边的内容都留着"}
+
     if choice == "overwrite_remote":
         to_push = mine
         # 覆盖是用户明确要的「以我为准」：带 force 跳过指纹校验
@@ -259,8 +267,13 @@ def resolve_upload(db: Session, list_id: int, remote_list_id: int,
 def pull_as_new(db: Session, remote_list_id: int, name: str) -> dict:
     """把服务器上的一份清单拉到本地。
 
-    按**编号**先看本地有没有同一份：有就直接绑定它（不重复创建一份同编号的清单
-    —— 那会让「哪份是哪份」彻底乱掉），没有才新建。
+    按**编号**先看本地有没有同一份：没有就新建一份；有（说明它本来就在本地，
+    比如解绑后还想再拉一遍）就**交给用户定怎么对齐** —— 与「上传撞上同一份」
+    共用同一个选择框和同一个 resolve。
+
+    为什么不能直接拿服务器那份覆盖本地：解绑之后共同基线没了，谁改了什么判不
+    出来（从前这里直接覆盖，本地改的东西无声消失；反方向合并也会把服务器盖掉）。
+    没有基线时正确的做法是让用户看着两边的内容选，而不是替他猜。
     """
     client = _client(db)
     snapshot = client.export_list(remote_list_id)
@@ -273,10 +286,12 @@ def pull_as_new(db: Session, remote_list_id: int, name: str) -> dict:
         existing = db.query(ItemList).filter(ItemList.code == incoming).first()
 
     if existing is not None:
-        _adopt(db, existing, remote_list_id, snapshot)
-        result = sync(db, existing.id)
-        result["created_list_id"] = existing.id
-        return result
+        return {"needs_upload_decision": {
+            "list_id": existing.id,
+            "remote_list_id": remote_list_id,
+            "local": _summarize(list_transfer.export_list(db, existing)),
+            "remote": _summarize(payload),
+        }}
 
     lst, local_map = local_apply.create_list_from_payload(db, payload, remote_name)
     db.commit()

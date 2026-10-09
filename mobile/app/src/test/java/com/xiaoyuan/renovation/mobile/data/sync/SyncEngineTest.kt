@@ -272,28 +272,23 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `拉取时本地已有同编号——直接绑定，不重复建一份`() = runBlocking {
+    fun `拉取时本地已有同编号——交给用户定，不重复建一份`() = runBlocking {
         val code = "ABCDEFGH"
         val listId = newList("装修采购", code)
-        server.enqueue(response(200, snapshotJson("fp-server", code)))
         server.enqueue(response(200, snapshotJson("fp-server", code)))
 
         val outcome = engine.pullAsNewList(5, "装修采购").okData ?: error("拉取应当成功")
 
-        assertEquals("要报出绑的是本地哪一份", listId, outcome.createdListId)
+        val decision = outcome.needsUploadDecision
+            ?: error("本地已有同编号的清单，应当弹选择框：$outcome")
+        assertEquals("选择框要指向本地那一份", listId, decision.localListId)
         assertEquals("不该多出一份清单", 1, db.lists().all().size)
-        assertNotNull("应当已经建立绑定", db.sync().byList(listId))
-        assertEquals(5, db.sync().byList(listId)?.remoteListId)
 
         val first = server.next()
-        val second = server.next()
         assertEquals("/api/sync/lists/5", first?.path)
-        assertEquals("/api/sync/lists/5", second?.path)
-        // 本地与服务器内容一致（这份清单是空的），两边都没动 ——
-        // 从前这里会无条件 PUT 把服务器重写一遍，推完 id 全变，
-        // 自动同步就被自己一轮轮转起来；现在不推了
-        val third = server.takeRequest(2, TimeUnit.SECONDS)
-        assertNull("内容一致时不该有第三次请求（更不该重写服务器）", third)
+        // 用户拍板之前，除了那次导出，不该有别的请求（更不该重写服务器）
+        val second = server.takeRequest(2, TimeUnit.SECONDS)
+        assertNull("拍板之前不该有第二次请求", second)
     }
 
     /* ---------------- 各种"不该动手"的前置条件 ---------------- */
@@ -593,6 +588,84 @@ class SyncEngineTest {
         val push = server.next()
         assertEquals("只改定金也要推送 —— 指纹漏了它会判成「没变」、永远不推", "PUT", push.method)
         assertTrue("推上去的载荷要带定金", push.body.readUtf8().contains("\"is_deposit\":true"))
+    }
+
+    @Test
+    fun `拉取遇到本地已有同编号时，不悄悄覆盖任何一边，而是弹选择框`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("采购清单", code)
+        // 本地这份有自己的改动（解绑后改的）
+        db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "本地新加的", price = 5.0,
+                updatedAt = "2026-09-19 13:30:00",
+            ),
+        )
+        // 服务器上同一份（同编号）也有内容 —— 解绑之后没有共同基线，谁改了什么都
+        // 判不出来，这里不能替用户做决定
+        server.enqueue(response(200, snapshotWithItem("fp-remote", code, price = 20.0)))
+
+        val outcome = engine.pullAsNewList(remoteListId = 5, name = "采购清单").okData
+            ?: error("应当正常返回")
+        val decision = outcome.needsUploadDecision
+            ?: error("本地已有同编号的清单，应当弹选择框交给用户：$outcome")
+
+        assertEquals(5, decision.remoteListId)
+        assertEquals("本地内容必须原封不动", "本地新加的",
+            db.items().all(listId).single().name)
+        server.next()      // 拉取本身会先导出一次服务器快照，这是正常的
+        assertNull("用户拍板之前不该往服务器写东西",
+            server.takeRequest(1, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun `另存一份：本机内容成为服务器上一份新清单，两份都留`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("采购清单", code)
+        db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "本地新加的", price = 5.0,
+                updatedAt = "2026-09-19 13:30:00",
+            ),
+        )
+
+        // 拉取撞上本地已有的同编号 → 先拿选择框
+        server.enqueue(response(200, snapshotWithItem("fp-remote", code, price = 20.0)))
+        val decision = engine.pullAsNewList(remoteListId = 5, name = "采购清单")
+            .okData?.needsUploadDecision ?: error("应当弹选择框")
+        assertEquals(listId, decision.localListId)
+
+        // 选「另存一份」：本机内容作为新清单传到服务器（服务器给它新编号 9）
+        server.enqueue(response(200, snapshotWithItem("fp-remote", code, price = 20.0)))
+        server.enqueue(response(200, """{
+            "list_id": 9, "fingerprint": "fp-new",
+            "payload": {"version": 1,
+              "list": {"name": "采购清单", "note": "", "sort": 0, "code": "NEWCODE1",
+                       "created_at": "2026-09-20 00:00:00", "updated_at": "2026-09-20 00:00:00"},
+              "rooms": [], "categories": [],
+              "items": [{"name": "本地新加的", "unit": "个", "qty_total": 1.0, "price": 5.0,
+                         "note": "", "sort": 0, "deleted_at": null,
+                         "created_at": "2026-09-19 13:30:00", "updated_at": "2026-09-19 13:30:00",
+                         "allocations": [], "records": []}],
+              "expenses": []}}"""))
+
+        val resolved = engine.resolveUpload(decision.localListId, decision.remoteListId,
+            UploadChoice.CreateNew).okData ?: error("另存一份应当成功")
+
+        assertEquals(9, resolved.createdListId)
+        assertEquals("绑定应改到新建的那份上", 9, db.sync().byList(listId)?.remoteListId)
+        assertEquals("本地内容一条不少", listOf("本地新加的"),
+            db.items().all(listId).map { it.name })
+        // 传上去的是本机内容：POST /api/sync/lists，body 里有本地那条物料
+        val firstGet = server.next()
+        val secondGet = server.next()
+        val post = server.next()
+        assertEquals("GET", firstGet.method)
+        assertEquals("GET", secondGet.method)
+        assertEquals("POST", post.method)
+        assertTrue("新建清单走 /api/sync/lists：${post.path}",
+            post.path.orEmpty().startsWith("/api/sync/lists"))
+        assertTrue("推的是本机内容", post.body.readUtf8().contains("本地新加的"))
     }
 
     @Test

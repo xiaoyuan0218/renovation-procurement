@@ -9,7 +9,7 @@ import { lists } from '../lists'
  *
  * 桌面端和手机端一样是客户端角色 —— 数据在本机，连上服务器才互相同步。
  * 交互与手机端「设置 / 服务器」页保持一致：绑定、立即同步、上传、拉取，
- * 以及两个绝不擅自替用户决定的弹窗（冲突裁决、上传撞上同一份时的三选一）。
+ * 以及两个绝不擅自替用户决定的弹窗（冲突裁决、两份撞上同一编号时的四选一）。
  */
 const emit = defineEmits(['synced'])
 
@@ -137,7 +137,19 @@ async function pull(remote) {
     remote_list_id: remote.id,
     name: remote.name,
   }))
-  if (result) await afterChange()
+  if (!result) return
+  if (result.needs_upload_decision) {
+    // 本地已经有同编号的一份：交给用户定怎么对齐（与上传撞车共用同一个选择框）
+    const decision = result.needs_upload_decision
+    const local = lists.all.find((l) => l.id === decision.list_id)
+    uploadDecision.value = {
+      ...decision,
+      list_id: decision.list_id,
+      list_name: local?.name || remote.name,
+    }
+    return
+  }
+  await afterChange()
 }
 
 async function syncNow(list) {
@@ -279,11 +291,11 @@ onMounted(loadState)
       </template>
     </el-dialog>
 
-    <!-- 上传撞上同一份：两边从没同步过，问用户怎么对齐 -->
+    <!-- 两份撞上同一编号（上传时服务器已有，或拉取时本地已有）：问用户怎么对齐 -->
     <el-dialog :model-value="!!uploadDecision" width="520px" :show-close="false"
                :close-on-click-modal="false"
-               :title="`服务器上已有「${uploadDecision?.list_name || ''}」`">
-      <p>编号相同，说明是同一份清单，但两台设备从没同步过 —— 没法自动判断该留谁的。</p>
+               :title="`两边都有「${uploadDecision?.list_name || ''}」`">
+      <p>编号相同，说明是同一份清单；但两边没有共同的同步记录，没法自动判断该留谁的。</p>
       <div class="side-row">
         <span>本机</span><span>{{ sideText(uploadDecision?.local) }}</span>
       </div>
@@ -302,6 +314,10 @@ onMounted(loadState)
       <div class="choice-row" @click="resolveUpload('keep_remote')">
         <strong>用服务器上的覆盖</strong>
         <span>这台电脑这份换成服务器的，本机上的改动会丢掉</span>
+      </div>
+      <div class="choice-row" @click="resolveUpload('create_new')">
+        <strong>另存一份（两份都留）</strong>
+        <span>本机这份作为一份新清单传到服务器，两边内容都不动</span>
       </div>
     </el-dialog>
   </div>

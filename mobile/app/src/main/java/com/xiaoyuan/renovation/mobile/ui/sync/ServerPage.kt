@@ -82,18 +82,16 @@ fun ServerPage(
         )
     }
 
-    // 上传撞上服务器上已有的同一份、且两边从没同步过：覆盖还是合并，让用户定
+    // 两份撞上同一编号（上传时服务器已有，或拉取时本地已有）：怎么对齐，让用户定
     state.uploadDecision?.let { decision ->
-        val current = lists.firstOrNull { it.id == currentListId } ?: lists.firstOrNull()
+        val current = lists.firstOrNull { it.id == decision.localListId }
+            ?: lists.firstOrNull { it.id == currentListId }
         UploadDecisionDialog(
             listName = current?.name.orEmpty(),
             decision = decision,
             onChoose = { choice ->
-                val listId = current?.id
-                if (listId != null) {
-                    vm.resolveUpload(listId, choice)
-                    onChanged()
-                }
+                vm.resolveUpload(choice)
+                onChanged()
             },
             onDismiss = vm::dismissUploadDecision,
         )
@@ -391,11 +389,11 @@ private fun UploadDecisionDialog(
         onDismissRequest = onDismiss,
         containerColor = Ink.BgMid,
         shape = RoundedCornerShape(22.dp),
-        title = { Text("服务器上已有「$listName」", color = Ink.TextPrimary) },
+        title = { Text("两边都有「$listName」", color = Ink.TextPrimary) },
         text = {
             Column {
                 Text(
-                    text = "编号相同，说明是同一份清单，但两台设备从没同步过 —— 没法自动判断该留谁的。",
+                    text = "编号相同，说明是同一份清单；但两边没有共同的同步记录，没法自动判断该留谁的。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Ink.TextPrimary,
                 )
@@ -433,6 +431,12 @@ private fun UploadDecisionDialog(
                     title = "用电脑上的覆盖",
                     caption = "手机这份换成服务器的，手机上的改动会丢掉",
                     onClick = { onChoose(UploadChoice.KeepRemote) },
+                )
+                Spacer(Modifier.height(6.dp))
+                ChoiceRow(
+                    title = "另存一份（两份都留）",
+                    caption = "手机这份作为一份新清单传到服务器，两边内容都不动",
+                    onClick = { onChoose(UploadChoice.CreateNew) },
                 )
             }
         },

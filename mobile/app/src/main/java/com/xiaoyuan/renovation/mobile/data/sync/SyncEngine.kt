@@ -77,8 +77,10 @@ data class SyncOutcome(
     val hasConflicts: Boolean get() = conflicts.isNotEmpty()
 }
 
-/** 上传前要问用户的事：服务器上那份和手机上这份，谁说了算。 */
+/** 两份撞上同一编号时要问用户的事：谁说了算。 */
 data class UploadDecision(
+    /** 本地这一份：上传撞车是要传上去的那份，拉取撞车是本地已有同编号的那份 */
+    val localListId: Int,
     val remoteListId: Int,
     /** 手机上这份有多少内容 */
     val local: SideSummary,
@@ -102,7 +104,7 @@ data class SideSummary(
     val isEmpty: Boolean get() = items == 0 && rooms == 0 && categories == 0
 }
 
-/** 用户在"上传撞上同一份"时选的处理方式。 */
+/** 用户在"两份撞上同一编号"时选的处理方式。 */
 enum class UploadChoice {
     /** 手机这份整份覆盖服务器那份（电脑上的改动丢掉） */
     OverwriteRemote,
@@ -112,6 +114,13 @@ enum class UploadChoice {
 
     /** 听服务器的：本地这份换成服务器上的内容（手机上的改动丢掉） */
     KeepRemote,
+
+    /**
+     * 两边都留成各自独立的两份：本机这份作为一份**新清单**传到服务器（编号由
+     * 服务器分配，不会跟原来那份撞），本机跟着改用新编号并绑定它；服务器原来
+     * 那份原样不动。用于"编号相同但内容已经分家、哪边都不想丢"的场合。
+     */
+    CreateNew,
 }
 
 /**
@@ -252,6 +261,7 @@ class SyncEngine(
                         is ApiResult.Ok -> ApiResult.Ok(
                             SyncOutcome(
                                 needsUploadDecision = UploadDecision(
+                                    localListId = listId,
                                     remoteListId = target,
                                     local = summarize(payload),
                                     remote = summarize(remote.data.payload),
@@ -293,6 +303,26 @@ class SyncEngine(
         val snapshot = (exported as ApiResult.Ok).data
         // 老服务器的 payload 缺 is_deposit：合并前按业务键补上本地旧值
         val theirs = Snapshot.fillMissingDeposit(db, listId, snapshot.payload)
+
+        if (choice == UploadChoice.CreateNew) {
+            // 两边都留：把本机这份作为一份新清单传到服务器（编号由服务器分配，
+            // 不会跟原来那份撞），本机跟着改用新编号并绑定它；服务器原来那份原样
+            // 不动，两份从此各走各的
+            return when (val created = api().createList(mine)) {
+                is ApiResult.Ok -> {
+                    adopt(
+                        db, prefs, json, listId,
+                        remoteListId = created.data.listId,
+                        remoteName = created.data.payload.list.name,
+                        fingerprint = created.data.fingerprint,
+                        payload = created.data.payload,
+                    )
+                    ApiResult.Ok(SyncOutcome(createdListId = created.data.listId))
+                }
+
+                is ApiResult.Err -> created
+            }
+        }
 
         if (choice == UploadChoice.KeepRemote) {
             // 听服务器的：本地换成它那份。这条不推送，服务器上原样不动
@@ -375,22 +405,20 @@ class SyncEngine(
         val existing = if (code.isEmpty()) null else db.lists().byCode(code)
 
         if (existing != null) {
-            // 本地已经有这一份了：直接绑定，然后把两边对齐（不重复建一份同编号的）
-            saveBinding(
-                listId = existing.id,
-                remoteListId = remoteListId,
-                remoteName = name,
-                fingerprint = snapshot.fingerprint,
-                payload = snapshot.payload,
-                localMap = emptyMap(),
-                previous = db.sync().byList(existing.id),
+            // 本地已经有同一份了（同编号）：交给用户定怎么对齐，与「上传撞上同一份」
+            // 共用同一个选择框。从前这里直接记下基线再"同步" —— 而解绑之后没有共同
+            // 基线，那套判定只会得出"本地改了、服务器没动"，于是把本地整份推上去、
+            // 无声覆盖服务器。谁都不该替用户猜。
+            return ApiResult.Ok(
+                SyncOutcome(
+                    needsUploadDecision = UploadDecision(
+                        localListId = existing.id,
+                        remoteListId = remoteListId,
+                        local = summarize(Snapshot.capture(db, existing.id)),
+                        remote = summarize(snapshot.payload),
+                    ),
+                ),
             )
-            val synced = sync(existing.id)
-            return if (synced is ApiResult.Ok) {
-                ApiResult.Ok(synced.data.copy(createdListId = existing.id))
-            } else {
-                synced
-            }
         }
 
         val listId = Snapshot.createList(db, snapshot.payload, name)

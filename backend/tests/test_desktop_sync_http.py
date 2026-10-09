@@ -151,6 +151,14 @@ def _remote_list_id(base: str, token: str, name: str) -> int:
     return next(row["id"] for row in response.json() if row["name"] == name)
 
 
+def _remote_names(base: str, token: str, list_id: int) -> set:
+    response = httpx.get(f"{base}/api/items",
+                         headers={"Authorization": f"Bearer {token}",
+                                  "X-List-Id": str(list_id)}, timeout=10.0)
+    response.raise_for_status()
+    return {row["name"] for row in response.json()}
+
+
 # ---------------------------------------------------------------- 登录与上传
 
 def test_login_then_upload_creates_remote_copy(ctx, remote_server):
@@ -301,16 +309,44 @@ def test_conflicting_edit_is_reported_not_decided(ctx, remote_server):
 
 # ---------------------------------------------------------------- 拉取
 
-def test_pull_creates_local_copy_and_binds(ctx, remote_server):
+def test_resolve_create_new_keeps_both_sides(ctx, remote_server):
+    """选「另存一份」：本机内容成为服务器上一份新清单，两边的内容都留着。"""
     lst = _first_list(ctx)
     _add_item(ctx, lst, "筒灯", qty=2, price=10)
     ctx.commit()
     desktop_sync.login(ctx, remote_server, USER, PASSWORD)
     remote_id = desktop_sync.upload(ctx, lst.id)["created_list_id"]
-    desktop_sync.unbind(ctx, lst.id)          # 本地这份变回纯本地
+    desktop_sync.unbind(ctx, lst.id)
 
-    target = ItemList(name="另一份", sort=5, code=codes.new_code())
-    ctx.add(target)
+    _add_item(ctx, lst, "本地新加的", qty=1, price=5)     # 本地改过
+    ctx.commit()
+    token = _remote_token(remote_server)
+    _remote_add_item(remote_server, token, remote_id, "服务器加的", qty=3, price=7)
+
+    decision = desktop_sync.pull_as_new(ctx, remote_id, "不管叫什么")["needs_upload_decision"]
+    out = desktop_sync.resolve_upload(ctx, decision["list_id"],
+                                     decision["remote_list_id"], choice="create_new")
+    assert out.get("notice"), out
+
+    # 本地内容一条不少，而且换了新编号、重新绑到新建的那份上
+    assert _names(ctx, lst.id) == {"筒灯", "本地新加的"}
+    binding = ctx.get(SyncBinding, lst.id)
+    assert binding is not None and binding.remote_list_id != remote_id
+    # 服务器上新旧各一份：新建那份带着本地全部内容，原来那份没被动过
+    assert _remote_names(remote_server, token, binding.remote_list_id) == {"筒灯", "本地新加的"}
+    assert _remote_names(remote_server, token, remote_id) == {"筒灯", "服务器加的"}
+
+
+def test_pull_creates_local_copy_and_binds(ctx, remote_server):
+    """本地没有这份（同编号）时，拉取就新建一份并绑定。"""
+    lst = _first_list(ctx)
+    _add_item(ctx, lst, "筒灯", qty=2, price=10)
+    ctx.commit()
+    desktop_sync.login(ctx, remote_server, USER, PASSWORD)
+    remote_id = desktop_sync.upload(ctx, lst.id)["created_list_id"]
+    desktop_sync.unbind(ctx, lst.id)
+    # 本地这份删掉，模拟"这台机器上还没有它"
+    ctx.delete(lst)
     ctx.commit()
 
     out = desktop_sync.pull_as_new(ctx, remote_id, "拉下来的")
@@ -319,8 +355,8 @@ def test_pull_creates_local_copy_and_binds(ctx, remote_server):
     assert ctx.get(SyncBinding, out["created_list_id"]) is not None
 
 
-def test_pull_same_code_binds_instead_of_duplicating(ctx, remote_server):
-    """本地已经有同编号的清单时，拉取应该绑定它，而不是再建一份同编号的。"""
+def test_pull_same_code_does_not_duplicate_list(ctx, remote_server):
+    """本地已经有同编号的清单时，拉取不该再建一份同编号的，而是弹选择框。"""
     lst = _first_list(ctx)
     _add_item(ctx, lst, "筒灯", qty=2, price=10)
     ctx.commit()
@@ -330,8 +366,40 @@ def test_pull_same_code_binds_instead_of_duplicating(ctx, remote_server):
     ctx.expire_all()
 
     out = desktop_sync.pull_as_new(ctx, remote_id, "不管叫什么")
-    assert out["created_list_id"] == lst.id
+
+    assert out.get("needs_upload_decision"), f"应当交给用户定：{out}"
     assert ctx.query(ItemList).count() == 1
+
+
+def test_pull_same_code_asks_instead_of_overwriting(ctx, remote_server):
+    """解绑后两边各改了一些，再点「拉到本地」：不许悄悄覆盖任何一边。
+
+    没有基线就分不清谁改了什么，所以只能把两边摆出来让用户选（按名字合并 /
+    以本机为准 / 以服务器为准），选择框与「上传撞上同一份」共用。从前是直接拿
+    服务器那份整份覆盖本地 —— 本地改动无声消失。
+    """
+    lst = _first_list(ctx)
+    _add_item(ctx, lst, "筒灯", qty=2, price=10)
+    ctx.commit()
+    desktop_sync.login(ctx, remote_server, USER, PASSWORD)
+    remote_id = desktop_sync.upload(ctx, lst.id)["created_list_id"]
+    desktop_sync.unbind(ctx, lst.id)          # 解绑：共同基线没了
+
+    # 两边各改一些：本地加一件，服务器（模拟网页版）加一件
+    _add_item(ctx, lst, "本地新加的", qty=1, price=5)
+    ctx.commit()
+    token = _remote_token(remote_server)
+    _remote_add_item(remote_server, token, remote_id, "服务器新加的", qty=3, price=7)
+
+    out = desktop_sync.pull_as_new(ctx, remote_id, "不管叫什么")
+
+    decision = out.get("needs_upload_decision")
+    assert decision, f"应当弹选择框，而不是直接覆盖：{out}"
+    assert decision["remote_list_id"] == remote_id
+    assert decision["local"]["items"] == 2      # 本地的样子
+    assert decision["remote"]["items"] == 2     # 服务器的样子
+    # 用户拍板之前，谁都不许动
+    assert _names(ctx, lst.id) == {"筒灯", "本地新加的"}
 
 
 # ---------------------------------------------------------------- 服务器那份被删

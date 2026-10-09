@@ -173,18 +173,19 @@ class SyncViewModel(
         }
     }
 
-    /** 用户在"上传撞上同一份"的弹窗里选了一种处理方式。 */
-    fun resolveUpload(listId: Int, choice: UploadChoice) {
+    /** 用户在"两份撞上同一编号"的弹窗里选了一种处理方式。 */
+    fun resolveUpload(choice: UploadChoice) {
         val decision = _state.value.uploadDecision ?: return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, uploadDecision = null)
-            val result = engine.resolveUpload(listId, decision.remoteListId, choice)
+            val result = engine.resolveUpload(decision.localListId, decision.remoteListId, choice)
             report(
                 result,
                 when (choice) {
                     UploadChoice.OverwriteRemote -> "已用手机上的内容覆盖服务器"
                     UploadChoice.MergeBoth -> "两边已合并，各自独有的都留着"
                     UploadChoice.KeepRemote -> "已改用电脑上的内容"
+                    UploadChoice.CreateNew -> "已另存为服务器上的一份新清单，两份都留着"
                 },
             )
             if (result is ApiResult.Ok) {
