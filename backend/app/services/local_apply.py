@@ -62,12 +62,17 @@ def _spare_ids(rows, key_of) -> dict:
     return out
 
 
-def _plan(rows, spare, key_of) -> list:
+def _plan(rows, spare, key_of, taken=()) -> list:
     """先给每行定好落地 id：能沿用的沿用，剩下的从「已用 id 之后」依次发。
 
     刻意不依赖数据库自增：自增从 max(rowid)+1 取，若复用 id 的行排在新增行
     后面，新增行可能先拿到那个 id，等复用的行插进来就撞主键了。全部显式指定
     就没有这个顺序陷阱。
+
+    `taken` 是**全库**已占用的 id（其它清单的行）。新拉一份清单时本清单没有可
+    沿用的 id，若只按"本清单"发号就会从 1 开始、一头撞进别的清单 —— 从前这里
+    报的就是 `UNIQUE constraint failed: rooms.id`：拉一份带分组的清单到本地，
+    只要本地已经有别的清单，就必然 500。
     """
     planned = []
     used = set()
@@ -77,7 +82,7 @@ def _plan(rows, spare, key_of) -> list:
         planned.append([reused, row])
         if reused is not None:
             used.add(reused)
-    next_id = max(used) + 1 if used else 1
+    next_id = max([*used, *taken], default=0) + 1
     for entry in planned:
         if entry[0] is None:
             entry[0] = next_id
@@ -103,6 +108,13 @@ def apply_payload(db: Session, lst: ItemList, payload: dict) -> dict:
     spare_items = _spare_ids(items, lambda i: i.name)
     spare_expenses = _spare_ids(expenses, lambda e: _expense_key(e))
 
+    # 全库已占用的 id（含别的清单）。发号时要从这些之后开始：新拉一份清单时没有
+    # 可沿用的行，只看本清单就会从 1 发起、撞上别人的主键 —— 拉带分组的清单必 500。
+    taken_rooms = {row[0] for row in db.query(Room.id).all()}
+    taken_categories = {row[0] for row in db.query(Category.id).all()}
+    taken_items = {row[0] for row in db.query(Item.id).all()}
+    taken_expenses = {row[0] for row in db.query(ExtraExpense.id).all()}
+
     _clear_local(db, lst)
 
     mapping: dict = {}
@@ -111,7 +123,7 @@ def apply_payload(db: Session, lst: ItemList, payload: dict) -> dict:
     item_map: dict = {}
 
     for local_id, row in _plan(payload.get("rooms", []), spare_rooms,
-                               lambda r: r.get("name", "")):
+                               lambda r: r.get("name", ""), taken_rooms):
         room = Room(id=local_id, list_id=lst.id, name=row.get("name", ""),
                     sort=row.get("sort") or 0,
                     created_at=_ts_or_now(row.get("created_at")),
@@ -124,7 +136,7 @@ def apply_payload(db: Session, lst: ItemList, payload: dict) -> dict:
             mapping[f"room:{remote_id}"] = local_id
 
     for local_id, row in _plan(payload.get("categories", []), spare_categories,
-                               lambda c: c.get("name", "")):
+                               lambda c: c.get("name", ""), taken_categories):
         category = Category(id=local_id, list_id=lst.id, name=row.get("name", ""),
                             sort=row.get("sort") or 0,
                             created_at=_ts_or_now(row.get("created_at")),
@@ -137,7 +149,7 @@ def apply_payload(db: Session, lst: ItemList, payload: dict) -> dict:
             mapping[f"category:{remote_id}"] = local_id
 
     for local_id, row in _plan(payload.get("items", []), spare_items,
-                               lambda i: i.get("name", "")):
+                               lambda i: i.get("name", ""), taken_items):
         item = Item(
             id=local_id, list_id=lst.id, name=row.get("name", ""),
             category_id=category_map.get(row.get("category_id")),
@@ -185,7 +197,7 @@ def apply_payload(db: Session, lst: ItemList, payload: dict) -> dict:
         db.flush()
 
     for local_id, row in _plan(payload.get("expenses", []), spare_expenses,
-                               lambda e: _expense_key(e)):
+                               lambda e: _expense_key(e), taken_expenses):
         db.add(ExtraExpense(
             id=local_id, list_id=lst.id, kind=row.get("kind") or "其他",
             amount=row.get("amount") or 0, date=row.get("date") or "",

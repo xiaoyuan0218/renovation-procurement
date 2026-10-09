@@ -270,3 +270,38 @@ def test_apply_payload_follows_incoming_code(db):
     db.commit()
     db.expire_all()
     assert lst.code == payload["list"]["code"]
+
+
+def test_new_list_ids_avoid_rows_of_other_lists(db):
+    """本地已有别的清单时，拉一份带分组的清单不能撞行 id。
+
+    `_plan` 从前只按"本清单"发号：新清单没有可沿用的行，就从 1 开始发 —— 本地
+    只要有别的清单占着 1 号（分组/分类/物料都算），一插就报
+    `UNIQUE constraint failed: rooms.id`，界面上就是「拉到本地」报 500。
+    """
+    other = ItemList(name="旧清单", sort=0, code=codes.new_code())
+    db.add(other)
+    db.flush()
+    db.add(Room(list_id=other.id, name="玄关", sort=0))
+    db.add(Category(list_id=other.id, name="灯具", sort=0))
+    db.add(Item(list_id=other.id, name="筒灯", qty_total=1, price=10))
+    db.commit()
+    assert db.query(Room).filter(Room.id == 1).count() == 1, "1 号应当已被占用"
+
+    payload = _payload(
+        rooms=[_room(1, "玄关")],
+        categories=[{"id": 1, "name": "灯具", "sort": 0,
+                     "created_at": "2026-01-01 00:00:00",
+                     "updated_at": "2026-01-01 00:00:00"}],
+        items=[_item(1, "筒灯", allocations=[
+            {"room_id": 1, "qty": 1, "price_override": None, "note": ""}])],
+    )
+    lst, _mapping = local_apply.create_list_from_payload(db, payload, name="采购清单")
+    db.commit()
+
+    assert lst.id != other.id
+    assert db.query(Room).filter(Room.list_id == lst.id).count() == 1
+    assert db.query(Category).filter(Category.list_id == lst.id).count() == 1
+    item = db.query(Item).filter(Item.list_id == lst.id).one()
+    # 分配也得跟着落地（不是"没报错但丢了布点"）
+    assert db.query(Allocation).filter(Allocation.item_id == item.id).count() == 1
