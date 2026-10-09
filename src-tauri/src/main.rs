@@ -61,22 +61,62 @@ fn port_alive(port: u16) -> bool {
     .is_ok()
 }
 
+/// 端口上那个服务自报的版本（问一句 `/api/version`）。问不到返回 None。
+///
+/// 只用来回答一个问题：它是**本版本**的内置服务吗（见 start_backend 里的说明）。
+/// 请求目标固定（本机回环、固定路径），所以手写一个极简 HTTP 就够，不引依赖。
+fn server_version(port: u16) -> Option<String> {
+    use std::io::Read;
+
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream =
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(800)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_millis(1500))).ok()?;
+    stream
+        .write_all(b"GET /api/version HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .ok()?;
+
+    let mut raw = Vec::new();
+    stream.take(64 * 1024).read_to_end(&mut raw).ok()?;
+    let text = String::from_utf8_lossy(&raw);
+    let body = text.split("\r\n\r\n").nth(1)?;
+
+    // 只取 `"version":"x.y.z"` 这一段，不为这一处引 JSON 库
+    let key = "\"version\":\"";
+    let start = body.find(key)? + key.len();
+    let end = start + body[start..].find('"')?;
+    Some(body[start..end].to_string())
+}
+
 /// 启动打包进来的后端，等它把实际端口写进数据目录，返回那个端口。
 fn start_backend(app: &tauri::App) -> Result<u16, Box<dyn std::error::Error>> {
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
     let port_file = data_dir.join("port");
 
-    // 上一次没退干净的实例还活着就直接用它。
+    // 上一次没退干净的实例还活着就直接用它 —— 但**先确认它是本版本的服务**。
     //
-    // 从前不管这个：僵尸后端占着端口，新起的那个可能起不来，用户看到的就是
-    // 「启动出错、窗口空白」，而且残留进程越积越多。复用已有实例既救了这个
-    // 场景，也省掉一次冷启动等待。
+    // 从前只看端口活着就复用，升级安装时踩过一个很难查的坑：旧版
+    // caizhidao-server.exe 要是在运行（安装器只盯着主程序，不认识这个独立
+    // 进程），它占着文件、安装器会跳过替换；新主程序一看端口活着就复用了它 ——
+    // 界面是新的、后端是旧的，新版本加的字段（比如采购记录的定金）会被旧后端
+    // 静默丢掉，用户看到的是"改了没生效"，而新装、镜像部署都正常。
+    // 所以问一句 /api/version：对不上就不复用它，另起本版本的服务。
     if let Ok(text) = std::fs::read_to_string(&port_file) {
         if let Ok(port) = text.trim().parse::<u16>() {
             if port_alive(port) {
-                log_line(app, &format!("复用已在运行的内置服务，端口 {port}"));
-                return Ok(port);
+                let want = app.package_info().version.to_string();
+                match server_version(port) {
+                    Some(found) if found == want => {
+                        log_line(app, &format!("复用已在运行的内置服务，端口 {port}"));
+                        return Ok(port);
+                    }
+                    Some(found) => log_line(
+                        app,
+                        &format!("端口 {port} 上是旧版内置服务（{found}，本程序 {want}）：不复用，另起一个"),
+                    ),
+                    None => log_line(app, &format!("端口 {port} 被别的程序占着：另起内置服务")),
+                }
             }
         }
     }
@@ -166,4 +206,47 @@ fn percent_encode(text: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// 起一个"只会吐一句 JSON"的假服务，验证版本能被读出来。
+    fn fake_server(body: &'static str) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn reads_version_from_local_service() {
+        // 与真实后端 /api/version 的返回同形（老版本会报自己的版本号）
+        let port = fake_server(r#"{"version":"1.2.0","built_at":"","repo":"x/y"}"#);
+        assert_eq!(server_version(port).as_deref(), Some("1.2.0"));
+    }
+
+    #[test]
+    fn missing_service_reads_as_none() {
+        // 端口上没有服务（或被别的程序占着）：要返回 None，好让启动逻辑另起服务
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        assert_eq!(server_version(port), None);
+    }
 }
