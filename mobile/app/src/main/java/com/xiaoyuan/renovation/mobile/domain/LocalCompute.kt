@@ -279,6 +279,7 @@ object LocalCompute {
             bought = st == STATUS_DONE,
             note = item.note,
             link = item.link,
+            createdAt = item.createdAt,
             totalQty = qty,
             listTotal = listTotal(item, b.allocations),
             discountTotal = discountTotal(item, b.allocations),

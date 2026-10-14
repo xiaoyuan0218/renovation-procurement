@@ -92,6 +92,11 @@ data class ItemDto(
     val note: String = "",
     /** 商品链接（1.2.5 起）：商品页/下单页的网址，只认 http/https */
     val link: String = "",
+    /**
+     * 什么时候加的：清单页默认按它倒序（最近加的在最上面，与网页版同一口径）。
+     * 服务端返回的是 `YYYY-MM-DD HH:MM:SS`；老数据可能为空，排序时沉底。
+     */
+    @SerialName("created_at") val createdAt: String = "",
     @SerialName("total_qty") val totalQty: Double = 0.0,
     @SerialName("list_total") val listTotal: Double = 0.0,
     @SerialName("discount_total") val discountTotal: Double = 0.0,

@@ -132,7 +132,10 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
                 }
                 matchKeyword && matchCategory && matchStatus
             }
-            .sortedByDescending { it.discountTotal }
+            // 默认按添加时间倒序：最近加的在最上面，与网页版表格的默认排序同一口径。
+            // 时间戳是等宽字符串（yyyy-MM-dd HH:mm:ss），字典序就是时间序；
+            // 同一时间的按 id 倒序（后加的在前面），老数据没有时间戳（空串）沉底
+            .sortedWith(compareByDescending<ItemDto> { it.createdAt }.thenByDescending { it.id })
     }
 
     /* ---------- 多选与批量删除 ---------- */

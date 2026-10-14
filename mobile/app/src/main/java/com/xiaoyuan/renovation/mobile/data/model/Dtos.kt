@@ -91,6 +91,11 @@ data class ItemDto(
     val bought: Boolean = false,
     val note: String = "",
     val link: String = "",
+    /**
+     * 什么时候加的：清单页默认按它倒序（最近加的在最上面，与网页版同一口径）。
+     * 老数据可能没有（空串），排序时沉底。
+     */
+    @SerialName("created_at") val createdAt: String = "",
     @SerialName("total_qty") val totalQty: Double = 0.0,
     @SerialName("list_total") val listTotal: Double = 0.0,
     @SerialName("discount_total") val discountTotal: Double = 0.0,
