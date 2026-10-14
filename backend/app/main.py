@@ -79,10 +79,25 @@ BUILT_AT = os.environ.get("RENOVATION_BUILT_AT", "")
 REPO = "xiaoyuan0218/renovation-procurement"
 
 
+def _deploy_id(version: str, built_at: str) -> str:
+    """部署标识：这次跑的是哪一批构建。
+
+    版本号 + 构建时间 —— 发布新版本、或者只是重新构建部署（版本号没变），
+    它都会变；同一个镜像重启容器则保持不变（重启不是新部署，不该让所有人的
+    打赏开关无缘无故重开）。网页上的打赏开关拿它判断"是不是更新过了"：
+    更新/重新部署后开关自动回到打开（见 frontend/src/donate.js）。
+    """
+    return f"{version}+{built_at}" if built_at else version
+
+
+DEPLOY_ID = _deploy_id(APP_VERSION, BUILT_AT)
+
+
 @app.get("/api/version")
 def version_info():
-    """版本与构建时间，给「关于」页显示、以及检查更新用。不需要登录。"""
-    return {"version": APP_VERSION, "built_at": BUILT_AT, "repo": REPO}
+    """版本、构建时间与部署标识：给「关于」页显示、检查更新与打赏开关用。不需要登录。"""
+    return {"version": APP_VERSION, "built_at": BUILT_AT, "repo": REPO,
+            "deploy_id": DEPLOY_ID}
 
 
 # 登录接口自身不能挂守卫，否则没法登录

@@ -1,16 +1,26 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { donateEnabled } from '../donate'
+import { api } from '../api'
+import { donateEnabled, syncDeployId } from '../donate'
 import DonateCodes from './DonateCodes.vue'
 
 /**
  * 打赏入口：右下角一个悬浮小圆钮，平时不占地方也不抢眼；点开是收款码
  * （微信与支付宝各一张）。开着开关（默认）时，每次打开页面自动弹一次 ——
  * 这就是「提示」。不想看到就去「设置 / 数据 → 关于」里关掉。
+ *
+ * 关掉只对当时那次部署有效：进页面时跟服务端对一次部署标识，更新/重新部署
+ * 过就自动把开关重开（见 donate.js）。
  */
 const open = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    const info = await api.get('/api/version')
+    syncDeployId(info?.deploy_id)
+  } catch {
+    // 拿不到部署标识（离线、老镜像没这个字段）就不动：按本地记录来
+  }
   // 晚一点再弹：一进页面就盖住内容很烦
   if (donateEnabled.value) {
     setTimeout(() => { open.value = true }, 1200)
