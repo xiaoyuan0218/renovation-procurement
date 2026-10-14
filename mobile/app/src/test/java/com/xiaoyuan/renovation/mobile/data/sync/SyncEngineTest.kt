@@ -52,6 +52,9 @@ class SyncEngineTest {
     private lateinit var currentList: CurrentListHolder
     private lateinit var engine: SyncEngine
 
+    /** 商品链接用例里的固定网址。 */
+    private val itemLink = "https://item.jd.com/100012043978.html"
+
     @Before
     fun setUp() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Application>()
@@ -591,6 +594,79 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `老服务器没带链接字段时，本地填的链接不被抹掉`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("装修采购", code)
+        db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "壁挂炉", unit = "台", qtyTotal = 1.0, price = 6999.0,
+                link = itemLink,
+                updatedAt = "2026-09-19 13:30:00",
+            ),
+        )
+        // 基线是上次同步存下来的（含链接）；服务器那份还是老格式（没有这个字段），
+        // 而且它在物料上改过别的东西（时间更新）—— 于是这一轮走合并
+        db.sync().upsert(
+            binding(listId, remoteListId = 5).copy(
+                fingerprint = "fp-old",
+                baseline = linkBaselineJson(code, withLinkField = true),
+            ),
+        )
+        currentList.set(listId)
+        awaitUntil("当前清单就位") { currentList.flow.value == listId }
+        val serverSnap = linkSnapshotJson("fp-server", code, withLinkField = false,
+            itemUpdated = "2026-09-19 13:40:00")
+        server.enqueue(response(200, serverSnap))
+        server.enqueue(response(200, serverSnap))
+
+        val outcome = engine.sync(listId).okData ?: error("同步应当成功")
+
+        assertFalse("这是普通合并（时间戳分得出来），不该弹冲突", outcome.hasConflicts)
+        assertEquals("老服务器没说这个字段，本地填的链接必须留着", itemLink,
+            db.items().all(listId).single().link)
+        server.next()   // GET
+        val push = server.next()
+        assertEquals("PUT", push.method)
+        assertTrue("合并结果要带着链接推上去（服务器那边才知道）",
+            push.body.readUtf8().contains("\"link\":\"$itemLink\""))
+    }
+
+    @Test
+    fun `只改商品链接也要推给服务器（指纹要认它）`() = runBlocking {
+        val code = "ABCDEFGH"
+        val listId = newList("装修采购", code)
+        db.items().insert(
+            com.xiaoyuan.renovation.mobile.data.db.ItemEntity(
+                listId = listId, name = "壁挂炉", unit = "台", qtyTotal = 1.0, price = 6999.0,
+                link = itemLink,
+                updatedAt = "2026-09-19 13:30:00",
+            ),
+        )
+        // 基线里这条还没有链接；服务器也没动过（指纹一致）—— 唯一的区别就是链接
+        db.sync().upsert(
+            binding(listId, remoteListId = 5).copy(
+                baseline = linkBaselineJson(code, withLinkField = false),
+            ),
+        )
+        currentList.set(listId)
+        awaitUntil("当前清单就位") { currentList.flow.value == listId }
+        val serverSnap = linkSnapshotJson("fp-server", code, withLinkField = false)
+        server.enqueue(response(200, serverSnap))
+        server.enqueue(response(200, serverSnap))
+
+        val outcome = engine.sync(listId).okData ?: error("同步应当成功")
+
+        assertFalse(outcome.hasConflicts)
+        val get = server.next()
+        assertEquals("GET", get.method)
+        val push = server.next()
+        assertEquals("只改链接也要推送 —— 指纹漏了它会判成「没变」、永远不推", "PUT", push.method)
+        assertTrue("推上去的载荷要带链接",
+            push.body.readUtf8().contains("\"link\":\"$itemLink\""))
+        assertEquals("推送落回本地后链接还在", itemLink, db.items().all(listId).single().link)
+    }
+
+    @Test
     fun `拉取遇到本地已有同编号时，不悄悄覆盖任何一边，而是弹选择框`() = runBlocking {
         val code = "ABCDEFGH"
         val listId = newList("采购清单", code)
@@ -1046,6 +1122,46 @@ class SyncEngineTest {
                      "records":[{"qty":0.0,"amount":1000.0,$deposit"date":"",
                                  "note":"","vendor":"","order_no":"","room_ids":[],
                                  "created_at":"2026-09-19 13:30:00","updated_at":"2026-09-19 13:30:00"}]}],
+           "expenses":[]},
+         "localMap":{"item:101":1}}
+        """.trimIndent()
+    }
+
+    /**
+     * 一条带商品链接的物料。`withLinkField = false` 模拟 1.2.5 之前的老服务器：
+     * payload 里根本没有 link 这个字段 —— 那是"不知道有这回事"，不是"没有链接"。
+     */
+    private fun linkSnapshotJson(
+        fingerprint: String,
+        code: String,
+        withLinkField: Boolean,
+        itemUpdated: String = "2026-09-19 13:30:00",
+    ): String {
+        val linkField = if (withLinkField) "\"link\":\"$itemLink\"," else ""
+        return """
+        {"fingerprint":"$fingerprint",
+         "payload":{"version":1,
+           "list":{"name":"装修采购","note":"","sort":0,"code":"$code",
+                   "created_at":"2026-09-01 10:00:00","updated_at":"2026-09-01 10:00:00"},
+           "rooms":[],"categories":[],
+           "items":[{"id":101,"name":"壁挂炉","unit":"台","price":6999.0,"qty_total":1.0,
+                     $linkField"created_at":"2026-09-19 13:30:00","updated_at":"$itemUpdated",
+                     "allocations":[],"records":[]}],
+           "expenses":[]}}
+        """.trimIndent()
+    }
+
+    /** 同上那份的老版本基线（本地 map 里把 101 对上）。 */
+    private fun linkBaselineJson(code: String, withLinkField: Boolean): String {
+        val linkField = if (withLinkField) "\"link\":\"$itemLink\"," else ""
+        return """
+        {"fingerprint":"fp-old",
+         "payload":{"version":1,
+           "list":{"name":"装修采购","note":"","sort":0,"code":"$code"},
+           "rooms":[],"categories":[],
+           "items":[{"id":101,"name":"壁挂炉","unit":"台","price":6999.0,"qty_total":1.0,
+                     $linkField"created_at":"2026-09-19 13:30:00","updated_at":"2026-09-19 13:30:00",
+                     "allocations":[],"records":[]}],
            "expenses":[]},
          "localMap":{"item:101":1}}
         """.trimIndent()

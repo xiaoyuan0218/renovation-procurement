@@ -27,6 +27,13 @@ const STATUS = {
   none: { label: '无需采购', type: 'info' },
 }
 
+// 只认 http/https：伪协议（javascript: 之类）不渲染成可点链接。
+// 服务端存之前会过滤一道，这里再拦一次 —— 列表是唯一把链接直接渲染成 <a> 的地方
+function safeLink(url) {
+  const text = (url || '').trim()
+  return /^https?:\/\//i.test(text) ? text : ''
+}
+
 const filtered = computed(() => items.value.filter((it) => {
   if (categoryId.value && it.category_id !== categoryId.value) return false
   if (brand.value && (it.brand || '').trim() !== brand.value) return false
@@ -358,7 +365,15 @@ function onSaved() {
                 @selection-change="onSelectionChange">
         <!-- reserve-selection：翻页勾选的也留着，不然跨页批量删会漏 -->
         <el-table-column type="selection" width="36" :resizable="false" reserve-selection />
-        <el-table-column prop="name" label="物料" min-width="150" sortable="custom" />
+        <el-table-column prop="name" label="物料" min-width="150" sortable="custom">
+          <template #default="{ row }">
+            <span>{{ row.name }}</span>
+            <!-- 有商品链接才显示这个小箭头：点开进商品页 -->
+            <a v-if="safeLink(row.link)" class="link-chip" :href="safeLink(row.link)"
+               target="_blank" rel="noopener noreferrer" title="打开商品链接"
+               @click.stop>↗</a>
+          </template>
+        </el-table-column>
         <el-table-column prop="brand" label="品牌" width="80" sortable="custom"
                          show-overflow-tooltip>
           <template #default="{ row }">{{ row.brand || '-' }}</template>
@@ -570,6 +585,12 @@ function onSaved() {
 .skeleton-pad { padding: 10px 8px; }
 .cat-cell { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .cat-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+/* 物料名后的商品链接小箭头：有链接才出现，点开进商品页 */
+.link-chip {
+  margin-left: 4px; font-size: 12px; text-decoration: none;
+  color: var(--el-text-color-placeholder);
+}
+.link-chip:hover { color: var(--el-color-primary); }
 .unpaid-cell { font-size: 11px; color: var(--ios-orange); }
 .unpaid-cell.cleared { color: var(--ios-green); }
 .status-tag { cursor: pointer; font-weight: 600; }

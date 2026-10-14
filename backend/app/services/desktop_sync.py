@@ -146,6 +146,8 @@ def _adopt(db: Session, lst: ItemList, remote_list_id: int, snapshot: dict) -> N
     而且基线会与本地内容不一致，每轮都被当成"本地有新改动"反复推送。
     """
     record_keys.fill_missing_deposit(db, lst.id, snapshot["payload"])
+    # 同理：老服务器 payload 里没有物料的 link 字段，按物料名沿用本地已有值
+    record_keys.fill_missing_item_link(db, lst.id, snapshot["payload"])
     local_map = local_apply.apply_payload(db, lst, snapshot["payload"])
     db.commit()
     _save_binding(db, lst.id, remote_list_id,

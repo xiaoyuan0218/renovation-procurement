@@ -208,6 +208,7 @@ def item_dict(item) -> dict:
         "discount_price": item.discount_price,
         "bought": item_status(item) == "done",
         "note": item.note,
+        "link": item.link or "",
         "total_qty": item_total_qty(item),
         "list_total": item_list_total(item),
         "discount_total": item_discount_total(item),

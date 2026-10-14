@@ -21,6 +21,7 @@ class MergerTest {
         name: String,
         price: Double = 10.0,
         model: String = "",
+        link: String? = null,
         allocations: List<SyncAllocation> = emptyList(),
         records: List<SyncRecord> = emptyList(),
         updatedAt: String = "",
@@ -29,6 +30,7 @@ class MergerTest {
         name = name,
         price = price,
         model = model,
+        link = link,
         qtyTotal = 1.0,
         allocations = allocations,
         records = records,
@@ -84,6 +86,33 @@ class MergerTest {
         val result = Merger.merge(base, mine, theirs)
         assertFalse(result.hasConflicts)
         assertEquals(25.5, result.itemNamed("筒灯")?.price)
+    }
+
+    @Test
+    fun `只改了商品链接也算改动`() {
+        val base = baseline(listOf(item(101, "筒灯", link = "")))
+        val mine = payload(listOf(item(1, "筒灯", link = "https://item.jd.com/1.html")))
+        val theirs = payload(listOf(item(101, "筒灯", link = "")))
+
+        val result = Merger.merge(base, mine, theirs)
+
+        assertFalse(result.hasConflicts)
+        assertEquals("链接是物料内容的一部分，改了要保住",
+            "https://item.jd.com/1.html", result.itemNamed("筒灯")?.link)
+    }
+
+    @Test
+    fun `老 payload 没带链接字段时，本地新填的链接照样保住`() {
+        // base 与 theirs 都是老格式（link = null，即"不知道有这回事"）：
+        // 本地填了链接就是本地改过，不能被当成"服务器没动、以服务器为准"抹掉
+        val base = baseline(listOf(item(101, "筒灯", link = null)))
+        val mine = payload(listOf(item(1, "筒灯", link = "https://item.jd.com/2.html")))
+        val theirs = payload(listOf(item(101, "筒灯", link = null)))
+
+        val result = Merger.merge(base, mine, theirs)
+
+        assertFalse(result.hasConflicts)
+        assertEquals("https://item.jd.com/2.html", result.itemNamed("筒灯")?.link)
     }
 
     @Test

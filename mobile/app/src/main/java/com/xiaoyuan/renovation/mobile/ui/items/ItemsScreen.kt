@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +55,7 @@ import com.xiaoyuan.renovation.mobile.data.model.ItemDto
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_DONE
 import com.xiaoyuan.renovation.mobile.data.model.STATUS_PARTIAL
 import com.xiaoyuan.renovation.mobile.data.model.statusLabel
+import com.xiaoyuan.renovation.mobile.domain.LocalCompute
 import com.xiaoyuan.renovation.mobile.ui.charts.ThinProgressBar
 import com.xiaoyuan.renovation.mobile.ui.common.LoadState
 import com.xiaoyuan.renovation.mobile.ui.design.AppSelect
@@ -73,6 +75,7 @@ import com.xiaoyuan.renovation.mobile.ui.theme.Ink
 import com.xiaoyuan.renovation.mobile.ui.theme.categoryColor
 import com.xiaoyuan.renovation.mobile.ui.theme.statusColor
 import com.xiaoyuan.renovation.mobile.util.Fmt
+import com.xiaoyuan.renovation.mobile.util.UrlOpener
 import kotlinx.coroutines.delay
 
 @Composable
@@ -346,6 +349,7 @@ private fun ItemCard(
     onPurchase: () -> Unit,
 ) {
     val progress = if (item.totalQty > 0) (item.paidQty / item.totalQty).toFloat() else 0f
+    val context = LocalContext.current
 
     GlassCard(
         padding = 14.dp,
@@ -384,6 +388,15 @@ private fun ItemCard(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            // 填了商品链接的给一个小入口：点它直接去看商品页（点卡片本身是进编辑）
+            if (LocalCompute.cleanLink(item.link).isNotEmpty()) {
+                Spacer(Modifier.width(6.dp))
+                TagPill(
+                    text = "商品 ↗",
+                    color = Ink.Cyan,
+                    onClick = { UrlOpener.open(context, item.link) },
+                )
+            }
             Spacer(Modifier.width(8.dp))
             TagPill(
                 text = if (item.status == STATUS_PARTIAL) {

@@ -81,7 +81,8 @@ def create_item(data: ItemIn, request: Request,
                 unit=data.unit,
                 brand=data.brand or "", model=data.model or "",
                 qty_total=data.qty_total, price=data.price,
-                discount_price=data.discount_price, note=data.note)
+                discount_price=data.discount_price, note=data.note,
+                link=data.link or "")
     if data.allocations is not None:
         _apply_allocations(db, item, data.allocations, lst)
     if data.records is not None:
@@ -123,6 +124,7 @@ def update_item(item_id: int, data: ItemIn, request: Request,
     item.price = data.price
     item.discount_price = data.discount_price
     item.note = data.note
+    item.link = data.link or ""
     if data.allocations is not None:
         _apply_allocations(db, item, data.allocations, lst)
     if data.records is not None:

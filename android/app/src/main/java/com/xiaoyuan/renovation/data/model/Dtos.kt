@@ -90,6 +90,8 @@ data class ItemDto(
     @SerialName("discount_price") val discountPrice: Double? = null,
     val bought: Boolean = false,
     val note: String = "",
+    /** 商品链接（1.2.5 起）：商品页/下单页的网址，只认 http/https */
+    val link: String = "",
     @SerialName("total_qty") val totalQty: Double = 0.0,
     @SerialName("list_total") val listTotal: Double = 0.0,
     @SerialName("discount_total") val discountTotal: Double = 0.0,
@@ -153,6 +155,8 @@ data class ItemInDto(
     val price: Double = 0.0,
     @SerialName("discount_price") val discountPrice: Double? = null,
     val note: String = "",
+    /** 商品链接：留空表示没有；伪协议由后端收口（只认 http/https） */
+    val link: String = "",
     val allocations: List<AllocInDto>? = null,
     val records: List<RecordInDto>? = null,
 )

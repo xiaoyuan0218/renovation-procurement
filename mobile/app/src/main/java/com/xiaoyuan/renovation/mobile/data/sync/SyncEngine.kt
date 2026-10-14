@@ -307,8 +307,9 @@ class SyncEngine(
         val exported = api().exportList(remoteListId)
         if (exported is ApiResult.Err) return exported
         val snapshot = (exported as ApiResult.Ok).data
-        // 老服务器的 payload 缺 is_deposit：合并前按业务键补上本地旧值
-        val theirs = Snapshot.fillMissingDeposit(db, listId, snapshot.payload)
+        // 老服务器的 payload 缺 is_deposit / link：合并前按业务键补上本地旧值，
+        // 否则合并会把"服务器没说"当成"服务器说是非定金 / 没有链接"
+        val theirs = Snapshot.fillMissingCompat(db, listId, snapshot.payload)
 
         if (choice == UploadChoice.CreateNew) {
             if (fromPull) {
@@ -531,9 +532,10 @@ class SyncEngine(
         val listId = binding.listId
         val mine = Snapshot.capture(db, listId)
         val base = readBaseline(binding)
-        // 老服务器的 payload 缺 is_deposit：合并前按业务键补上本地旧值，
-        // 否则合并会把"服务器没说"当成"服务器说是非定金"、把本地标记带走
-        val theirs = Snapshot.fillMissingDeposit(db, listId, snapshot.payload)
+        // 老服务器的 payload 缺 is_deposit / link：合并前按业务键补上本地旧值，
+        // 否则合并会把"服务器没说"当成"服务器说是非定金 / 没有链接"、
+        // 把本地刚填的定金与商品链接带走
+        val theirs = Snapshot.fillMissingCompat(db, listId, snapshot.payload)
 
         // 服务器没动过：把本地推上去。
         //
@@ -628,7 +630,12 @@ class SyncEngine(
             listOf(
                 item.name, categoryName[item.categoryId ?: 0].orEmpty(), item.unit,
                 item.brand, item.model, item.qtyTotal, item.price, item.discountPrice,
-                item.note, item.sort, item.deletedAt,
+                item.note,
+                // 商品链接也要进指纹：漏了它，只改链接会被判成"内容没变"，
+                // 两边都不动、改动永远不推给服务器。老 payload 的 null 与空串等同
+                // —— "不知道有这个字段"不该被当成"填了又清掉"
+                item.link.orEmpty(),
+                item.sort, item.deletedAt,
                 allocations, records,
             ).joinToString("\u0001")
         }.sorted()
@@ -657,9 +664,9 @@ class SyncEngine(
         fingerprint: String,
         payload: SyncPayload,
     ) {
-        // 兼容层：老服务器（1.2.2 之前）的 payload 里没有 is_deposit，落地前先按
-        // 业务键把本地旧值填进去（基线也照填后的存），否则本地刚勾的定金会被抹掉
-        val filled = Snapshot.fillMissingDeposit(db, listId, payload)
+        // 兼容层：老服务器的 payload 里没有 is_deposit / link，落地前先按业务键把
+        // 本地旧值填进去（基线也照填后的存），否则本地刚勾的定金、刚填的链接会被抹掉
+        val filled = Snapshot.fillMissingCompat(db, listId, payload)
         val localMap = Snapshot.apply(db, listId, filled)
         saveBinding(listId, remoteListId, remoteName, fingerprint, filled, localMap, db.sync().byList(listId))
     }

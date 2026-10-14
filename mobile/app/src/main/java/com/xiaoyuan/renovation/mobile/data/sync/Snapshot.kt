@@ -63,6 +63,47 @@ object Snapshot {
     }
 
     /**
+     * 老服务器 payload 的兼容层：is_deposit 与 link 都按本地旧值回填。
+     *
+     * 落地、合并、存基线的入口都走它 —— 两层的顺序无所谓（一个补记录、一个补
+     * 物料），包在一起只是免得将来漏掉一层。
+     */
+    suspend fun fillMissingCompat(
+        db: AppDatabase,
+        listId: Int,
+        payload: SyncPayload,
+    ): SyncPayload =
+        fillMissingItemLink(db, listId, fillMissingDeposit(db, listId, payload))
+
+    /**
+     * 兼容层：老服务器（1.2.5 之前）发来的 payload 里没有 link —— 那不是
+     * "这个物料没有商品链接"，而是"它不知道有这回事"。落地前按**物料名**把本地
+     * 旧值填进去，免得刚填的链接在同步回落时被抹掉（与 [fillMissingDeposit]
+     * 同一套路；后端对应的是 record_keys.fill_missing_item_link）。
+     *
+     * 与后端同一条判据：只要有一条物料带了 link，就认为对方是新版本、整份照它落；
+     * 全都没带才按名字回填。老服务器永远不会发出这个字段，所以"有的带有的不带"
+     * 只会出现在新版本的数据里。
+     */
+    suspend fun fillMissingItemLink(
+        db: AppDatabase,
+        listId: Int,
+        payload: SyncPayload,
+    ): SyncPayload {
+        val items = payload.items
+        if (items.isEmpty() || items.any { it.link != null }) return payload
+
+        val known = db.items().all(listId)
+            .mapNotNull { item -> item.link.takeIf { it.isNotEmpty() }?.let { item.name to it } }
+            .toMap()
+        if (known.isEmpty()) return payload
+
+        return payload.copy(items = items.map { item ->
+            if (item.link != null) item else item.copy(link = known[item.name])
+        })
+    }
+
+    /**
      * 记录的业务键：缺 is_deposit 的 payload 靠它认出"覆盖前那条记录"。
      * 与后端 record_keys.record_key 是同一套字段 —— 行 id 覆盖后会重排，指望不上。
      */
@@ -110,6 +151,7 @@ object Snapshot {
                     price = item.price,
                     discountPrice = item.discountPrice,
                     note = item.note,
+                    link = item.link,
                     sort = item.sort,
                     deletedAt = item.deletedAt,
                     createdAt = item.createdAt,
@@ -237,6 +279,9 @@ object Snapshot {
                     price = item.price,
                     discountPrice = item.discountPrice,
                     note = item.note,
+                    // null 是"老 payload 没说"：落地时当空串（真要保留旧值，
+                    // 调用方在落地前已经用 fillMissingItemLink 按名字补过了）
+                    link = item.link.orEmpty(),
                     sort = item.sort,
                     deletedAt = item.deletedAt,
                     createdAt = item.createdAt,

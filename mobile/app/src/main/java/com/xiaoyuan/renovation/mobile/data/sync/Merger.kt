@@ -141,6 +141,9 @@ object Merger {
             price = item.price,
             discountPrice = item.discountPrice,
             note = item.note,
+            // link 可空：老 payload 没这个字段（null），取用时保留 null —— 落地前
+            // Snapshot.fillMissingItemLink 会按物料名把本地旧值填回来
+            link = item.link,
             sort = item.sort,
             deletedAt = item.deletedAt,
             allocations = item.allocations
@@ -164,6 +167,8 @@ object Merger {
             price = item.price,
             discountPrice = item.discountPrice,
             note = item.note,
+            // 老 payload 没这个字段时保留 null（落地前会按物料名回填本地旧值）
+            link = item.link,
             sort = item.sort,
             deletedAt = item.deletedAt,
             allocations = item.allocations
@@ -220,6 +225,7 @@ object Merger {
                 price = row.price,
                 discountPrice = row.discountPrice,
                 note = row.note,
+                link = row.link,
                 sort = row.sort,
                 deletedAt = row.deletedAt,
                 createdAt = pickCreated(mineItem?.createdAt, remoteItem?.createdAt),
@@ -369,6 +375,7 @@ object Merger {
                 price = row.price,
                 discountPrice = row.discountPrice,
                 note = row.note,
+                link = row.link,
                 sort = row.sort,
                 deletedAt = row.deletedAt,
                 createdAt = row.createdAt,
@@ -641,6 +648,8 @@ object Merger {
         val price: Double,
         val discountPrice: Double?,
         val note: String,
+        /** 可空：老 payload 没有这个字段。取用时保留 null，落地前回填本地旧值 */
+        val link: String?,
         val sort: Int,
         val deletedAt: String?,
         val allocations: List<AllocRow>,

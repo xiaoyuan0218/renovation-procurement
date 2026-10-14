@@ -92,6 +92,14 @@ data class SyncItem(
     val price: Double = 0.0,
     @SerialName("discount_price") val discountPrice: Double? = null,
     val note: String = "",
+    /**
+     * 商品链接（1.2.5 起）：商品页/下单页的网址。
+     *
+     * 可空与定金同理：老服务器发出的 payload 里没有这个字段，反序列化出来是
+     * null —— 落地前按物料名把本地旧值填回去（见 Snapshot.fillMissingItemLink）。
+     * 直接当空串会把用户填好的链接抹掉。
+     */
+    val link: String? = null,
     val sort: Int = 0,
     /** 非空表示这条在回收站里 —— 回收站也要跟着搬，两端才一致 */
     @SerialName("deleted_at") val deletedAt: String? = null,

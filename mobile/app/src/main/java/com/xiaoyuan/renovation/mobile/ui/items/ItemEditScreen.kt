@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
@@ -34,12 +35,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xiaoyuan.renovation.mobile.data.model.statusLabel
 import com.xiaoyuan.renovation.mobile.di.AppContainer
+import com.xiaoyuan.renovation.mobile.domain.LocalCompute
 import com.xiaoyuan.renovation.mobile.ui.common.containerViewModel
 import com.xiaoyuan.renovation.mobile.ui.design.AppDateField
 import com.xiaoyuan.renovation.mobile.ui.design.MultiChoiceChips
@@ -62,6 +66,7 @@ import com.xiaoyuan.renovation.mobile.ui.design.TagPill
 import com.xiaoyuan.renovation.mobile.ui.theme.Ink
 import com.xiaoyuan.renovation.mobile.ui.theme.statusColor
 import com.xiaoyuan.renovation.mobile.util.Fmt
+import com.xiaoyuan.renovation.mobile.util.UrlOpener
 import kotlinx.coroutines.delay
 
 /**
@@ -82,6 +87,8 @@ fun ItemEditScreen(
     val loadError by vm.loadError.collectAsStateWithLifecycle()
     val saving by vm.saving.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
 
     var confirmDelete by remember { mutableStateOf(false) }
 
@@ -219,6 +226,30 @@ fun ItemEditScreen(
                                     minLines = 2,
                                     singleLine = false,
                                 )
+                                Spacer(Modifier.height(12.dp))
+                                AppTextField(
+                                    value = form.link,
+                                    onValueChange = { v -> vm.edit { it.copy(link = v) } },
+                                    label = "商品链接",
+                                    placeholder = "https://…（选填，之后点开就能看商品页）",
+                                    keyboardType = KeyboardType.Uri,
+                                )
+                                // 只有认得出的 http/https 才给"打开"入口：伪协议
+                                // 交给系统可能是执行而不是浏览，不当成链接
+                                val cleanLink = LocalCompute.cleanLink(form.link)
+                                if (cleanLink.isNotEmpty()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    GhostButton(
+                                        text = "打开商品链接",
+                                        icon = Icons.AutoMirrored.Filled.OpenInNew,
+                                        contentColor = Ink.Cyan,
+                                        onClick = {
+                                            if (!UrlOpener.open(context, cleanLink)) {
+                                                vm.showMessage("没有能打开这个链接的应用")
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
 

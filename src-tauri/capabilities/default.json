@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "桌面端默认权限：只放开核心能力，以及启动内置后端这一个 sidecar。",
+  "description": "桌面端默认权限：只放开核心能力、启动内置后端这一个 sidecar，以及把商品链接交给系统浏览器打开。",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "opener:default",
     {
       "identifier": "shell:allow-execute",
       "allow": [

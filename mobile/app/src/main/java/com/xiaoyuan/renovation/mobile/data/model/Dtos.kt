@@ -90,6 +90,7 @@ data class ItemDto(
     @SerialName("discount_price") val discountPrice: Double? = null,
     val bought: Boolean = false,
     val note: String = "",
+    val link: String = "",
     @SerialName("total_qty") val totalQty: Double = 0.0,
     @SerialName("list_total") val listTotal: Double = 0.0,
     @SerialName("discount_total") val discountTotal: Double = 0.0,
@@ -154,6 +155,7 @@ data class ItemInDto(
     val price: Double = 0.0,
     @SerialName("discount_price") val discountPrice: Double? = null,
     val note: String = "",
+    val link: String = "",
     val allocations: List<AllocInDto>? = null,
     val records: List<RecordInDto>? = null,
 )

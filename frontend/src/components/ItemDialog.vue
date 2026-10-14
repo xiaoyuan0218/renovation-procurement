@@ -13,7 +13,7 @@ const emit = defineEmits(['saved'])
 
 const blank = () => ({
   name: '', category_id: null, brand: '', model: '', unit: '个', qty_total: null,
-  price: null, discount_price: null, note: '',
+  price: null, discount_price: null, note: '', link: '',
   allocations: [], records: [],
 })
 const form = ref(blank())
@@ -45,6 +45,7 @@ watch(visible, (v) => {
       discount_price: props.item.discount_price,
       brand: props.item.brand || '',
       model: props.item.model || '',
+      link: props.item.link || '',
       allocations: props.item.allocations.map((a) => ({ ...a })),
       records: (props.item.records || []).map((r) => ({
         qty: r.qty || 0, amount: r.amount || 0, date: r.date || '', note: r.note || '',
@@ -180,6 +181,7 @@ async function save() {
       discount_price: form.value.discount_price === null || form.value.discount_price === ''
         ? null : Number(form.value.discount_price),
       note: form.value.note || '',
+      link: form.value.link || '',
       allocations: form.value.allocations.map((a) => ({
         room_id: a.room_id,
         qty: Number(a.qty) || 0,
@@ -261,19 +263,19 @@ async function save() {
         </el-col>
       </el-row>
       <el-row :gutter="12">
-        <el-col :xs="12" :sm="6">
+        <el-col :xs="12" :sm="8">
           <el-form-item label="分类">
             <el-select v-model="form.category_id" placeholder="选择" clearable style="width: 100%">
               <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :xs="12" :sm="6">
+        <el-col :xs="12" :sm="8">
           <el-form-item label="单位">
             <el-input v-model="form.unit" placeholder="个/米/套" />
           </el-form-item>
         </el-col>
-        <el-col :xs="12" :sm="6">
+        <el-col :xs="12" :sm="8">
           <el-form-item label="数量">
             <el-input-number :model-value="allocationsLocked ? allocQtyTotal : form.qty_total"
                              :min="0" :disabled="allocationsLocked"
@@ -282,9 +284,17 @@ async function save() {
             <div v-if="allocationsLocked" class="field-hint">总量由分配合计决定</div>
           </el-form-item>
         </el-col>
-        <el-col :xs="12" :sm="6">
+      </el-row>
+      <!-- 备注与商品链接并排：两样都是选填的副信息，各占一半 -->
+      <el-row :gutter="12">
+        <el-col :xs="24" :sm="12">
           <el-form-item label="备注">
             <el-input v-model="form.note" placeholder="选填" />
+          </el-form-item>
+        </el-col>
+        <el-col :xs="24" :sm="12">
+          <el-form-item label="商品链接">
+            <el-input v-model="form.link" placeholder="https://…（选填，之后点开就能看商品页）" />
           </el-form-item>
         </el-col>
       </el-row>

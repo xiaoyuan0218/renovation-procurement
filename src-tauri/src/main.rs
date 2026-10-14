@@ -23,6 +23,7 @@ struct ServerProcess(Mutex<Option<CommandChild>>);
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             match start_backend(app) {
                 Ok((port, stale_note)) => {
@@ -31,10 +32,24 @@ fn main() {
                         // 内核版本对不上时的说明交给界面显示（AppShell 读这个参数）
                         url.push_str(&format!("/?service_stale={}", percent_encode(&note)));
                     }
+                    // 页面里点商品链接（<a target="_blank">）不在应用内开新窗口，
+                    // 交给系统浏览器 —— 用户要的是"去看商品页"，不是多一个窗口
+                    let opener = app.handle().clone();
                     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                         .title("采知道")
                         .inner_size(1280.0, 860.0)
                         .min_inner_size(900.0, 620.0)
+                        .on_new_window(move |target, _features| {
+                            use tauri_plugin_opener::OpenerExt;
+                            if matches!(target.scheme(), "http" | "https") {
+                                let _ = opener
+                                    .opener()
+                                    .open_url(target.as_str(), None::<&str>);
+                            }
+                            // 一律不在应用内开窗：http(s) 已交给系统浏览器，
+                            // 其余协议（javascript: 之类）直接拒绝
+                            tauri::webview::NewWindowResponse::Deny
+                        })
                         .build()?;
                 }
                 Err(error) => {

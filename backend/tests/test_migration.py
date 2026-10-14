@@ -188,7 +188,7 @@ def test_migration_moves_everything_into_default_list(legacy_db):
         db.close()
 
     cols = _columns("items")
-    assert {"list_id", "brand", "model", "rev"} <= cols  # 多清单列 + 老补列都在
+    assert {"list_id", "brand", "model", "rev", "link"} <= cols  # 多清单列 + 老补列都在
 
 
 def test_migration_keeps_money_numbers(legacy_db):
@@ -457,3 +457,155 @@ def test_lists_migration_is_idempotent(multi_list_db):
     init_db()
     assert _unique_cols("lists") == first
     assert ["name"] not in first
+
+
+# ---------------------------------------------------------------- 轻量补列（商品链接）
+
+# 1.2.4 的库结构（照着真实开发库的 sqlite_master 抄下来的）：多清单早就到位，
+# items 还没有 link 列。对这种库 needs_migration() 返回 False —— 多清单那条迁移
+# 整段都不执行，所以补列必须由启动时的 ensure_item_link_column 负责。
+# 1.2.5 之前漏了这一步，实测症状：升级后每次查 items 都报
+# sqlite3.OperationalError: no such column: items.link，应用整体起不来。
+V124_SCHEMA = """
+CREATE TABLE lists (
+    id INTEGER NOT NULL,
+    name VARCHAR(50) NOT NULL,
+    note VARCHAR(200),
+    sort INTEGER,
+    created_at DATETIME, updated_at DATETIME,
+    code VARCHAR(12),
+    PRIMARY KEY (id)
+);
+CREATE INDEX ix_lists_code ON lists (code);
+CREATE UNIQUE INDEX uq_lists_code ON lists (code)
+    WHERE code IS NOT NULL AND code != '';
+CREATE TABLE users (
+    id INTEGER NOT NULL,
+    username VARCHAR(50) NOT NULL,
+    password_hash VARCHAR(200) NOT NULL,
+    created_at DATETIME, updated_at DATETIME,
+    PRIMARY KEY (id), UNIQUE (username)
+);
+CREATE TABLE items (
+    id INTEGER NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    category_id INTEGER,
+    unit VARCHAR(20), qty_total FLOAT, price FLOAT, discount_price FLOAT,
+    paid_amount FLOAT, paid_qty FLOAT, paid_price FLOAT, bought_qty FLOAT,
+    bought BOOLEAN, note VARCHAR(500), sort INTEGER,
+    brand VARCHAR(100) DEFAULT '', model VARCHAR(100) DEFAULT '',
+    rev INTEGER DEFAULT 1, deleted_at DATETIME,
+    list_id INTEGER REFERENCES lists(id) ON DELETE CASCADE,
+    created_at DATETIME, updated_at DATETIME,
+    PRIMARY KEY (id),
+    FOREIGN KEY(category_id) REFERENCES categories (id)
+);
+CREATE INDEX ix_items_list_id ON items (list_id);
+CREATE TABLE rooms (
+    id INTEGER NOT NULL, name VARCHAR(50) NOT NULL, sort INTEGER,
+    list_id INTEGER REFERENCES lists(id) ON DELETE CASCADE,
+    created_at DATETIME, updated_at DATETIME,
+    PRIMARY KEY (id)
+);
+CREATE INDEX ix_rooms_list_id ON rooms (list_id);
+CREATE TABLE categories (
+    id INTEGER NOT NULL, list_id INTEGER, name VARCHAR(50) NOT NULL,
+    sort INTEGER, created_at DATETIME, updated_at DATETIME,
+    PRIMARY KEY (id),
+    CONSTRAINT uq_category_list_name UNIQUE (list_id, name),
+    FOREIGN KEY(list_id) REFERENCES lists (id) ON DELETE CASCADE
+);
+CREATE INDEX ix_categories_list_id ON categories (list_id);
+CREATE TABLE allocations (
+    id INTEGER NOT NULL, item_id INTEGER NOT NULL, room_id INTEGER NOT NULL,
+    qty FLOAT, price_override FLOAT, paid_qty FLOAT, note VARCHAR(200),
+    PRIMARY KEY (id),
+    FOREIGN KEY(item_id) REFERENCES items (id) ON DELETE CASCADE,
+    FOREIGN KEY(room_id) REFERENCES rooms (id) ON DELETE CASCADE
+);
+CREATE TABLE purchase_records (
+    id INTEGER NOT NULL, item_id INTEGER NOT NULL,
+    qty FLOAT, amount FLOAT, date VARCHAR(20), note VARCHAR(200),
+    vendor VARCHAR(50) DEFAULT '', order_no VARCHAR(50) DEFAULT '',
+    room_id INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+    created_at DATETIME, updated_at DATETIME,
+    PRIMARY KEY (id),
+    FOREIGN KEY(item_id) REFERENCES items (id) ON DELETE CASCADE
+);
+CREATE TABLE record_rooms (
+    id INTEGER NOT NULL, record_id INTEGER NOT NULL, room_id INTEGER,
+    PRIMARY KEY (id),
+    FOREIGN KEY(record_id) REFERENCES purchase_records (id) ON DELETE CASCADE,
+    FOREIGN KEY(room_id) REFERENCES rooms (id) ON DELETE SET NULL
+);
+"""
+
+
+@pytest.fixture()
+def db_124():
+    """1.2.4 的真实结构 + 几条数据，items 没有 link 列。"""
+    engine.dispose()
+    _remove_db_files()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.executescript(V124_SCHEMA)
+        conn.execute("INSERT INTO lists (id, name, note, sort, created_at, "
+                     "updated_at, code) VALUES (1, '采购清单', '', 0, "
+                     "'2026-10-01 10:00:00', '2026-10-01 10:00:00', 'AAAA1111')")
+        conn.execute("INSERT INTO users (id, username, password_hash) "
+                     "VALUES (1, 'admin', 'x')")
+        conn.execute("INSERT INTO rooms (id, name, sort, list_id) "
+                     "VALUES (1, '客厅', 0, 1)")
+        conn.execute("INSERT INTO categories (id, list_id, name, sort) "
+                     "VALUES (1, 1, '照明', 0)")
+        conn.execute(
+            "INSERT INTO items (id, name, category_id, unit, qty_total, price, "
+            "discount_price, bought, note, sort, rev, list_id, created_at, "
+            "updated_at) VALUES (1, '筒灯', 1, '个', 6, 99, 79.4, 1, "
+            "'客厅用贵的', 0, 1, 1, '2026-10-01 10:00:00', '2026-10-01 10:00:00')")
+        conn.execute(
+            "INSERT INTO purchase_records (id, item_id, qty, amount, date, note, "
+            "vendor, order_no, created_at, updated_at) VALUES "
+            "(1, 1, 2, 200, '2026-09-01', '定金', '某商家', 'NO-1', "
+            "'2026-10-01 10:00:00', '2026-10-01 10:00:00')")
+        conn.commit()
+    finally:
+        conn.close()
+    yield
+    engine.dispose()
+    _remove_db_files()
+
+
+def test_link_column_added_to_existing_multi_list_db(db_124):
+    """1.2.4 的库（结构已是多清单、没有 link 列）升级后必须补上这一列。
+
+    这类库 needs_migration() 返回 False，多清单迁移整段不跑 —— 补列只写在
+    那条路里时，升级后每次查 items 都会 no such column，应用整体起不来。
+    """
+    assert "link" not in _columns("items")
+
+    init_db()
+
+    assert "link" in _columns("items")
+    db = SessionLocal()
+    try:
+        item = db.query(Item).one()
+        assert item.link == "", "老行补列后是空串（都没填过）"
+        assert (item.name, item.note, item.price) == ("筒灯", "客厅用贵的", 99)
+        assert db.query(PurchaseRecord).count() == 1
+        # 补列 + 启动流程不该动到清单/分组/分类
+        assert db.query(ItemList).count() == 1
+        assert db.query(Room).count() == 1
+        assert db.query(Category).count() == 1
+    finally:
+        db.close()
+
+
+def test_link_column_migration_is_idempotent(db_124):
+    """重复启动不会重复补列、不会报错。"""
+    init_db()
+    once = _columns("items")
+
+    init_db()
+
+    assert _columns("items") == once

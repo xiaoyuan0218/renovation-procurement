@@ -192,6 +192,16 @@ class ExpenseOut(Timestamped):
         return date_utils.for_read(value)
 
 
+def _clean_link(value: str) -> str:
+    """商品链接只认 http/https：别的写法（javascript: 之类）一律清空。
+
+    这个值最终会被各端渲染成可点链接，把协议收窄是必须的 —— 伪协议在浏览器里
+    能执行脚本。前端点击前也会再校验一道，两边都拦。
+    """
+    text = (value or "").strip()
+    return text if text.lower().startswith(("http://", "https://")) else ""
+
+
 class ItemIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     category_id: Optional[int] = None
@@ -202,11 +212,18 @@ class ItemIn(BaseModel):
     price: float = 0
     discount_price: Optional[float] = None
     note: str = ""
+    # 商品链接（下单页/商品页地址）。只存 http/https，渲染成可点链接前各端都会校验
+    link: str = Field(default="", max_length=500)
     # 传入则整体替换布点明细 / 采购记录；不传(None)表示不动
     allocations: Optional[list[AllocIn]] = None
     records: Optional[list[RecordIn]] = None
     # 读取时拿到的 rev，保存时原样带回；对不上说明这条在别处被改过（409）
     base_rev: Optional[int] = None
+
+    @field_validator("link")
+    @classmethod
+    def _normalize_link(cls, value: str) -> str:
+        return _clean_link(value)
 
 
 class ItemPatchIn(BaseModel):
@@ -220,6 +237,13 @@ class ItemPatchIn(BaseModel):
     price: Optional[float] = None
     discount_price: Optional[float] = None
     note: Optional[str] = None
+    link: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("link")
+    @classmethod
+    def _normalize_link(cls, value: Optional[str]) -> Optional[str]:
+        # 没传（None）表示不动这一列；传了就走同一条伪协议收口
+        return None if value is None else _clean_link(value)
 
 
 class MatrixCellIn(BaseModel):
@@ -247,6 +271,7 @@ class ItemOut(Timestamped):
     discount_price: Optional[float] = None
     bought: bool
     note: str
+    link: str = ""
     total_qty: float
     list_total: float
     discount_total: float
@@ -428,10 +453,19 @@ class SyncItemIn(SyncRowTimestamps):
     price: float = 0
     discount_price: Optional[float] = None
     note: str = Field(default="", max_length=500)
+    # 商品链接。None 表示"推送方没带这个字段"（老客户端）—— 落地时按物料名沿用
+    # 覆盖前的值，别把别人填好的链接抹成空串
+    link: Optional[str] = Field(default=None, max_length=500)
     sort: int = 0
     deleted_at: Optional[str] = None
     allocations: list[SyncAllocIn] = []
     records: list[SyncRecordIn] = []
+
+    @field_validator("link")
+    @classmethod
+    def _normalize_link(cls, value: Optional[str]) -> Optional[str]:
+        # None 要留着：那是"推送方没带这个字段"的意思，落地时靠它决定是否沿用旧值
+        return None if value is None else _clean_link(value)
 
 
 class SyncExpenseIn(SyncRowTimestamps):

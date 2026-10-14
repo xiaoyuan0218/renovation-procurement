@@ -118,6 +118,8 @@ data class ItemEntity(
     @ColumnInfo(name = "bought_qty") val boughtQty: Double = 0.0,
     val bought: Boolean = false,
     val note: String = "",
+    /** 商品链接（下单页/商品页地址）。只存 http/https，点开前各端都会再校验一道 */
+    @ColumnInfo(name = "link") val link: String = "",
     val sort: Int = 0,
     val rev: Int = 1,
     @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,

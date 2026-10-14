@@ -28,7 +28,7 @@ PRODUCT_HEADER = {"灯具", "面板", "物料", "产品"}
 # 读取一律按列名找列，所以老文件（ID 在最后一列）照样能读。
 ITEM_HEADER = ["物料ID", "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价",
                "优惠单价", "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
-               "日常价未付", "实际优惠", "日常价优惠", "已购", "备注",
+               "日常价未付", "实际优惠", "日常价优惠", "已购", "备注", "商品链接",
                "添加时间", "修改时间"]
 ALLOC_HEADER = ["物料ID", "物料名称", "房间", "数量", "单价", "备注"]
 RECORD_HEADER = ["物料ID", "物料名称", "实付数量", "实付金额", "定金", "付款日期", "分组",
@@ -411,6 +411,7 @@ def _parse_flat(path_or_bytes):
     c_paid_amount = col_of(ws_items, "实付金额")
     c_bought = col_of(ws_items, "已购")
     c_note = col_of(ws_items, "备注")
+    c_link = col_of(ws_items, "商品链接")
     c_created = col_of(ws_items, "添加时间")
     c_updated = col_of(ws_items, "修改时间")
 
@@ -440,6 +441,9 @@ def _parse_flat(path_or_bytes):
                                         f"{label}的「实付金额」", warnings),
             "bought": bought_cell in ("是", "TRUE", "True", "1"),
             "note": _txt(_v(ws_items, r, c_note)),
+            # 没有这一列（1.2.5 之前的老文件）时给 None：落库时保留原值，
+            # 别把清单里已经填好的链接清空
+            "link": _txt(_v(ws_items, r, c_link)) if c_link else None,
             # 老文件没有这两列（返回 None），落库时按数据库默认值走
             "created_at": _parse_stamp(_vo(ws_items, r, c_created)),
             "updated_at": _parse_stamp(_vo(ws_items, r, c_updated)),
@@ -806,6 +810,13 @@ def _apply_flat(db, parsed, mode, report, list_id):
     if record_keys.misses_deposit(parsed.get("records", [])):
         inherit = record_keys.deposit_index(db, list_id)
 
+    # 同理：老文件没有「商品链接」列（解析出来是 None）时，按物料名把已有链接
+    # 记下来 —— replace 会先清空整份清单，索引得在清空之前建好
+    inherit_links: dict = {}
+    parsed_items = parsed.get("items", [])
+    if parsed_items and any(row.get("link") is None for row in parsed_items):
+        inherit_links = record_keys.item_link_index(db, list_id)
+
     if mode == "replace":
         _clear_list_items(db, list_id)
     rooms_cache, cats_cache = {}, {}
@@ -881,6 +892,12 @@ def _apply_flat(db, parsed, mode, report, list_id):
         item.brand = data["brand"] or ""
         item.model = data["model"] or ""
         item.note = data["note"]
+        # 「商品链接」：文件带了这个信息就照它写；老文件没带（None）则按物料名
+        # 沿用覆盖前的值，别把已填的链接清空
+        if data.get("link") is not None:
+            item.link = data["link"]
+        else:
+            item.link = inherit_links.get(data["name"], "")
         if data.get("created_at") or data.get("updated_at"):
             stamped.append((item, data.get("created_at"), data.get("updated_at")))
         if (data["paid_qty"] or data["paid_amount"]) and _norm(data["name"]) not in rec_names:
@@ -1037,7 +1054,7 @@ def export_xlsx(db, list_id=None) -> bytes:
             i.price, i.discount_price, d["discount_total"],
             d["paid_qty"], d["paid"], d["unpaid_qty"], d["unpaid"],
             d["daily_unpaid"], d["actual_discount"], d["daily_discount"],
-            "是" if d["bought"] else "否", i.note,
+            "是" if d["bought"] else "否", i.note, i.link or "",
             # 时间带上一起走：不然导出再灌回去，所有「修改时间」都变成刚刚，
             # 同步还会把每条都当成新改动推一遍
             _stamp_out(i.created_at), _stamp_out(i.updated_at),
@@ -1113,10 +1130,10 @@ def build_template() -> bytes:
     ws.append(ITEM_HEADER)
     ws.append([None, "照明", "示例筒灯（导入前请删除本行）", None, None, "个", 4, 99, 79.4,
                None, None, None, None, None, None, None, None, "否", "日常单价留空则按原价计",
-               None, None])
+               None, None, None])
     ws.append([None, "网络", "示例网线（导入前请删除本行）", None, None, "米", 150, 4.41, None,
                None, None, None, None, None, None, None, None, None, "实付见「采购记录」页",
-               None, None])
+               None, None, None])
 
     ws2 = wb.create_sheet("布点明细")
     ws2.append(ALLOC_HEADER)
@@ -1162,9 +1179,11 @@ def build_template() -> bytes:
         "13. 「采购记录」页的「定金」列：填「是」表示这笔是定金 —— 钱先付了、货还没到，"
         "所以它只算进已付金额、不推进「已买数量」，状态不会变成买完；等货到了再记一笔"
         "尾款（定金列填「否」）就结清了。定金的钱会从「未付」里扣掉。留空按「否」算。",
-        "14. 「添加时间」「修改时间」由系统填写，写的是**本地时间**（后面带着时区偏移量，"
+        "14. 「添加时间」「修改时间」由系统填写，写的是本地时间（后面带着时区偏移量，"
         "如 2026-10-08 15:30:42+08:00），导出时一并带出、导入时照原样换回去，"
         "所以导出再导入不会改动任何时间。手填无效，认不出来会忽略。",
+        "15. 「商品链接」填商品页/下单页的网址（http 或 https 开头），点开就能跳过去；"
+        "留空也可以。只认这两种开头的地址，其它写法会被忽略。",
     ]:
         ws4.append([line])
 

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (Allocation, Category, ExtraExpense, Item, ItemList,
                       PurchaseRecord, RecordRoom, Room, utcnow)
-from .record_keys import fill_missing_deposit
+from .record_keys import fill_missing_deposit, fill_missing_item_link
 from . import codes
 
 FORMAT_VERSION = 1
@@ -104,6 +104,7 @@ def _item_payload(item: Item) -> dict:
         "price": item.price or 0,
         "discount_price": item.discount_price,
         "note": item.note or "",
+        "link": item.link or "",
         "sort": item.sort or 0,
         # 回收站里的也一起走：两端回收站保持一致，捞回来的东西才不会一边有一边没有
         "deleted_at": item.deleted_at.isoformat() if item.deleted_at else None,
@@ -282,6 +283,8 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
         # 不等于"这条不是定金" —— 覆盖成 False 的话，一台老手机推一次就把整份
         # 清单的定金标记抹平。先按业务键把旧值填进 payload，再照它覆盖重建。
         payload = fill_missing_deposit(db, target.id, payload)
+        # 同理：老客户端 payload 里没有 link 字段，按物料名把已有链接填回去
+        payload = fill_missing_item_link(db, target.id, payload)
         _clear(db, target)
         target.note = payload["list"].get("note", "")
         target.sort = payload["list"].get("sort", 0)
@@ -347,6 +350,7 @@ def import_list(db: Session, payload: dict, target: ItemList | None = None,
             price=row.get("price") or 0,
             discount_price=row.get("discount_price"),
             note=row.get("note") or "",
+            link=row.get("link") or "",
             sort=row.get("sort") or 0,
             deleted_at=_parse_dt(row.get("deleted_at")),
             created_at=_ts_or_now(row.get("created_at")),

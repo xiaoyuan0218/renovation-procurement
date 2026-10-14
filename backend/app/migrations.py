@@ -366,6 +366,36 @@ def _ensure_code_unique_index(cur) -> None:
                 "ON lists (code) WHERE code IS NOT NULL AND code != ''")
 
 
+def ensure_item_link_column() -> bool:
+    """轻量迁移：老库给 items 补上「商品链接」列（1.2.5 起物料带这个字段）。
+
+    必须与 `migrate_to_multi_list` 分开、每次启动都跑一遍：那条路只在"结构还是
+    老样子"时才动（`needs_migration` 为假直接返回 None），而 1.2.4 的库结构已经
+    是多清单了 —— 走不到它的 `_apply`，列却非补不可：ORM 此后每次查 items 都会
+    SELECT link，缺列时应用当场起不来（sqlite3.OperationalError: no such column）。
+
+    纯字面量、可重复执行；只加列、不动任何数据。返回是否真的补过。
+    """
+    conn = sqlite3.connect(DB_PATH, isolation_level=None, timeout=30)
+    try:
+        cur = conn.cursor()
+        if "items" not in _tables(cur):
+            return False
+        if "link" in _columns(cur, "items"):
+            return False
+        cur.execute("BEGIN IMMEDIATE")
+        try:
+            cur.execute("ALTER TABLE items ADD COLUMN link VARCHAR(500) DEFAULT ''")
+            cur.execute("COMMIT")
+        except BaseException:
+            cur.execute("ROLLBACK")
+            raise
+        print("[升级] 老库已给物料补上「商品链接」列（原有数据不动）")
+        return True
+    finally:
+        conn.close()
+
+
 def _apply(cur, default_list_name: str) -> dict:
     if "lists" not in _tables(cur):
         raise RuntimeError("lists 表不存在：init_db 应先在 create_all 里建好它")
@@ -376,6 +406,8 @@ def _apply(cur, default_list_name: str) -> dict:
         cur.execute("ALTER TABLE items ADD COLUMN list_id INTEGER "
                     "REFERENCES lists(id) ON DELETE CASCADE")
         added.append("items")
+    # 「商品链接」列由 ensure_item_link_column() 在启动时补（要覆盖结构已是
+    # 多清单、走不到本函数的库），这里不再重复加，免得两处写法drift
     cur.execute("UPDATE items SET list_id = ? WHERE list_id IS NULL", (default_id,))
     cur.execute("CREATE INDEX IF NOT EXISTS ix_items_list_id ON items (list_id)")
 

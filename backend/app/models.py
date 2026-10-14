@@ -208,6 +208,9 @@ class Item(Base):
     bought_qty = Column(Float, default=0)          # 旧字段：已由采购记录取代
     bought = Column(Boolean, default=False)        # 兼容字段：是否全部买完（读取时以推导状态为准）
     note = Column(String(500), default="")
+    # 商品链接：下单页/商品页的地址，点开跳浏览器。只认 http/https（见 compute 的
+    # 输出与各端渲染），空串表示没填。
+    link = Column(String(500), default="")
     sort = Column(Integer, default=0)
     # 修订号：每次改动（含改这条物料的分配、采购记录）都 +1。
     # 客户端读取时带走、保存时带回，用来发现"我编辑期间别处也改了这条"，

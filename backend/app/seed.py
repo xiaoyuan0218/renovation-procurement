@@ -23,6 +23,9 @@ def init_db():
     backup = migrations.backup_if_needed()
     Base.metadata.create_all(engine)
     _add_missing_columns()
+    # 轻量补列（每次启动都过一遍）：1.2.5 的商品链接。老库结构已经是多清单时
+    # migrate_to_multi_list 会直接跳过，补列只能靠这一步
+    migrations.ensure_item_link_column()
     # 老库升级成多清单：单事务、做完自检（详见 migrations 模块）
     migrations.migrate_to_multi_list(backup_path=backup)
     _ensure_code_unique_index_safe()

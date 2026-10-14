@@ -168,6 +168,7 @@ class LocalRepository(
                     price = body.price,
                     discountPrice = body.discountPrice,
                     note = body.note,
+                    link = LocalCompute.cleanLink(body.link),
                     sort = db.items().nextSort(listId),
                 ).stamped(),
             ).toInt()
@@ -194,6 +195,7 @@ class LocalRepository(
                     price = body.price,
                     discountPrice = body.discountPrice,
                     note = body.note,
+                    link = LocalCompute.cleanLink(body.link),
                     rev = existing.rev + 1,
                 ).stamped(),
             )

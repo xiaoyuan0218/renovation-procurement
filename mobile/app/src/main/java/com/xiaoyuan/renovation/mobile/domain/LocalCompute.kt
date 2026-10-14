@@ -241,6 +241,23 @@ object LocalCompute {
 
     /* ---------------- 视图 ---------------- */
 
+    /**
+     * 商品链接只认 http/https：伪协议（javascript: 之类）一律清空。
+     *
+     * 存库前收一道，点开时还会再校验一次 —— 这个值最终会被渲染成可点的链接，
+     * 伪协议在浏览器里能执行脚本。与后端 `_clean_link` 是同一套规则。
+     */
+    fun cleanLink(value: String?): String {
+        val text = (value ?: "").trim()
+        return if (text.startsWith("http://", ignoreCase = true) ||
+            text.startsWith("https://", ignoreCase = true)
+        ) {
+            text
+        } else {
+            ""
+        }
+    }
+
     fun toDto(b: ItemBundle): ItemDto {
         val item = b.item
         val qty = totalQty(item, b.allocations)
@@ -261,6 +278,7 @@ object LocalCompute {
             discountPrice = item.discountPrice,
             bought = st == STATUS_DONE,
             note = item.note,
+            link = item.link,
             totalQty = qty,
             listTotal = listTotal(item, b.allocations),
             discountTotal = discountTotal(item, b.allocations),

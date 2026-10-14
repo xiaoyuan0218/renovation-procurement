@@ -54,7 +54,7 @@ object SheetMapping {
         "物料ID", "类目", "物料名称", "品牌", "型号", "单位", "数量", "单价", "优惠单价",
         "日常价", "实付数量", "实付金额", "未付数量", "未付金额",
         "日常价未付", "实际优惠", "日常价优惠",
-        "已购", "备注", "添加时间", "修改时间",
+        "已购", "备注", "商品链接", "添加时间", "修改时间",
     )
     private val ALLOC_HEADERS = listOf("物料ID", "物料名称", "房间", "数量", "单价", "备注")
 
@@ -124,6 +124,7 @@ object SheetMapping {
                 LocalCompute.dailyDiscount(item, mine, bundle.records),
                 if (dto.bought) "是" else "否",
                 item.note,
+                item.link,
                 // 时间跟着一起走（写成本地时间带偏移量）：不然导出再导回来，
                 // 所有「修改时间」都变成刚刚，同步还会把每条都当成新改动推一遍
                 toExportStamp(item.createdAt),
@@ -330,6 +331,14 @@ object SheetMapping {
                     price = itemTable.number(row, "单价") ?: current.price,
                     discountPrice = itemTable.number(row, "优惠单价") ?: current.discountPrice,
                     note = itemTable.cell(row, "备注").ifBlank { current.note },
+                    // 「商品链接」：文件带了这一列就照它写（空单元格 = 用户清掉了），
+                    // 老文件（1.2.5 之前导出的）没有这一列时保留本地已有的 —— 与后端
+                    // excel_io 同一套语义，拿旧备份导一次不会把链接清空
+                    link = if (itemTable.has("商品链接")) {
+                        LocalCompute.cleanLink(itemTable.cell(row, "商品链接"))
+                    } else {
+                        current.link
+                    },
                     // 表里带了时间就照原样写回，导出再导入不改动任何时间；
                     // 没带的（老文件、或本次新建的行）补一个"现在"，免得界面
                     // 上「添加时间」是空的
@@ -470,6 +479,9 @@ object SheetMapping {
             val index = header.indexOf(name)
             return if (index >= 0) row.getOrElse(index) { "" } else ""
         }
+
+        /** 表里有没有这一列：区分「没带这个信息」与「带了但空着」。 */
+        fun has(name: String): Boolean = header.indexOf(name) >= 0
 
         fun number(row: List<String>, name: String): Double? =
             cell(row, name).trim().takeIf { it.isNotEmpty() }?.toDoubleOrNull()

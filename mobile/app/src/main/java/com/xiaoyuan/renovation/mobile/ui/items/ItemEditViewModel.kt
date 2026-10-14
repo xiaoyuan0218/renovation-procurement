@@ -55,6 +55,7 @@ data class ItemForm(
     val price: String = "",
     val discountPrice: String = "",
     val note: String = "",
+    val link: String = "",
     val records: List<DraftRecord> = emptyList(),
     val allocations: List<DraftAlloc> = emptyList(),
 ) {
@@ -141,6 +142,7 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
                             price = if (item.price > 0) Fmt.qty(item.price) else "",
                             discountPrice = item.discountPrice?.let { Fmt.qty(it) } ?: "",
                             note = item.note,
+                            link = item.link,
                             records = item.records.map {
                                 DraftRecord(
                                     key = nextKey++,
@@ -298,6 +300,8 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
             price = Fmt.parseNumberOrZero(form.price),
             discountPrice = Fmt.parseNumber(form.discountPrice),
             note = form.note.trim(),
+            // 伪协议（javascript: 之类）由仓库层统一清空，这里原样带上
+            link = form.link.trim(),
             allocations = allocs,
             records = toRecordInputs(form),
         )
@@ -331,5 +335,10 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
 
     fun consumeMessage() {
         _message.value = null
+    }
+
+    /** 界面自己发现的问题（比如没有应用能打开商品链接）也走同一条提示通道。 */
+    fun showMessage(text: String) {
+        _message.value = text
     }
 }

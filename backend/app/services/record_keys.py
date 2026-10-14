@@ -74,3 +74,28 @@ def fill_missing_deposit(db: Session, list_id: int, payload: dict) -> dict:
                     record.get("date"), record.get("note"),
                     record.get("vendor"), record.get("order_no")), False))
     return payload
+
+
+def item_link_index(db: Session, list_id: int) -> dict:
+    """物料名 → 已有的商品链接（只记非空的），给"老 payload 没带 link"回填用。"""
+    rows = db.query(Item.name, Item.link).filter(Item.list_id == list_id).all()
+    return {name: link for name, link in rows if name and link}
+
+
+def fill_missing_item_link(db: Session, list_id: int, payload: dict) -> dict:
+    """payload 里的物料都没带 link（老客户端推的、老表格导的）时，按名字把旧值填回去。
+
+    与 fill_missing_deposit 同一个道理：对方不懂这个字段，"没带"不等于"要清空"。
+    重名物料按名字取第一条 —— 同名本来就有歧义，与记录级回填的处理一致。
+    """
+    items = payload.get("items", [])
+    if not items or any(row.get("link") is not None for row in items):
+        return payload
+    index = item_link_index(db, list_id)
+    if not index:
+        return payload
+    for row in payload.get("items", []):
+        link = index.get(row.get("name"))
+        if link:
+            row["link"] = link
+    return payload

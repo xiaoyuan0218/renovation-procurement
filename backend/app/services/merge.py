@@ -224,6 +224,9 @@ def _item_row(item, translate) -> tuple:
         item.get("deleted_at"),
         tuple(sorted(allocations, key=repr)),
         tuple(sorted(records, key=repr)),
+        # 商品链接加在**最后**：这个元组是按位置读的，手机端也按序号对，
+        # 插在中间会让后面所有位置整体错位
+        item.get("link") or "",
     )
 
 
@@ -410,6 +413,7 @@ def _rebuild_item(local_id, row, mine_rows, aligned):
         "brand": row[3], "model": row[4], "qty_total": row[5], "price": row[6],
         "discount_price": row[7], "note": row[8], "sort": row[9],
         "deleted_at": row[10], "allocations": allocations, "records": records,
+        "link": row[13],
         "created_at": _pick_created(mine_item.get("created_at") if mine_item else None,
                                     remote_item.get("created_at") if remote_item else None),
         "updated_at": _pick_updated(mine_item.get("updated_at") if mine_item else None,
@@ -525,6 +529,7 @@ def merge_without_base(mine: dict, theirs: dict) -> dict:
             "price": row.get("price") or 0,
             "discount_price": row.get("discount_price"),
             "note": row.get("note") or "",
+            "link": row.get("link") or "",
             "sort": row.get("sort") or 0,
             "deleted_at": row.get("deleted_at"),
             "created_at": row.get("created_at"),

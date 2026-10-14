@@ -163,7 +163,8 @@ def write_log(db: Session, request, status_code: int) -> None:
 
 _ITEM_LABELS = (("name", "名称"), ("category_id", "分类"), ("unit", "单位"),
                 ("brand", "品牌"), ("model", "型号"), ("qty_total", "总量"),
-                ("price", "单价"), ("discount_price", "日常单价"), ("note", "备注"))
+                ("price", "单价"), ("discount_price", "日常单价"), ("note", "备注"),
+                ("link", "商品链接"))
 
 _EXPENSE_LABELS = (("kind", "类型"), ("amount", "金额"), ("date", "日期"),
                    ("vendor", "商家"), ("order_no", "订单号"), ("note", "备注"),
