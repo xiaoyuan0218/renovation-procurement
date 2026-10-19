@@ -1,5 +1,8 @@
 name: 打包 APK（下载直链）
 
+# 本仓库以 Gitea 为主，提交由 Gitea 的镜像同步推到 GitHub；镜像推送同样是
+# push 事件，会照常触发这里的构建，所以平时只推 Gitea 就能拿到安装包。
+
 # 构建两个安卓 App，把 APK 发布到一个滚动更新的 release 上。
 # 直链形如 .../releases/latest/download/caizhidao-online.apk，只要这个工作流
 # 在跑，它就永远指向最新构建 —— 手机点开即下，不用登录、不用找 artifact。
