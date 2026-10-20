@@ -493,12 +493,15 @@ async function save() {
               <el-input v-model="row.note" size="small" placeholder="如 尾款/批次" />
             </template>
           </el-table-column>
-          <el-table-column width="108">
+          <el-table-column width="112">
             <template #default="{ row, $index }">
-              <!-- 退款只有对已经付出去的钱才有意义；负数行不再显示，点错了也没处退 -->
-              <el-button v-if="Number(row.amount) > 0" link type="warning" size="small"
-                         @click="openRefund(row, $index)">退款</el-button>
-              <el-button link type="danger" size="small" @click="removeRecord($index)">删除</el-button>
+              <!-- 两个操作固定横排：窄屏/大字号下也不能上下错开 -->
+              <div class="record-actions">
+                <!-- 退款只有对已经付出去的钱才有意义；负数行不再显示，点错了也没处退 -->
+                <el-button v-if="Number(row.amount) > 0" link type="warning" size="small"
+                           @click="openRefund(row, $index)">退款</el-button>
+                <el-button link type="danger" size="small" @click="removeRecord($index)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -637,6 +640,15 @@ async function save() {
 .cell-tip { display: block; cursor: help; }
 /* 表头带说明的列：虚线下划线提示"这里能悬停看解释"，不然没人知道能停上去 */
 .th-tip { border-bottom: 1px dashed var(--ios-label-3); cursor: help; }
+/* 记录行的操作按钮：横排、靠右、不换行 */
+.record-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+.record-actions :deep(.el-button + .el-button) { margin-left: 0; }
 /* 退款记录用红色区分：金额是负的，和普通付款不是一个方向的钱 */
 .refund-amount :deep(.el-input__inner) { color: var(--ios-red); font-weight: 600; }
 .refund-text { color: var(--ios-red); }

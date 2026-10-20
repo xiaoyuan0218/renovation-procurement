@@ -392,14 +392,6 @@ fun ItemEditScreen(
                                             style = MaterialTheme.typography.bodySmall,
                                             color = if (row.isDeposit) Ink.Amber else Ink.TextSecondary,
                                         )
-                                        if (Fmt.parseNumberOrZero(row.amount) > 0) {
-                                            Spacer(Modifier.weight(1f))
-                                            TagPill(
-                                                text = "退款",
-                                                color = Ink.DangerSoft,
-                                                onClick = { refundSource = row },
-                                            )
-                                        }
                                     }
                                 }
                                 Spacer(Modifier.height(10.dp))
@@ -466,6 +458,15 @@ fun ItemEditScreen(
                                         accent = Ink.Indigo,
                                         modifier = Modifier.weight(1f),
                                     )
+                                    // 退款和删除并排放在备注行末尾，两个操作对齐
+                                    if (!isRefund && Fmt.parseNumberOrZero(row.amount) > 0) {
+                                        Spacer(Modifier.width(8.dp))
+                                        TagPill(
+                                            text = "退款",
+                                            color = Ink.DangerSoft,
+                                            onClick = { refundSource = row },
+                                        )
+                                    }
                                     Spacer(Modifier.width(10.dp))
                                     GlassIconButton(
                                         icon = Icons.Filled.Delete,
