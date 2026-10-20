@@ -493,7 +493,8 @@ async function save() {
               <el-input v-model="row.note" size="small" placeholder="如 尾款/批次" />
             </template>
           </el-table-column>
-          <el-table-column width="112">
+          <!-- 宽度要算上单元格左右各 12px 的内边距：两个按钮约 106px，留够不溢出 -->
+          <el-table-column width="136">
             <template #default="{ row, $index }">
               <!-- 两个操作固定横排：窄屏/大字号下也不能上下错开 -->
               <div class="record-actions">
