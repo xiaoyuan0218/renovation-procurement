@@ -12,6 +12,8 @@ on:
     paths:
       - 'android/**'
       - 'mobile/**'
+      # 版本号变了也要重出安装包，否则发版后手机端还停在上一版
+      - 'VERSION'
       - '.github/workflows/apk.yml'
   workflow_dispatch:
 

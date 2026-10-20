@@ -10,6 +10,7 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - 'package.json'
+      - 'VERSION'
       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
