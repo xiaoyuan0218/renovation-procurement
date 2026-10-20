@@ -332,45 +332,75 @@ fun ItemEditScreen(
                                 HintText("还没有采购记录。买过一次就记一笔，状态会自动变成「部分已买」或「已买完」。")
                             }
                         }
+                        var refundSource by remember { mutableStateOf<DraftRecord?>(null) }
                         form.records.forEach { row ->
                             GlassCard(corner = 16.dp, padding = 12.dp) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    // 定金行不填数量：置灰输入框，提示这句话
-                                    AppNumberField(
-                                        value = row.qty,
-                                        onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(qty = v) } },
-                                        label = "实付数量",
-                                        enabled = !row.isDeposit,
-                                        supportingText = if (row.isDeposit) "定金不看数量" else null,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    AppNumberField(
-                                        value = row.amount,
-                                        onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(amount = v) } },
-                                        label = "实付金额",
-                                        accent = Ink.Mint,
-                                        modifier = Modifier.weight(1f),
-                                    )
+                                val isRefund = row.isRefundRow()
+                                if (isRefund) {
+                                    // 退款没有数量与可编辑金额：数字是负的，只读展示
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TagPill(text = "退款", color = Ink.DangerSoft)
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            text = "-" + Fmt.money(-Fmt.parseNumberOrZero(row.amount)),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = Ink.DangerSoft,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Spacer(Modifier.weight(1f))
+                                        HintText("不推进数量")
+                                    }
+                                } else {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        // 定金行不填数量：置灰输入框，提示这句话
+                                        AppNumberField(
+                                            value = row.qty,
+                                            onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(qty = v) } },
+                                            label = "实付数量",
+                                            enabled = !row.isDeposit,
+                                            supportingText = if (row.isDeposit) "定金不看数量" else null,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        AppNumberField(
+                                            value = row.amount,
+                                            onValueChange = { v -> vm.updateRecordRow(row.key) { it.copy(amount = v) } },
+                                            label = "实付金额",
+                                            accent = Ink.Mint,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
                                 }
                                 Spacer(Modifier.height(4.dp))
-                                // 定金：钱先付、货没到。只进已付金额，不推进到货进度
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(
-                                        checked = row.isDeposit,
-                                        onCheckedChange = { on -> vm.toggleRecordDeposit(row.key, on) },
-                                        colors = CheckboxDefaults.colors(
-                                            checkedColor = Ink.Amber,
-                                            uncheckedColor = Ink.TextMuted,
-                                            checkmarkColor = Color.White,
-                                        ),
-                                        modifier = Modifier.size(26.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        text = "定金（预付款，货还没到）",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (row.isDeposit) Ink.Amber else Ink.TextSecondary,
-                                    )
+                                if (isRefund) {
+                                    HintText("这是一笔退款：只把已付扣回去，已买数量不变。")
+                                } else {
+                                    // 定金：钱先付、货没到。只进已付金额，不推进到货进度
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = row.isDeposit,
+                                            onCheckedChange = { on -> vm.toggleRecordDeposit(row.key, on) },
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = Ink.Amber,
+                                                uncheckedColor = Ink.TextMuted,
+                                                checkmarkColor = Color.White,
+                                            ),
+                                            modifier = Modifier.size(26.dp),
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "定金（预付款，货还没到）",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (row.isDeposit) Ink.Amber else Ink.TextSecondary,
+                                        )
+                                        if (Fmt.parseNumberOrZero(row.amount) > 0) {
+                                            Spacer(Modifier.weight(1f))
+                                            TagPill(
+                                                text = "退款",
+                                                color = Ink.DangerSoft,
+                                                onClick = { refundSource = row },
+                                            )
+                                        }
+                                    }
                                 }
                                 Spacer(Modifier.height(10.dp))
                                 AppDateField(
@@ -453,6 +483,16 @@ fun ItemEditScreen(
                                 }
                             }
                             Spacer(Modifier.height(10.dp))
+                        }
+                        refundSource?.let { source ->
+                            RefundDialog(
+                                source = source,
+                                onConfirm = { amount, note, date ->
+                                    vm.addRefundRow(source.key, amount, note, date)
+                                    refundSource = null
+                                },
+                                onDismiss = { refundSource = null },
+                            )
                         }
                     }
 
@@ -575,4 +615,43 @@ fun ItemEditScreen(
             onDismiss = { confirmDelete = false },
         )
     }
+}
+
+/** 退款弹窗：默认整单退回这笔，改小就是部分退款（价保退差价通常选这种）。 */
+@Composable
+private fun RefundDialog(
+    source: DraftRecord,
+    onConfirm: (amount: String, note: String, date: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sourceAmount = Fmt.parseNumberOrZero(source.amount)
+    var amount by remember(source.key) { mutableStateOf(Fmt.qty(sourceAmount)) }
+    var note by remember(source.key) { mutableStateOf("价保退款") }
+    var date by remember(source.key) { mutableStateOf(Fmt.today()) }
+    val parsed = Fmt.parseNumberOrZero(amount)
+    val invalid = parsed <= 0 || parsed > sourceAmount + 1e-9
+    ConfirmDialog(
+        title = "记一笔退款",
+        message = "原记录 ${Fmt.money(sourceAmount)}。默认整单退回；改小就是部分退款，价保退差价选这个。",
+        confirmText = "记下退款",
+        confirmEnabled = !invalid,
+        onConfirm = { onConfirm(amount, note, date) },
+        onDismiss = onDismiss,
+        extraContent = {
+            Spacer(Modifier.height(10.dp))
+            AppNumberField(value = amount, onValueChange = { amount = it }, label = "退款金额")
+            Spacer(Modifier.height(10.dp))
+            AppTextField(value = note, onValueChange = { note = it }, label = "退款原因")
+            Spacer(Modifier.height(10.dp))
+            AppDateField(value = date, onValueChange = { date = it }, showQuickChips = false)
+            if (invalid) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "退款金额要大于 0，且不超过这笔的实付金额",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Ink.DangerSoft,
+                )
+            }
+        },
+    )
 }

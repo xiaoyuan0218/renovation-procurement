@@ -551,6 +551,7 @@ fun ConfirmDialog(
     confirmText: String = "确定",
     dismissText: String = "取消",
     danger: Boolean = false,
+    confirmEnabled: Boolean = true,
     extraContent: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     AlertDialog(
@@ -567,7 +568,7 @@ fun ConfirmDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            TextButton(onClick = onConfirm, enabled = confirmEnabled) {
                 Text(
                     text = confirmText,
                     color = if (danger) Ink.Danger else Ink.Blue,

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.xiaoyuan.renovation.mobile.data.model.AllocInDto
 import com.xiaoyuan.renovation.mobile.data.model.CategoryDto
 import com.xiaoyuan.renovation.mobile.data.model.ItemInDto
+import com.xiaoyuan.renovation.mobile.data.model.RecordDto
 import com.xiaoyuan.renovation.mobile.data.model.RecordInDto
 import com.xiaoyuan.renovation.mobile.data.model.RoomDto
 import com.xiaoyuan.renovation.mobile.data.repo.ApiResult
@@ -33,6 +34,26 @@ data class DraftRecord(
     val roomIds: List<Int> = emptyList(),
     /** 什么时候记的（新加的行还没有，保存后才由数据库盖章） */
     val createdAt: String = "",
+)
+
+/** 金额是负数的记录就是退款（价保/退货），不参与已买数量。 */
+internal fun DraftRecord.isRefundRow(): Boolean = Fmt.parseNumberOrZero(amount) < 0
+
+/**
+ * 数据库记录 → 编辑行。负数金额必须保留：那是退款，读回时若按空值处理，
+ * 下次保存就会把这条退款抹掉，已付又涨回去。
+ */
+internal fun draftRecordOf(record: RecordDto, key: Long): DraftRecord = DraftRecord(
+    key = key,
+    qty = Fmt.qty(record.qty),
+    amount = if (record.amount != 0.0) Fmt.qty(record.amount) else "",
+    isDeposit = record.isDeposit,
+    date = record.date,
+    note = record.note,
+    vendor = record.vendor,
+    orderNo = record.orderNo,
+    roomIds = record.roomIds,
+    createdAt = record.createdAt,
 )
 
 /** 编辑中的一条分配。 */
@@ -143,20 +164,7 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
                             discountPrice = item.discountPrice?.let { Fmt.qty(it) } ?: "",
                             note = item.note,
                             link = item.link,
-                            records = item.records.map {
-                                DraftRecord(
-                                    key = nextKey++,
-                                    qty = Fmt.qty(it.qty),
-                                    amount = if (it.amount > 0) Fmt.qty(it.amount) else "",
-                                    isDeposit = it.isDeposit,
-                                    date = it.date,
-                                    note = it.note,
-                                    vendor = it.vendor,
-                                    orderNo = it.orderNo,
-                                    roomIds = it.roomIds,
-                                    createdAt = it.createdAt,
-                                )
-                            },
+                            records = item.records.map { draftRecordOf(it, nextKey++) },
                             allocations = item.allocations.map {
                                 DraftAlloc(
                                     key = nextKey++,
@@ -186,6 +194,38 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
 
     fun addRecordRow() {
         _form.update { it.copy(records = it.records + DraftRecord(key = nextKey++)) }
+    }
+
+    /**
+     * 追加一条退款记录：金额记成负数、数量为 0。
+     *
+     * 退的是定金就沿用源记录的定金标记 —— 未付金额里的那笔定金抵扣才会跟着退回；
+     * 不沿用的话，钱退了、账上还欠着少 1000。
+     */
+    fun addRefundRow(sourceKey: Long, amountText: String, note: String, date: String) {
+        val source = _form.value.records.firstOrNull { it.key == sourceKey } ?: return
+        val sourceAmount = Fmt.parseNumberOrZero(source.amount)
+        val amount = Fmt.parseNumberOrZero(amountText)
+        if (sourceAmount <= 0 || amount <= 0) {
+            _message.value = "退款金额要大于 0"
+            return
+        }
+        if (amount > sourceAmount + 1e-9) {
+            _message.value = "退款金额不能超过这笔的实付金额"
+            return
+        }
+        val row = DraftRecord(
+            key = nextKey++,
+            qty = "",
+            amount = Fmt.qty(-amount),
+            isDeposit = source.isDeposit,
+            date = date.trim().ifBlank { Fmt.today() },
+            note = note.trim().ifBlank { "退款" },
+            vendor = source.vendor,
+            orderNo = source.orderNo,
+            roomIds = source.roomIds,
+        )
+        _form.update { it.copy(records = it.records + row) }
     }
 
     fun removeRecordRow(key: Long) {
@@ -263,8 +303,9 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
     private fun toRecordInputs(form: ItemForm): List<RecordInDto> =
         form.records.map { row ->
             RecordInDto(
-                // 定金不看数量：勾了就按 0 存，跟网页端一致
-                qty = if (row.isDeposit) 0.0 else Fmt.parseNumberOrZero(row.qty),
+                // 定金与退款都不看数量：勾了就按 0 存，跟网页端一致
+                qty = if (row.isDeposit || row.isRefundRow()) 0.0
+                      else Fmt.parseNumberOrZero(row.qty),
                 amount = Fmt.parseNumberOrZero(row.amount),
                 isDeposit = row.isDeposit,
                 date = row.date.trim(),
