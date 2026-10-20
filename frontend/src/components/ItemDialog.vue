@@ -425,8 +425,8 @@ async function save() {
         <!-- 条目多了只让表体自己滚（表头钉住）：不然弹窗被越撑越高，
              底部「保存 / 取消」直接被顶出屏幕 -->
         <el-table :data="form.records" size="small" :max-height="recordMaxH"
-                  style="min-width: 1000px">
-          <el-table-column label="实付数量" width="112">
+                  style="min-width: 980px">
+          <el-table-column label="实付数量" width="104">
             <template #default="{ row }">
               <!-- 退款没有到货数量，用标签替掉输入框，一眼和普通付款区分开 -->
               <el-tag v-if="isRefund(row)" type="danger" size="small" effect="plain">退款</el-tag>
@@ -436,7 +436,7 @@ async function save() {
                                controls-position="right" style="width: 100%" />
             </template>
           </el-table-column>
-          <el-table-column label="实付金额" width="124">
+          <el-table-column label="实付金额" width="116">
             <template #default="{ row }">
               <!-- 单价收进悬停：行内再挂一行小字会把格子撑高，两个数字框就不在同一
                    水平线上了。单价本来也是顺带看一眼的数，不值得占行高。 -->
@@ -460,7 +460,7 @@ async function save() {
             </template>
           </el-table-column>
           <!-- 记录于收进悬停：它是只读的辅助信息，不值得占一列 -->
-          <el-table-column label="日期" width="132">
+          <el-table-column label="日期" width="120">
             <template #default="{ row }">
               <span :title="stampTitle(row)" class="cell-tip">
                 <el-date-picker v-model="row.date" type="date" value-format="YYYY-MM-DD"
@@ -469,7 +469,7 @@ async function save() {
             </template>
           </el-table-column>
           <!-- 涉及分组（可多选）：勾了谁，"这间买齐了没"就只往谁身上算 -->
-          <el-table-column label="涉及分组" width="150">
+          <el-table-column label="涉及分组" width="132">
             <template #default="{ row }">
               <el-select v-model="row.room_ids" multiple collapse-tags size="small"
                          placeholder="不指定" style="width: 100%">
@@ -488,13 +488,13 @@ async function save() {
               <el-input v-model="row.order_no" size="small" placeholder="选填" />
             </template>
           </el-table-column>
-          <el-table-column label="备注" min-width="160">
+          <el-table-column label="备注" min-width="140">
             <template #default="{ row }">
               <el-input v-model="row.note" size="small" placeholder="如 尾款/批次" />
             </template>
           </el-table-column>
-          <!-- 宽度要算上单元格左右各 12px 的内边距：两个按钮约 106px，留够不溢出 -->
-          <el-table-column width="136">
+          <!-- 操作列 124：两个 24px 高的胶囊按钮约 94px + 单元格左右内边距 24px -->
+          <el-table-column width="124">
             <template #default="{ row, $index }">
               <!-- 两个操作固定横排：窄屏/大字号下也不能上下错开 -->
               <div class="record-actions">
