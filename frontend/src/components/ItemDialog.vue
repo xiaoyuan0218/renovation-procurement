@@ -20,6 +20,13 @@ const form = ref(blank())
 const formRef = ref(null)
 const saving = ref(false)
 
+// 退款：往采购记录里追加一条负数记录（价保退差价、退货等）。统计、导出、同步
+// 都沿用采购记录这一套口径，不需要再维护第二份「退款金额」。
+const refundVisible = ref(false)
+const refundIndex = ref(-1)
+const refundMax = ref(0)
+const refundForm = ref({ amount: 0, date: '', note: '价保退款' })
+
 // 采购记录表最多这么高（超出在表内滚，表头钉住）。按屏幕高度算：大约占三分之一，
 // 剩下的留给上面的信息与汇总、下面的分配表和底部按钮 —— 记录再多也不会把
 // 「保存 / 取消」顶出屏幕。窗口大小变了要重算，所以监听 resize。
@@ -97,9 +104,13 @@ const unitTip = (row) => {
 const recordsQtySum = computed(() =>
   form.value.records.reduce(
     (s, r) => s + (r.is_deposit ? 0 : (Number(r.qty) || 0)), 0))
-// 已付金额：定金也算付出去的钱
+// 已付金额：定金也算付出去的钱；退款（负数）自动扣回，得到的是净额
 const recordsAmountSum = computed(() =>
   form.value.records.reduce((s, r) => s + (Number(r.amount) || 0), 0))
+// 退款合计（只统计负数记录），用于在汇总里单独提示
+const refundSum = computed(() => Math.round(
+  form.value.records.reduce(
+    (s, r) => s + (Number(r.amount) < 0 ? -Number(r.amount) : 0), 0) * 100) / 100)
 // 已付的定金：用来抵扣未付（和后端口径一致）
 const depositSum = computed(() =>
   form.value.records.reduce(
@@ -143,6 +154,54 @@ function addRecord() {
 
 function removeRecord(idx) {
   form.value.records.splice(idx, 1)
+}
+
+/** 金额为负的记录就是退款，界面上给个醒目的标记，别和普通付款混在一起看。 */
+const isRefund = (row) => (Number(row.amount) || 0) < 0
+
+function todayStr() {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+function openRefund(row, index) {
+  const amount = Number(row.amount) || 0
+  if (amount <= 0) return
+  refundIndex.value = index
+  refundMax.value = amount
+  // 默认整单退回这笔；改小就是部分退款（价保退差价通常属于这种）
+  refundForm.value = { amount, date: todayStr(), note: '价保退款' }
+  refundVisible.value = true
+}
+
+function confirmRefund() {
+  const row = form.value.records[refundIndex.value]
+  if (!row) { refundVisible.value = false; return }
+  const amount = Math.round((Number(refundForm.value.amount) || 0) * 100) / 100
+  if (amount <= 0) {
+    ElMessage.warning('退款金额要大于 0')
+    return
+  }
+  if (amount > refundMax.value + 1e-9) {
+    ElMessage.warning('退款金额不能超过这笔的实付金额')
+    return
+  }
+  form.value.records.push({
+    qty: 0,
+    amount: -amount,
+    // 退的是定金就沿用定金标记，否则「未付」里那份定金抵扣不会跟着退回
+    is_deposit: !!row.is_deposit,
+    date: refundForm.value.date || todayStr(),
+    note: refundForm.value.note || '退款',
+    vendor: row.vendor || '',
+    order_no: row.order_no || '',
+    room_ids: [...(row.room_ids || [])],
+    created_at: '',
+    updated_at: '',
+  })
+  refundVisible.value = false
+  ElMessage.success('退款已记下，点「保存」后生效')
 }
 
 // 采购记录里的「归属分组」只列这条物料实际分到的分组 ——
@@ -346,6 +405,13 @@ async function save() {
           <span class="ps-label">已付</span>
           <span class="ps-value paid">￥{{ money(recordsAmountSum) }}</span>
         </div>
+        <template v-if="refundSum">
+          <div class="ps-divider">|</div>
+          <div class="ps-item">
+            <span class="ps-label">已退</span>
+            <span class="ps-value refund">￥{{ money(refundSum) }}</span>
+          </div>
+        </template>
         <div class="ps-divider">|</div>
         <div class="ps-item">
           <span class="ps-label">未付</span>
@@ -362,8 +428,10 @@ async function save() {
                   style="min-width: 1000px">
           <el-table-column label="实付数量" width="112">
             <template #default="{ row }">
+              <!-- 退款没有到货数量，用标签替掉输入框，一眼和普通付款区分开 -->
+              <el-tag v-if="isRefund(row)" type="danger" size="small" effect="plain">退款</el-tag>
               <!-- 定金不看数量：灰掉它，省得填了数字却发现进度不动 -->
-              <el-input-number v-model="row.qty" :min="0" size="small"
+              <el-input-number v-else v-model="row.qty" :min="0" size="small"
                                :disabled="!!row.is_deposit"
                                controls-position="right" style="width: 100%" />
             </template>
@@ -372,8 +440,10 @@ async function save() {
             <template #default="{ row }">
               <!-- 单价收进悬停：行内再挂一行小字会把格子撑高，两个数字框就不在同一
                    水平线上了。单价本来也是顺带看一眼的数，不值得占行高。 -->
-              <span :title="unitTip(row)" class="cell-tip">
-                <el-input-number v-model="row.amount" :min="0" :precision="2" size="small"
+              <span :title="unitTip(row)" class="cell-tip"
+                    :class="{ 'refund-amount': isRefund(row) }">
+                <el-input-number v-model="row.amount" :min="isRefund(row) ? -1000000000 : 0"
+                                 :precision="2" size="small"
                                  controls-position="right" style="width: 100%" />
               </span>
             </template>
@@ -423,8 +493,11 @@ async function save() {
               <el-input v-model="row.note" size="small" placeholder="如 尾款/批次" />
             </template>
           </el-table-column>
-          <el-table-column width="66">
-            <template #default="{ $index }">
+          <el-table-column width="108">
+            <template #default="{ row, $index }">
+              <!-- 退款只有对已经付出去的钱才有意义；负数行不再显示，点错了也没处退 -->
+              <el-button v-if="Number(row.amount) > 0" link type="warning" size="small"
+                         @click="openRefund(row, $index)">退款</el-button>
               <el-button link type="danger" size="small" @click="removeRecord($index)">删除</el-button>
             </template>
           </el-table-column>
@@ -435,6 +508,7 @@ async function save() {
         <span v-if="form.records.length" class="alloc-hint">
           合计 {{ recordsQtySum }}{{ form.unit || '' }} · 已付 ￥{{ money(recordsAmountSum) }}
           <template v-if="depositSum"> （含定金 ￥{{ money(depositSum) }}）</template>
+          <template v-if="refundSum"> · <span class="refund-text">已退 ￥{{ money(refundSum) }}</span></template>
           <template v-if="recordsPrice"> · 均价 ￥{{ money(recordsPrice) }}</template>
         </span>
         <span v-else class="alloc-hint">没填记录则视为未买</span>
@@ -491,6 +565,42 @@ async function save() {
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- 退款弹窗：默认整单退回这笔，改小就是部分退款（价保退差价通常选这个）。
+       生成一条负数采购记录，和其它记录一起保存，统计、导出、同步沿用同一套口径。 -->
+  <el-dialog v-model="refundVisible" width="440px" append-to-body
+             :close-on-click-modal="false" class="refund-dialog" title="记一笔退款">
+    <div v-if="form.records[refundIndex]" class="refund-source">
+      原记录：{{ form.records[refundIndex].date || '未填日期' }}
+      · ￥{{ money(form.records[refundIndex].amount) }}
+      <template v-if="form.records[refundIndex].vendor"> · {{ form.records[refundIndex].vendor }}</template>
+      <template v-if="form.records[refundIndex].order_no"> · 订单 {{ form.records[refundIndex].order_no }}</template>
+    </div>
+    <el-form label-position="top">
+      <el-form-item label="退款金额">
+        <el-input-number v-model="refundForm.amount" :min="0.01" :max="refundMax"
+                         :precision="2" controls-position="right" style="width: 100%" />
+        <div class="field-hint">默认退回这笔的全部金额（整单退款）；改小就是部分退款，价保退差价选这个。</div>
+      </el-form-item>
+      <el-form-item label="退款原因">
+        <div class="refund-presets">
+          <el-button v-for="r in ['价保退款', '退货退款', '其他']" :key="r" size="small"
+                     :type="refundForm.note === r ? 'primary' : ''"
+                     @click="refundForm.note = r">{{ r }}</el-button>
+        </div>
+        <el-input v-model="refundForm.note" placeholder="会写进这笔记录的备注"
+                  style="margin-top: 8px" />
+      </el-form-item>
+      <el-form-item label="退款日期">
+        <el-date-picker v-model="refundForm.date" type="date" value-format="YYYY-MM-DD"
+                        placeholder="选择日期" style="width: 100%" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="refundVisible = false">取消</el-button>
+      <el-button type="primary" @click="confirmRefund">记下退款</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -527,5 +637,20 @@ async function save() {
 .cell-tip { display: block; cursor: help; }
 /* 表头带说明的列：虚线下划线提示"这里能悬停看解释"，不然没人知道能停上去 */
 .th-tip { border-bottom: 1px dashed var(--ios-label-3); cursor: help; }
+/* 退款记录用红色区分：金额是负的，和普通付款不是一个方向的钱 */
+.refund-amount :deep(.el-input__inner) { color: var(--ios-red); font-weight: 600; }
+.refund-text { color: var(--ios-red); }
+.ps-value.refund { color: var(--ios-red); }
+.refund-source {
+  font-size: 12px;
+  color: var(--ios-label-2);
+  background: rgba(255, 55, 95, 0.05);
+  border: 1px solid rgba(255, 55, 95, 0.12);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.refund-presets { display: flex; gap: 8px; flex-wrap: wrap; }
 :global(.item-dialog) { max-width: 94vw; }
+:global(.refund-dialog) { max-width: 94vw; }
 </style>

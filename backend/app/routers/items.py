@@ -192,8 +192,12 @@ def add_record(item_id: int, data: RecordIn, request: Request,
     db.commit()
     db.refresh(item)
     qty_s = f"{data.qty:g}" if data.qty else "0"
-    amount_s = f"{data.amount:g}" if data.amount else "0"
-    if data.is_deposit:
+    amount_s = f"{abs(data.amount):g}" if data.amount else "0"
+    if data.amount < 0:
+        # 负数金额就是退款（价保/退货）：只把已付扣回去，不动到货数量
+        action = "退定金" if data.is_deposit else "退款"
+        request.state.audit_subject = f"物料「{item.name}」{action} {amount_s} 元"
+    elif data.is_deposit:
         # 定金只记钱、不推进到货进度，日志里说清楚，免得以为是普通采购
         request.state.audit_subject = f"物料「{item.name}」付定金 {amount_s} 元"
     else:
@@ -259,7 +263,8 @@ def update_record(record_id: int, data: RecordPatchIn, request: Request,
     item.touch()
     db.commit()
     db.refresh(item)
-    request.state.audit_subject = f"物料「{item.name}」的采购记录"
+    kind = "退款记录" if (rec.amount or 0) < 0 else "采购记录"
+    request.state.audit_subject = f"物料「{item.name}」的{kind}"
     return compute.item_dict(item)
 
 
@@ -289,6 +294,8 @@ def delete_record(record_id: int, request: Request,
                   lst: ItemList = Depends(current_list),
                   db: Session = Depends(get_db)):
     rec = _record_in_list(db, record_id, lst)
+    # 删除并提交之后 rec 就失效了，类型要在这之前记下来
+    is_refund = (rec.amount or 0) < 0
     request.state.audit_undo = {"kind": "item_restore",
                                 "data": audit.snapshot_item(db, rec.item_id)}
     item = rec.item
@@ -297,5 +304,6 @@ def delete_record(record_id: int, request: Request,
     item.touch()
     db.commit()
     db.refresh(item)
-    request.state.audit_subject = f"物料「{item.name}」的一笔采购记录"
+    kind = "退款记录" if is_refund else "采购记录"
+    request.state.audit_subject = f"物料「{item.name}」的一笔{kind}"
     return compute.item_dict(item)
