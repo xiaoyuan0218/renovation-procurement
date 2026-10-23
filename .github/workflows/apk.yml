@@ -145,18 +145,30 @@ jobs:
           拿不准装哪个就用不带 debug 的。这个页面每次 push 自动更新，链接不变。
           EOF
 
-          # 只清残留的 draft（gh release delete 看不到 draft，走 API 更彻底）；
-          # 已发布的那个不动，免得下载链接空窗
-          gh api "repos/${{ github.repository }}/releases?per_page=100" \
-            --jq '.[] | select(.tag_name == "latest" and .draft) | .id' |
-            while read -r id; do gh api -X DELETE "repos/${{ github.repository }}/releases/$id"; done
+          # latest 停在 draft 的话，直链（/releases/latest/download/…）会全部 404，
+          # 而 gh 的 edit/upload 不会顺手把它发布出来（2026-10-20 出过这事）。
+          # 就地发布而不是删掉重建：删了会连桌面端的 exe 一起丢（那个资产归 desktop.yml 管），
+          # 重建期间链接还会空窗。
+          DRAFT_ID=$(gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq 'first(.[] | select(.tag_name == "latest" and .draft) | .id) // ""')
+          if [ -n "$DRAFT_ID" ]; then
+            echo "latest release 停在 draft（id=$DRAFT_ID），就地发布"
+            gh api -X PATCH "repos/${{ github.repository }}/releases/$DRAFT_ID" -F draft=false >/dev/null
+          fi
 
           if gh release view latest >/dev/null 2>&1; then
-            gh release edit latest --title "最新构建" --notes-file /tmp/notes.md
+            gh release edit latest --title "最新构建" --notes-file /tmp/notes.md --draft=false
           else
             gh release create latest --title "最新构建" --notes-file /tmp/notes.md
           fi
           # --clobber：同名资产就地替换，上传期间旧的那份还在，链接不断
           gh release upload latest out/*.apk --clobber
-          gh release view latest --json tagName,isDraft,assets \
-            --jq '"发布完成: " + .tagName + " draft=" + (.isDraft|tostring) + " 资产=" + ([.assets[].name]|join(", "))'
+
+          DRAFT=$(gh release view latest --json isDraft --jq .isDraft)
+          echo "发布完成: latest draft=$DRAFT 资产=$(gh release view latest --json assets --jq '[.assets[].name]|join(", ")')"
+          # draft 就是「链接失效」：资产传上去了但直链 404，页面外的人只看到打不开的链接。
+          # 与其等下一个人来报，不如在这里把构建标红。
+          if [ "$DRAFT" != "false" ]; then
+            echo "::error title=发布停在草稿::latest release 仍是草稿，下载直链会 404"
+            exit 1
+          fi
