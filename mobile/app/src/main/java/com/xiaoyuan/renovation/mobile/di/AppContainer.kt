@@ -1,6 +1,7 @@
 package com.xiaoyuan.renovation.mobile.di
 
 import android.app.Application
+import com.xiaoyuan.renovation.mobile.data.backup.AutoBackup
 import com.xiaoyuan.renovation.mobile.data.db.AppDatabase
 import com.xiaoyuan.renovation.mobile.data.db.ensureListCodes
 import com.xiaoyuan.renovation.mobile.data.db.seedIfEmpty
@@ -13,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,6 +65,17 @@ class AppContainer(private val app: Application) {
             ensureListCodes(db)
         }
 
+        // 每天进程第一次启动：把所有清单各导一份 xlsx 到应用私有目录
+        // （AutoBackup 自己判重，当天已有就跳过）。延迟几秒避开启动抢 IO；
+        // 失败只记日志 —— 备份是兜底，不能反过来打扰正常使用，备份页里
+        // 能看到最后一次成功的时间
+        scope.launch {
+            delay(AUTO_BACKUP_DELAY_MS)
+            AutoBackup.runOnce(app, db).onFailure {
+                android.util.Log.w("AutoBackup", "每日自动备份失败", it)
+            }
+        }
+
         // 本地一有改动，就把「当前清单」静默对齐到服务器（已绑定且开着自动同步的
         // 才动）。防抖 1.5 秒：连着写几条只发一次请求。同步真把数据改动了才
         // bump —— 下一轮比对发现没变化就自然停下，不会自己触发自己。
@@ -79,5 +92,6 @@ class AppContainer(private val app: Application) {
 
     private companion object {
         const val AUTO_SYNC_DEBOUNCE_MS = 1500L
+        const val AUTO_BACKUP_DELAY_MS = 4_000L
     }
 }

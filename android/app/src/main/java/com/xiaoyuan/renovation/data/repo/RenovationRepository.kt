@@ -14,6 +14,7 @@ import com.xiaoyuan.renovation.data.model.ItemInDto
 import com.xiaoyuan.renovation.data.model.ItemListDto
 import com.xiaoyuan.renovation.data.model.ListInDto
 import com.xiaoyuan.renovation.data.model.LoginResultDto
+import com.xiaoyuan.renovation.data.model.LogsPageDto
 import com.xiaoyuan.renovation.data.model.MatrixCellInDto
 import com.xiaoyuan.renovation.data.model.MatrixDto
 import com.xiaoyuan.renovation.data.model.NameInDto
@@ -24,6 +25,7 @@ import com.xiaoyuan.renovation.data.model.PurgeResultDto
 import com.xiaoyuan.renovation.data.model.RoomDto
 import com.xiaoyuan.renovation.data.model.TrashItemDto
 import com.xiaoyuan.renovation.data.model.SummaryDto
+import com.xiaoyuan.renovation.data.model.UndoResultDto
 import com.xiaoyuan.renovation.data.remote.ApiClientFactory
 import com.xiaoyuan.renovation.data.remote.ApiService
 import okhttp3.MediaType.Companion.toMediaType
@@ -190,6 +192,14 @@ class RenovationRepository(
     suspend fun testConnection(address: String): ApiResult<AuthStateDto> = apiCall {
         ApiClientFactory.create({ address }).authState()
     }
+
+    /* ---------- 操作日志 ---------- */
+
+    suspend fun logs(page: Int, pageSize: Int = 50, query: String? = null): ApiResult<LogsPageDto> =
+        call { api.logs(page, pageSize, query) }
+
+    /** 回退最近一次操作：数据会变，走 mutate 让各页面跟着刷新。 */
+    suspend fun undoLog(logId: Int): ApiResult<UndoResultDto> = mutate { api.undoLog(logId) }
 
     /* ---------- 导入导出 ---------- */
 

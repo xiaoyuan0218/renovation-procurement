@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, money } from '../api'
 import { pagedSlice } from '../paging'
@@ -27,7 +27,10 @@ function calcTableHeight() {
   const h = window.innerHeight || 800
   tableMaxH.value = Math.max(240, Math.min(460, Math.round(h * 0.52)))
 }
+// 监听挂 window 上必须成对清理：视图用 v-if 切换，卸载不会自动摘掉，
+// 否则每切一轮残留一个并闭包引用旧组件的 ref。
 window.addEventListener('resize', calcTableHeight)
+onUnmounted(() => window.removeEventListener('resize', calcTableHeight))
 calcTableHeight()
 
 function blank(kind = '运费') {

@@ -317,7 +317,7 @@ class SyncEngine(
                 // （编号自动换新，本地已有那份原样不动），两边的内容都留着。新份是
                 // 独立副本，不建立绑定 —— 它和服务器那份编号不同，绑了反而让
                 // "哪份是哪份"乱掉。
-                val copyId = Snapshot.createList(
+                val (copyId, _) = Snapshot.createList(
                     db, snapshot.payload,
                     snapshot.payload.list.name.ifEmpty { "副本" },
                     freshCode = true,
@@ -441,7 +441,7 @@ class SyncEngine(
             )
         }
 
-        val listId = Snapshot.createList(db, snapshot.payload, name)
+        val (listId, localMap) = Snapshot.createList(db, snapshot.payload, name)
         // 拉到本地后就是绑定关系：以后可以继续双向同步
         saveBinding(
             listId = listId,
@@ -449,7 +449,9 @@ class SyncEngine(
             remoteName = name,
             fingerprint = snapshot.fingerprint,
             payload = snapshot.payload,
-            localMap = emptyMap(),
+            // 基线要带着"服务器 id → 本地 id"映射：这是这份清单的第一次落地，
+            // 映射只有这里拿得到，空着的话下一轮同步改名/删行全都配不上对
+            localMap = localMap,
             previous = db.sync().byList(listId),
         )
         return ApiResult.Ok(SyncOutcome(createdListId = listId))

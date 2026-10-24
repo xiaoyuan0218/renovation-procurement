@@ -241,22 +241,67 @@ object LocalCompute {
 
     /* ---------------- 视图 ---------------- */
 
+    /* ---------------- 商品链接 ---------------- */
+
+    // 候选串只认 RFC 3986 字符集：中文、中文标点、全角空格天然截断。
+    // $ 用 ${'$'} 显式转义，避免双引号串里被当成字符串模板的引用。
+    private val LINK_RE =
+        Regex("https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!${'$'}&'()*+,;=%]+", RegexOption.IGNORE_CASE)
+
+    // host 段（scheme:// 到第一个 / ? # 之间）至少要有一个字母或数字：
+    // `https://...` 这类残值经尾剥剩 `https://`，只查 scheme 前缀是拦不住的
+    private val LINK_HOST_RE = Regex("^https?://[^/?#]*[A-Za-z0-9]", RegexOption.IGNORE_CASE)
+
     /**
-     * 商品链接只认 http/https：伪协议（javascript: 之类）一律清空。
+     * 从一段分享文案里提取第一个 http(s) 链接；没有就返回空串。
      *
-     * 存库前收一道，点开时还会再校验一次 —— 这个值最终会被渲染成可点的链接，
-     * 伪协议在浏览器里能执行脚本。与后端 `_clean_link` 是同一套规则。
+     * 与后端 `services/link_text.py`、网页端、安卓端是同一套统一提取规范：
+     * 尾部普通标点逐字符剥（句子结尾的句号逗号不属于 URL），收括号看配对 ——
+     * 对应开括号出现得比它少，说明它是外面包裹的才剥，URL 自己的括号不动；
+     * 结果超过 500 字符（库字段上限）整体放弃而不是截断，链接截断就打不开了。
+     * 对已清洗过的纯 URL 幂等（提取两次结果一致），scheme 大小写保留原样。
      */
-    fun cleanLink(value: String?): String {
+    fun extractLink(value: String?): String {
         val text = (value ?: "").trim()
-        return if (text.startsWith("http://", ignoreCase = true) ||
-            text.startsWith("https://", ignoreCase = true)
-        ) {
-            text
-        } else {
-            ""
+        var candidate = LINK_RE.find(text)?.value ?: return ""
+        while (candidate.isNotEmpty()) {
+            when (val last = candidate.last()) {
+                '.', ',', ';', ':', '!', '?', '\'', '"' -> candidate = candidate.dropLast(1)
+                // '}' 连同开括号 '{' 都不在候选字符集里，进不了候选串；写上只为
+                // 与规范剥除表逐字对齐，实际永远走不到
+                ')', ']', '}' -> {
+                    val open = when (last) {
+                        ')' -> '('
+                        ']' -> '['
+                        else -> '{'
+                    }
+                    if (candidate.count { it == open } < candidate.count { it == last }) {
+                        candidate = candidate.dropLast(1)
+                    } else {
+                        break
+                    }
+                }
+                else -> break
+            }
         }
+        if (!(candidate.startsWith("http://", ignoreCase = true) ||
+                candidate.startsWith("https://", ignoreCase = true))
+        ) {
+            return ""
+        }
+        // containsMatchIn 而不是 matches：host 正则没有 $，语义是「串首匹配」
+        // （对齐 Python 的 re.match / JS 的 test），matches 会要求把整条 URL 消费完
+        if (!LINK_HOST_RE.containsMatchIn(candidate)) return ""
+        return if (candidate.length > 500) "" else candidate
     }
+
+    /**
+     * 存库前的收口：现在语义是「从输入里提取链接」而不是「原值是不是 http(s)」，
+     * 整段分享文案也能拿到链接，伪协议与裸网址照旧清空。对已清洗过的库值恒等，
+     * 读回路径不受影响。点开时还会再校验一次 —— 这个值最终会被渲染成可点的
+     * 链接，伪协议在浏览器里能执行脚本。与后端 `_clean_link` 是同一套规则。
+     */
+    fun cleanLink(value: String?): String = extractLink(value)
 
     fun toDto(b: ItemBundle): ItemDto {
         val item = b.item

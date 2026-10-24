@@ -1,28 +1,36 @@
 package com.xiaoyuan.renovation.mobile.ui.settings
 
+import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.xiaoyuan.renovation.mobile.data.backup.AutoBackup
 import com.xiaoyuan.renovation.mobile.data.xlsx.ImportReport
 import com.xiaoyuan.renovation.mobile.data.xlsx.SheetMapping
 import com.xiaoyuan.renovation.mobile.data.xlsx.Xlsx
@@ -38,10 +46,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private val STAMP = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
+private val STAMP_MIN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+/** 把一份 xlsx 通过分享面板交出去（导出与自动备份共用）。 */
+private fun shareXlsx(context: Context, file: File, title: String) {
+    val uri = FileProvider.getUriForFile(
+        context, "${context.packageName}.fileprovider", file,
+    )
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, title))
+}
+
+private fun modifiedText(file: File): String =
+    Instant.ofEpochMilli(file.lastModified())
+        .atZone(ZoneId.systemDefault()).format(STAMP_MIN)
 
 private val MODES = listOf(
     "replace" to "覆盖现有物料",
@@ -115,17 +143,7 @@ fun BackupPage(container: AppContainer, onBack: () -> Unit) {
                                         File(dir, "采知道_${name}_$stamp.xlsx")
                                             .apply { writeBytes(bytes) }
                                     }
-                                    val uri = FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        file,
-                                    )
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                        putExtra(Intent.EXTRA_STREAM, uri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "导出采知道"))
+                                    shareXlsx(context, file, "导出采知道")
                                     message = "已导出，选个地方保存就行"
                                 } catch (e: Exception) {
                                     message = e.message ?: "导出失败"
@@ -140,6 +158,68 @@ fun BackupPage(container: AppContainer, onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(12.dp))
                 HintText("导出后会弹出分享面板，可以存到文件、发到微信或云盘。这一份表在电脑上也能导进网页版。")
+            }
+        }
+
+        item {
+            GlassCard {
+                // 自动备份的文件列表从私有目录现读：进页面读一次，「刷新」再读
+                // 一遍 —— 自动备份在启动后几秒才跑，刚打开就进这页可能还没写完
+                var refresh by remember { mutableIntStateOf(0) }
+                var autoFiles by remember { mutableStateOf<List<File>>(emptyList()) }
+                LaunchedEffect(refresh) {
+                    autoFiles = withContext(Dispatchers.IO) { AutoBackup.files(context) }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "自动备份",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Ink.TextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    GhostButton(text = "刷新", onClick = { refresh++ },
+                                icon = Icons.Filled.Refresh)
+                }
+                Spacer(Modifier.height(8.dp))
+                if (autoFiles.isEmpty()) {
+                    HintText("还没有自动备份：每天打开 App 后，会把所有清单各存一份当天的快照到这里。")
+                } else {
+                    // 列表按文件名排（同清单日期在尾部，倒序即新→旧），跨清单时
+                    // 字典序最大的清单排前面，「上次备份」要按文件修改时间取
+                    KeyValueRow(
+                        "上次备份",
+                        modifiedText(autoFiles.maxBy { it.lastModified() }),
+                        emphasize = true,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    KeyValueRow("保留策略", "每份清单最近 ${AutoBackup.KEEP} 份")
+                    Spacer(Modifier.height(12.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        autoFiles.forEach { f ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        text = f.name.removeSuffix(".xlsx"),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Ink.TextPrimary,
+                                    )
+                                    Text(
+                                        text = "${modifiedText(f)} · ${f.length() / 1024} KB",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Ink.TextSecondary,
+                                    )
+                                }
+                                GhostButton(
+                                    text = "分享",
+                                    onClick = { shareXlsx(context, f, "分享备份") },
+                                    icon = Icons.Filled.Share,
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                HintText("备份存在应用私有目录，卸载 App 会一起删掉。换机、送修或手机要离手之前，把最近的几份分享到云盘或电脑。")
             }
         }
 

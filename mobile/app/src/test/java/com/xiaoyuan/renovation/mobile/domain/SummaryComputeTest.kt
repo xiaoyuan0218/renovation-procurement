@@ -1,7 +1,10 @@
 package com.xiaoyuan.renovation.mobile.domain
 
+import com.xiaoyuan.renovation.mobile.data.db.AllocationEntity
 import com.xiaoyuan.renovation.mobile.data.db.CategoryEntity
 import com.xiaoyuan.renovation.mobile.data.db.ExtraExpenseEntity
+import com.xiaoyuan.renovation.mobile.data.db.ItemEntity
+import com.xiaoyuan.renovation.mobile.data.db.PurchaseRecordEntity
 import com.xiaoyuan.renovation.mobile.data.db.RoomEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -142,6 +145,40 @@ class SummaryComputeTest {
             expected.totals.listTotal,
             totals.paidTotal + totals.actualDiscountTotal + totals.unpaidTotal,
         )
+    }
+
+    @Test
+    fun `分组已付按记录勾选的分组归集，没勾归属的不计入`() {
+        // 手工构造：不依赖 fixture —— 后端 by_room 的 paid_total 口径还没落进
+        // 对照数据，先按已定死的原则（勾了谁记到谁头上、没勾的不猜）钉住行为
+        val bundle = ItemBundle(
+            item = ItemEntity(id = 1, listId = 1, name = "筒灯", price = 10.0),
+            allocations = listOf(
+                AllocationEntity(id = 1, itemId = 1, roomId = 1, qty = 4.0),
+                AllocationEntity(id = 2, itemId = 1, roomId = 2, qty = 6.0),
+            ),
+            records = listOf(
+                // 勾了客厅（多选归属）：30 元记到客厅
+                PurchaseRecordEntity(id = 1, itemId = 1, qty = 3.0, amount = 30.0),
+                // 没勾归属：10 元哪间都不记
+                PurchaseRecordEntity(id = 2, itemId = 1, qty = 1.0, amount = 10.0),
+                // 老记录的单值 room_id：当成只勾了主卧
+                PurchaseRecordEntity(id = 3, itemId = 1, qty = 1.0, amount = 12.0, roomId = 2),
+            ),
+            recordRooms = mapOf(1 to listOf(1)),
+        )
+        val rooms = listOf(
+            RoomEntity(id = 1, listId = 1, name = "客厅", sort = 0),
+            RoomEntity(id = 2, listId = 1, name = "主卧", sort = 1),
+        )
+
+        val result = SummaryCompute.summary(listOf(bundle), emptyList(), rooms, emptyList())
+
+        assertClose("客厅已付", 30.0, result.byRoom[0].paidTotal)
+        assertClose("主卧已付", 12.0, result.byRoom[1].paidTotal)
+        // 没勾归属的那笔不计入：两间之和小于总已付，差额就是"说不清买给谁的"
+        assertClose("总已付", 52.0, result.totals.paidTotal)
+        assertClose("分组已付合计", 42.0, result.byRoom.sumOf { it.paidTotal })
     }
 
     private fun assertClose(what: String, expected: Double, actual: Double) {

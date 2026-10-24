@@ -5,6 +5,7 @@ from pydantic import (BaseModel, ConfigDict, Field, field_serializer,
                       field_validator)
 
 from .services import dates as date_utils
+from .services import link_text
 
 
 class Timestamped(BaseModel):
@@ -193,13 +194,15 @@ class ExpenseOut(Timestamped):
 
 
 def _clean_link(value: str) -> str:
-    """商品链接只认 http/https：别的写法（javascript: 之类）一律清空。
+    """商品链接统一从原文案提取第一个 http(s) URL（规范见 services/link_text.py）。
 
-    这个值最终会被各端渲染成可点链接，把协议收窄是必须的 —— 伪协议在浏览器里
-    能执行脚本。前端点击前也会再校验一道，两边都拦。
+    用户贴过来的常常是整段分享文案：旧版只按前缀收窄协议，整段套话会原样入库。
+    现在提取不出链接、伪协议（javascript: 之类）、超长（>500，URL 不能截断）
+    都清成空串 —— 这个值最终会被各端渲染成可点链接，把协议收窄是必须的，伪协议
+    在浏览器里能执行脚本。web/mobile/android 照同一份 spec 实现，口径不一致
+    会让同步互相覆盖。
     """
-    text = (value or "").strip()
-    return text if text.lower().startswith(("http://", "https://")) else ""
+    return link_text.extract_link(value)
 
 
 class ItemIn(BaseModel):
@@ -212,8 +215,10 @@ class ItemIn(BaseModel):
     price: float = 0
     discount_price: Optional[float] = None
     note: str = ""
-    # 商品链接（下单页/商品页地址）。只存 http/https，渲染成可点链接前各端都会校验
-    link: str = Field(default="", max_length=500)
+    # 商品链接（下单页/商品页地址）。Field 放宽到 2000 是为容纳整段分享文案
+    # （文案常超 500，先收进来才轮得到 validator 提取）；入库值由 _clean_link
+    # 收口在 500 以内，渲染成可点链接前各端还会再校验
+    link: str = Field(default="", max_length=2000)
     # 传入则整体替换布点明细 / 采购记录；不传(None)表示不动
     allocations: Optional[list[AllocIn]] = None
     records: Optional[list[RecordIn]] = None
@@ -228,7 +233,9 @@ class ItemIn(BaseModel):
 
 class ItemPatchIn(BaseModel):
     """部分更新（矩阵页/清单页行内快捷改动用）。"""
-    name: Optional[str] = None
+    # 同 ItemIn.name 的长度约束：不传（None）表示不改，传了就必须非空 ——
+    # 否则行内 PATCH 空串能绕过创建/整条更新两处的校验，落出无名物料。
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     category_id: Optional[int] = None
     brand: Optional[str] = None
     model: Optional[str] = None
@@ -237,7 +244,8 @@ class ItemPatchIn(BaseModel):
     price: Optional[float] = None
     discount_price: Optional[float] = None
     note: Optional[str] = None
-    link: Optional[str] = Field(default=None, max_length=500)
+    # 同 ItemIn.link：放宽到 2000 容纳整段文案，提取与 500 收口都在 validator 里
+    link: Optional[str] = Field(default=None, max_length=2000)
 
     @field_validator("link")
     @classmethod
@@ -307,6 +315,9 @@ class RoomStat(BaseModel):
     name: str
     qty: float
     list_total: float
+    # 该分组的实付金额：按记录勾选的 room_ids 归集（多分组均摊，
+    # 没勾分组的记录不计入 —— 见 summary 的 by_room_unassigned_paid）
+    paid: float = 0
 
 
 class SummaryOut(BaseModel):
@@ -454,8 +465,9 @@ class SyncItemIn(SyncRowTimestamps):
     discount_price: Optional[float] = None
     note: str = Field(default="", max_length=500)
     # 商品链接。None 表示"推送方没带这个字段"（老客户端）—— 落地时按物料名沿用
-    # 覆盖前的值，别把别人填好的链接抹成空串
-    link: Optional[str] = Field(default=None, max_length=500)
+    # 覆盖前的值，别把别人填好的链接抹成空串。Field 放宽到 2000 容纳整段文案，
+    # 提取与 500 收口都在下面的 validator（超长提取不出即清空，不 422）
+    link: Optional[str] = Field(default=None, max_length=2000)
     sort: int = 0
     deleted_at: Optional[str] = None
     allocations: list[SyncAllocIn] = []

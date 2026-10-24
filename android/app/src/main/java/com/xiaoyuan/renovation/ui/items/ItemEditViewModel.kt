@@ -13,6 +13,7 @@ import com.xiaoyuan.renovation.data.repo.RenovationRepository
 import com.xiaoyuan.renovation.data.repo.okData
 import com.xiaoyuan.renovation.domain.Compute
 import com.xiaoyuan.renovation.util.Fmt
+import com.xiaoyuan.renovation.util.UrlOpener
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -77,6 +78,8 @@ data class ItemForm(
     val discountPrice: String = "",
     val note: String = "",
     val link: String = "",
+    /** 读取时的乐观锁版本号：保存时带回，别处改过（409）就不让这版覆盖上去 */
+    val rev: Int? = null,
     val records: List<DraftRecord> = emptyList(),
     val allocations: List<DraftAlloc> = emptyList(),
 ) {
@@ -164,6 +167,7 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
                             discountPrice = item.discountPrice?.let { Fmt.qty(it) } ?: "",
                             note = item.note,
                             link = item.link,
+                            rev = item.rev,
                             records = item.records.map { draftRecordOf(it, nextKey++) },
                             allocations = item.allocations.map {
                                 DraftAlloc(
@@ -340,10 +344,13 @@ class ItemEditViewModel(private val repo: RenovationRepository) : ViewModel() {
             price = Fmt.parseNumberOrZero(form.price),
             discountPrice = Fmt.parseNumber(form.discountPrice),
             note = form.note.trim(),
-            // 伪协议由后端收口（只认 http/https），这里原样带上
-            link = form.link.trim(),
+            // 整段文案在保存前统一提取成纯 URL，与后端同一口径；没有链接就存空串
+            link = UrlOpener.extractHttp(form.link),
             allocations = allocs,
             records = toRecordInputs(form),
+            // 新增物料没有"读取时的版本"，不参与乐观锁；编辑必须带回，否则别处
+            // 刚记的采购会被这版保存整体覆盖掉（409 的文案后端已写好，直接展示）
+            baseRev = if (form.isNew) null else form.rev,
         )
 
         viewModelScope.launch {

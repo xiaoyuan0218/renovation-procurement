@@ -61,6 +61,31 @@ def get_summary(lst: ItemList = Depends(current_list),
 
     rooms = (db.query(Room).filter(Room.list_id == lst.id)
              .order_by(Room.sort, Room.id).all())
+
+    # 各分组的实付金额：按每笔记录写明的涉及分组（room_ids）归集。口径先定死，
+    # 与导出回灌同一级的谨慎 —— 一笔钱在分组之间怎么分，只认用户明确勾的：
+    #   - 勾了 N 个分组 → 按 N 份均摊（最后一间吃两位小数的尾差），每笔钱
+    #     不重不漏地分完：Σ各分组已付 + 未归属 = totals.paid_total。不按
+    #     数量摊：那要靠"分配顺序抵扣"去猜（多分组只买了一部分时系统本来就
+    #     不敢猜），而且物料没建分配时根本没有摊的依据；
+    #   - 没勾分组的记录不计入任何一间，合计另放 by_room_unassigned_paid，
+    #     界面提示"还有多少钱没标分组"，引导用户补勾而不是替他分；
+    #   - 定金与退款（负数金额）照常按其勾选分组计入，与 paid_total 同口径。
+    paid_by_room: dict[int, float] = {}
+    unassigned_paid = 0.0
+    for i in items:
+        for rec in i.records:
+            amount = rec.amount or 0
+            room_ids = sorted(compute.record_room_ids(rec))
+            if not room_ids:
+                unassigned_paid += amount
+                continue
+            share = round(amount / len(room_ids), 2)
+            for idx, rid in enumerate(room_ids):
+                paid_by_room[rid] = paid_by_room.get(rid, 0.0) + (
+                    share if idx < len(room_ids) - 1
+                    else amount - share * (len(room_ids) - 1))
+
     by_room = []
     for r in rooms:
         qty, total = 0.0, 0.0
@@ -71,7 +96,8 @@ def get_summary(lst: ItemList = Depends(current_list),
                     unit = a.price_override if a.price_override is not None else (i.price or 0)
                     total += (a.qty or 0) * unit
         by_room.append({"id": r.id, "name": r.name,
-                        "qty": round(qty, 2), "list_total": round(total, 2)})
+                        "qty": round(qty, 2), "list_total": round(total, 2),
+                        "paid": round(paid_by_room.get(r.id, 0.0), 2)})
 
     # 未买清单：货还没到齐的都算（含只付了定金的 —— 钱付了，东西还得盯着）
     unbought = [v for v in views if v["status"] in ("unbought", "partial", "deposit")]
@@ -105,6 +131,8 @@ def get_summary(lst: ItemList = Depends(current_list),
         "totals": totals,
         "by_category": by_category,
         "by_room": by_room,
+        # 没勾分组的采购记录合计：与 by_room 各项相加应等于 totals.paid_total
+        "by_room_unassigned_paid": round(unassigned_paid, 2),
         "unbought": unbought,
         "by_month": by_month,
         # 没填日期的那些付款合计 —— 界面用来提示"还有多少钱没记日期"

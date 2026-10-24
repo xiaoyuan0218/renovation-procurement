@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Checkbox
@@ -83,10 +84,12 @@ fun ItemsScreen(
     vm: ItemsViewModel,
     refreshKey: Int,
     onEditItem: (Int) -> Unit,
+    onOpenRecords: () -> Unit = {},
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val categoryId by vm.categoryId.collectAsStateWithLifecycle()
+    val roomId by vm.roomId.collectAsStateWithLifecycle()
     val statusFilter by vm.status.collectAsStateWithLifecycle()
     val selectionMode by vm.selectionMode.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -116,8 +119,9 @@ fun ItemsScreen(
         is LoadState.Ready -> {
             val data = current.data
             // remember 住：不然每次重组都要重算筛选与排序，还会让 LazyColumn 拿到新列表对象
-            val filtered = remember(data, query, categoryId, statusFilter) { vm.filtered(data) }
+            val filtered = remember(data, query, categoryId, roomId, statusFilter) { vm.filtered(data) }
             val selectedCategory = data.categories.firstOrNull { it.id == categoryId }
+            val selectedRoom = data.rooms.firstOrNull { it.id == roomId }
 
             Column(Modifier.fillMaxSize()) {
                 Column(Modifier.padding(horizontal = 16.dp)) {
@@ -134,6 +138,11 @@ fun ItemsScreen(
                                         contentDescription = "退出多选",
                                     )
                                 } else {
+                                    GlassIconButton(
+                                        icon = Icons.Filled.ReceiptLong,
+                                        onClick = onOpenRecords,
+                                        contentDescription = "采购流水",
+                                    )
                                     GlassIconButton(
                                         icon = Icons.Filled.CheckCircle,
                                         onClick = { vm.setSelectionMode(true) },
@@ -199,6 +208,31 @@ fun ItemsScreen(
                                 .height(cellHeight),
                         )
                     }
+                    Spacer(Modifier.height(gap))
+
+                    // 按分组筛选：出门购物清单 —— 选个分组，卡片各自亮出还差几个
+                    Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        AppSelect(
+                            label = "分组",
+                            items = data.rooms,
+                            selected = selectedRoom,
+                            itemLabel = { it.name },
+                            onSelect = { vm.setRoom(it?.id) },
+                            placeholder = "全部分组",
+                            allowClear = true,
+                            clearLabel = "全部分组",
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(cellHeight),
+                        )
+                        RoomPendingBar(
+                            items = filtered,
+                            active = selectedRoom != null,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(cellHeight),
+                        )
+                    }
 
                     Spacer(Modifier.height(10.dp))
                 }
@@ -222,6 +256,12 @@ fun ItemsScreen(
                             items(filtered, key = { it.id }) { item ->
                                 ItemCard(
                                     item = item,
+                                    // 分组筛选激活时亮出「还差几个」—— 这就是出门要买的数
+                                    pendingBadge = if (roomId != null && item.unpaidQty > 0) {
+                                        "差 ${Fmt.qtyUnit(item.unpaidQty, item.unit)}"
+                                    } else {
+                                        null
+                                    },
                                     selectionMode = selectionMode,
                                     selected = item.id in selected,
                                     onToggleSelect = { vm.toggleSelect(item.id) },
@@ -302,6 +342,40 @@ fun ItemsScreen(
 
 const val NEW_ITEM_ID = -1
 
+/** 分组筛选旁的摘要格：选中分组时给出「这张采购单还差几项、合计几个」。 */
+@Composable
+private fun RoomPendingBar(items: List<ItemDto>, active: Boolean, modifier: Modifier = Modifier) {
+    GlassCard(corner = 14.dp, padding = 12.dp, modifier = modifier) {
+        if (!active) {
+            Text(
+                text = "出门前选个分组，生成采购单",
+                fontSize = 11.sp,
+                color = Ink.TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            val pending = items.filter { it.unpaidQty > 0 }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "该分组还差",
+                    fontSize = 11.sp,
+                    color = Ink.TextSecondary,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "${pending.size} 项 · ${Fmt.qty(pending.sumOf { it.unpaidQty })} 件",
+                    fontSize = 12.sp,
+                    color = Ink.Amber,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun TotalsBar(items: List<ItemDto>, modifier: Modifier = Modifier) {
     // 四格之一，只有半屏宽、56dp 高：竖排两行会被裁掉，所以单行横排 ——
@@ -342,6 +416,7 @@ private fun TotalsBar(items: List<ItemDto>, modifier: Modifier = Modifier) {
 @Composable
 private fun ItemCard(
     item: ItemDto,
+    pendingBadge: String? = null,
     selectionMode: Boolean,
     selected: Boolean,
     onToggleSelect: () -> Unit,
@@ -396,6 +471,10 @@ private fun ItemCard(
                     color = Ink.Cyan,
                     onClick = { UrlOpener.open(context, item.link) },
                 )
+            }
+            if (pendingBadge != null) {
+                Spacer(Modifier.width(6.dp))
+                TagPill(text = pendingBadge, color = Ink.Amber)
             }
             Spacer(Modifier.width(8.dp))
             TagPill(

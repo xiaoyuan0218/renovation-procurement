@@ -84,6 +84,8 @@ fun PurchaseSheet(
         rooms.filter { it.id in ids }
     }
     var confirmClear by remember { mutableStateOf(false) }
+    // 买超待确认的那一笔：不为空时弹确认框，确认才真正提交
+    var pendingOver by remember { mutableStateOf<RecordInDto?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(item.id, item.paidQty) {
@@ -251,7 +253,17 @@ fun PurchaseSheet(
                             q < 0 || a < 0 -> "不能填负数"
                             else -> null
                         }
-                        if (error == null) onAdd(recordInput(q, a))
+                        if (error == null) {
+                            val body = recordInput(q, a)
+                            // 手滑防线：已买 + 本次 > 总量时先确认再放行，真实买超不被拦。
+                            // 定金不推进数量（qty 按 0 存）、没设总量时不参与这个判断
+                            val over = if (!isDeposit && q > 0 && item.totalQty > 0) {
+                                item.paidQty + q - item.totalQty
+                            } else {
+                                0.0
+                            }
+                            if (over > 0) pendingOver = body else onAdd(body)
+                        }
                     },
                     icon = Icons.Filled.Add,
                     enabled = !busy,
@@ -339,6 +351,22 @@ fun PurchaseSheet(
                 onClear()
             },
             onDismiss = { confirmClear = false },
+        )
+    }
+
+    pendingOver?.let { body ->
+        val over = (item.paidQty + body.qty - item.totalQty).coerceAtLeast(0.0)
+        ConfirmDialog(
+            title = "这次买的数量超过总量了",
+            message = "「${item.name}」总量 ${Fmt.qty(item.totalQty)}、已买 ${Fmt.qty(item.paidQty)}、" +
+                "本次 ${Fmt.qty(body.qty)}，将超 ${Fmt.qty(over)}${item.unit}。" +
+                "数量确实如此就确认放行，拿不准请回上一步核对。",
+            confirmText = "确认放行",
+            onConfirm = {
+                pendingOver = null
+                onAdd(body)
+            },
+            onDismiss = { pendingOver = null },
         )
     }
 }

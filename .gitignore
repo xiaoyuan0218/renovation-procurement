@@ -14,6 +14,9 @@ backend/tests/test_import_original.py
 .venv/
 node_modules/
 frontend/dist/
+# 仓库根的 Gradle 构建壳（门禁在根目录跑 :app 任务用）的缓存与产物
+/.gradle/
+/build/
 # APK 分发目录（构建产物，用 GitHub Release 或 Actions artifact 分发）
 /dist/
 # PyInstaller 的中间目录与产物（桌面端 sidecar，合起来约 75MB）

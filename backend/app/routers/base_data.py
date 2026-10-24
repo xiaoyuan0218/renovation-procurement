@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import current_list, room_in_list
-from ..models import Category, ItemList, Room
+from ..models import Category, Item, ItemList, Room
 from ..schemas import CategoryIn, CategoryOut, RoomIn, RoomOut
 
 router = APIRouter(prefix="/api", tags=["base-data"])
@@ -113,7 +113,10 @@ def delete_category(cat_id: int, request: Request,
                     db: Session = Depends(get_db)):
     cat = _category_in_list(db, cat_id, lst)
     request.state.audit_subject = f"分类「{cat.name}」"
-    if cat.items:
+    # cat.items 是原样 relationship，含回收站里的行；只数未删的，
+    # 否则分类下物料全进回收站后（界面一条都看不到）删除仍被拒。
+    if db.query(Item.id).filter(Item.category_id == cat_id,
+                                Item.deleted_at.is_(None)).count():
         raise HTTPException(400, "该类目下仍有物料，请先移动物料再删除")
     db.delete(cat)
     db.commit()

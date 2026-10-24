@@ -10,7 +10,10 @@ plugins {
 
 /** 版本号统一在仓库根的 VERSION 文件里（后端与安卓端也读它，三端一致）。 */
 fun appVersionName(): String {
-    val f = rootProject.file("../VERSION")
+    // rootProject 随构建根变：在 mobile/ 里构建时是 mobile/（VERSION 在上一级），
+    // 门禁在仓库根构建时就是仓库根本尊（VERSION 就在脚下）。两处都找一遍。
+    val f = rootProject.file("VERSION").takeIf { it.exists() }
+        ?: rootProject.file("../VERSION")
     return if (f.exists()) f.readText().trim() else "0.0.0"
 }
 

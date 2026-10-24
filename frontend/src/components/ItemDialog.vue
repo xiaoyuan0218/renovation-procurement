@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api, money, qty as fmtQty, shortStamp, toLocalStamp } from '../api'
 
@@ -38,7 +38,10 @@ function calcRecordHeight() {
   recordMaxH.value = Math.max(170, Math.min(460, Math.round(h * 0.36)))
   allocMaxH.value = Math.max(120, Math.min(340, Math.round(h * 0.26)))
 }
+// 监听挂在 window 上，组件卸载不会自动摘掉：App.vue 用 v-if 切换视图，
+// 每切一轮残留一个并闭包引用旧组件的 ref，必须成对清理（对照 Items.vue 的做法）。
 window.addEventListener('resize', calcRecordHeight)
+onUnmounted(() => window.removeEventListener('resize', calcRecordHeight))
 calcRecordHeight()
 
 watch(visible, (v) => {
@@ -72,9 +75,54 @@ const rules = {
   name: [{ required: true, message: '请填写物料名称', trigger: 'blur' }],
 }
 
+// 统一链接提取规范（与 backend/app/services/link_text.py、mobile/android 的
+// Kotlin 版同一份 spec，函数名 extractLink）：从整段分享文案里取出第一个
+// http(s) URL。正则字符集是 RFC 3986 常用子集，中文、中文标点、emoji 天然把
+// URL 截断；尾部剥句读时收括号要配对感知 —— 朴素 trimEnd 会把
+// 「https://x.com/a_(page))」剥坏成「https://x.com/a_(page」。三端正则与尾剥
+// 逐字同一，改这里必须同步另两端，否则同步会互相覆盖。
+const LINK_RE = /https?:\/\/[A-Za-z0-9\-._~:\/?#[\]@!$&'()*+,;=%]+/i
+
+function extractLink(value) {
+  const text = (value ?? '').trim()
+  const m = LINK_RE.exec(text)
+  if (!m) return ''
+  let cand = m[0]
+  // 普通标点直接摘；收括号只在"开括号比闭括号少"（说明它是文案的包裹符）
+  // 时才摘，碰到配对完整的括号立即停
+  const openOf = { ')': '(', ']': '[', '}': '{' }
+  const tail = new Set([...`.,;:!?')]}"`])
+  while (cand && tail.has(cand[cand.length - 1])) {
+    const ch = cand[cand.length - 1]
+    const open = openOf[ch]
+    if (open !== undefined) {
+      const count = (s, c) => s.split(c).length - 1
+      if (count(cand, open) >= count(cand, ch)) break
+    }
+    cand = cand.slice(0, -1)
+  }
+  // scheme 前缀 + host 段非空（scheme:// 之后到第一个 / ? # 之间至少要有一个
+  // 字母数字），「https://...」这类值不放行
+  if (!/^https?:\/\//i.test(cand)) return ''
+  if (!/^https?:\/\/[^/?#]*[A-Za-z0-9]/i.test(cand)) return ''
+  // URL 不能截断（截了就坏）：超长整体清空，与后端/客户端收口同一
+  if (cand.length > 500) return ''
+  return cand
+}
+
+/** 失焦时把提取结果回写进输入框，用户当场看到链接长什么样。
+ *  提取为空时不动原值：贴的口令占位、手输的文字失焦不会被清。 */
+function onLinkBlur() {
+  const picked = extractLink(form.value.link || '')
+  if (picked && picked !== form.value.link) form.value.link = picked
+}
+
 const usedRoomIds = computed(() => new Set(form.value.allocations.map((a) => a.room_id)))
 const allocQtyTotal = computed(() =>
   form.value.allocations.reduce((s, a) => s + (Number(a.qty) || 0), 0))
+// 数量允许小数，裸插值会出现 0.30000000000000004 这类尾数（后端 compute 已用
+// r2 收敛，前端对齐）；顺带去掉多余的零，3.00 显示成 3。
+const qtyFmt = (n) => String(Math.round((Number(n) || 0) * 100) / 100)
 const allocListTotal = computed(() =>
   form.value.allocations.reduce((s, a) => {
     const unit = a.price_override ?? Number(form.value.price ?? 0)
@@ -227,6 +275,29 @@ function removeAlloc(idx) {
 
 async function save() {
   await formRef.value.validate()
+  // 保存后到货数量推过总量时先确认一次：数量录错（多打一个 0、没注意已买 9
+  // 其实只差 1）是最常见的记账错误。对比基线是打开弹窗时的已买量 —— 打开时就
+  // 已经超量的（之前确认放行过）不再重复拦，只有本次改动把量推得更高才确认。
+  // 确认过就是真实买超，放行：口径不变，服务端本来就不夹断数量。
+  const baseline = Number(props.item?.paid_qty) || 0
+  const after = recordsQtySum.value
+  const maxQty = maxBoughtQty.value
+  const over = Math.round((after - maxQty) * 100) / 100
+  if (over > 0 && after > baseline + 1e-9) {
+    const delta = Math.round((after - baseline) * 100) / 100
+    try {
+      await ElMessageBox.confirm(
+        `总量 ${fmtQty(maxQty)}${form.value.unit || ''}、打开时已买 ${fmtQty(baseline)}、保存后共 ${fmtQty(after)}（本次 +${fmtQty(delta)}），将超 ${fmtQty(over)}。确认保存？`,
+        '买超确认', { type: 'warning', confirmButtonText: '确认保存' })
+    } catch { return }
+  }
+  // 保存兜底再提取一次（失焦回写挡不住"贴完直接点保存"）。框里有字但提取
+  // 不出链接时不能悄悄清库：先说一声，再照常提交（后端同口径清空）
+  const rawLink = (form.value.link || '').trim()
+  const link = extractLink(rawLink)
+  if (rawLink && !link) {
+    ElMessage.warning('商品链接里没有可用的 http(s) 链接，保存后这一栏将为空')
+  }
   saving.value = true
   try {
     const payload = {
@@ -240,7 +311,7 @@ async function save() {
       discount_price: form.value.discount_price === null || form.value.discount_price === ''
         ? null : Number(form.value.discount_price),
       note: form.value.note || '',
-      link: form.value.link || '',
+      link,
       allocations: form.value.allocations.map((a) => ({
         room_id: a.room_id,
         qty: Number(a.qty) || 0,
@@ -274,11 +345,17 @@ async function save() {
         type: 'warning',
         confirmButtonClass: 'el-button--danger',
       }).then(async () => {
-        const fresh = await api.get(`/api/items/${props.item.id}`)
-        const saved = await api.put(`/api/items/${props.item.id}`,
-                                    { ...payload, base_rev: fresh.rev })
-        ElMessage.success('已按你这边的版本覆盖保存')
-        emit('saved', saved)
+        try {
+          const fresh = await api.get(`/api/items/${props.item.id}`)
+          const saved = await api.put(`/api/items/${props.item.id}`,
+                                      { ...payload, base_rev: fresh.rev })
+          ElMessage.success('已按你这边的版本覆盖保存')
+          emit('saved', saved)
+        } catch (err) {
+          // 覆盖本身也可能失败（又被别处改了/物料已删/断网），不能跟"用户取消"
+          // 一起吞掉 —— 否则弹窗不关、数据没存，用户还以为覆盖成功了
+          ElMessage.error(err.message)
+        }
       }).catch(() => { /* 用户选择先刷新，什么都不做 */ })
     } else {
       ElMessage.error(e.message)
@@ -353,7 +430,8 @@ async function save() {
         </el-col>
         <el-col :xs="24" :sm="12">
           <el-form-item label="商品链接">
-            <el-input v-model="form.link" placeholder="https://…（选填，之后点开就能看商品页）" />
+            <el-input v-model="form.link" placeholder="粘贴商品链接或整段分享文案，自动提取链接"
+                      @blur="onLinkBlur" />
           </el-form-item>
         </el-col>
       </el-row>
@@ -510,7 +588,7 @@ async function save() {
       <div class="alloc-footer">
         <el-button size="small" @click="addRecord">+ 添加采购记录</el-button>
         <span v-if="form.records.length" class="alloc-hint">
-          合计 {{ recordsQtySum }}{{ form.unit || '' }} · 已付 ￥{{ money(recordsAmountSum) }}
+          合计 {{ qtyFmt(recordsQtySum) }}{{ form.unit || '' }} · 已付 ￥{{ money(recordsAmountSum) }}
           <template v-if="depositSum"> （含定金 ￥{{ money(depositSum) }}）</template>
           <template v-if="refundSum"> · <span class="refund-text">已退 ￥{{ money(refundSum) }}</span></template>
           <template v-if="recordsPrice"> · 均价 ￥{{ money(recordsPrice) }}</template>
@@ -559,7 +637,7 @@ async function save() {
       <div class="alloc-footer">
         <el-button size="small" @click="addAlloc">+ 添加分组</el-button>
         <span v-if="form.allocations.length" class="alloc-hint">
-          分配合计 {{ allocQtyTotal }}{{ form.unit || '' }} · 原价小计 ￥{{ money(allocListTotal) }}
+          分配合计 {{ qtyFmt(allocQtyTotal) }}{{ form.unit || '' }} · 原价小计 ￥{{ money(allocListTotal) }}
         </span>
         <span v-else class="alloc-hint">不填分配则直接使用上方"数量"</span>
       </div>

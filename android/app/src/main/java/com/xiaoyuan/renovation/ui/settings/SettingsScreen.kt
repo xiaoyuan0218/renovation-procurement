@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material3.Icon
@@ -139,6 +140,16 @@ fun SettingsScreen(
                 } ?: "正在读取…",
                 accent = Ink.TextSecondary,
                 onClick = { onOpenPage("trash") },
+            )
+        }
+
+        item {
+            MenuRow(
+                icon = Icons.Filled.History,
+                title = "操作日志",
+                summary = "最近做过什么，最新一条可一键回退",
+                accent = Ink.Mint,
+                onClick = { onOpenPage("logs") },
             )
         }
 

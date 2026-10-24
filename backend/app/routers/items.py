@@ -9,7 +9,7 @@ from ..deps import category_in_list, current_list, item_in_list
 from ..models import (Allocation, Category, Item, ItemList, PurchaseRecord, utcnow,
                       RecordRoom, Room)
 from ..schemas import ItemIn, ItemOut, ItemPatchIn, RecordIn, RecordPatchIn, BatchDeleteIn
-from ..services import compute
+from ..services import compute, dates
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 records_router = APIRouter(prefix="/api/records", tags=["records"])
@@ -221,9 +221,76 @@ def clear_records(item_id: int, request: Request,
     return compute.item_dict(item)
 
 
+@records_router.get("", response_model=None)
+def list_records(date_from: str | None = None, date_to: str | None = None,
+                 vendor: str | None = None, order_no: str | None = None,
+                 q: str | None = None,
+                 lst: ItemList = Depends(current_list),
+                 db: Session = Depends(get_db)):
+    """跨物料的采购流水：当前清单的全部采购记录列成一张台账，附筛选后的合计。
+
+    大促对账、找某笔订单、按商家汇总时不用逐个物料翻详情。四个筛选条件都是
+    包含匹配、可叠加：date_from / date_to 是日期区间（YYYY-MM-DD，含端点），
+    vendor、order_no 各自匹配，q 关键词同时匹配物料名 / 备注 / 商家 / 订单号。
+    记录行的业务字段与物料详情里的 records 完全一致（同一份 record_dict），
+    另带 item_name 与 unit；时间戳列由响应编码直接转文本，与 summary 的
+    unbought 同格式。
+    """
+    # 日期参数宽松归一化（2026/9/1 也能用），归不出来就等于没筛这一头
+    lo = dates.for_read(date_from) if date_from else ""
+    hi = dates.for_read(date_to) if date_to else ""
+    vendor_kw = (vendor or "").strip()
+    order_kw = (order_no or "").strip()
+    q_kw = (q or "").strip()
+
+    rows = []
+    for item in (db.query(Item).filter(Item.list_id == lst.id, Item.alive())
+                 .order_by(Item.sort, Item.id).all()):
+        for rec in item.records:
+            d = dates.for_read(rec.date)
+            if lo and (not d or d < lo):
+                continue
+            if hi and (not d or d > hi):
+                continue
+            v, o = rec.vendor or "", rec.order_no or ""
+            if vendor_kw and vendor_kw not in v:
+                continue
+            if order_kw and order_kw not in o:
+                continue
+            if q_kw and not any(q_kw in text
+                                for text in (item.name, rec.note or "", v, o)):
+                continue
+            rows.append((item, rec, d))
+
+    # 流水习惯最新在上：有日期的按日期倒序，同日按记录 id 倒序；没填日期的
+    # 排不出先后，整段垫底（段内保持 id 倒序）。两次稳定排序各管一半。
+    rows.sort(key=lambda t: t[1].id, reverse=True)
+    rows.sort(key=lambda t: (t[2] != "", t[2]), reverse=True)
+
+    records = []
+    for item, rec, _ in rows:
+        row = compute.record_dict(rec)
+        row["item_name"] = item.name
+        row["unit"] = item.unit
+        records.append(row)
+
+    # 合计就是筛选结果的直接求和：金额含定金与负数退款，与 totals.paid_total
+    # 是同一口径；数量里定金那笔通常填 0，照实加即可
+    totals = {
+        "count": len(records),
+        "qty": compute.r2(sum(r.qty or 0 for _, r, _ in rows)),
+        "amount": compute.r2(sum(r.amount or 0 for _, r, _ in rows)),
+    }
+    return {"records": records, "totals": totals}
+
+
 def _record_in_list(db: Session, record_id: int, lst: ItemList) -> PurchaseRecord:
     rec = db.get(PurchaseRecord, record_id)
-    if rec is None or rec.item is None or rec.item.list_id != lst.id:
+    # 已进回收站的物料跟它的记录一起视为不存在：与 trash.py 的约定一致 —— 要动
+    # 它得先从回收站恢复，否则软删的物料还能经这里继续改账、删账，把回收站的
+    # rev 顶高、bought 重算，恢复出来和界面上看到的对不上
+    if (rec is None or rec.item is None or rec.item.list_id != lst.id
+            or rec.item.deleted_at is not None):
         raise HTTPException(404, "采购记录不存在")
     return rec
 

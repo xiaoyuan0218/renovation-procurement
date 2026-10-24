@@ -306,7 +306,10 @@ private fun DashboardContent(
             .take(8)
         if (roomBars.isNotEmpty()) {
             Spacer(Modifier.height(22.dp))
-            SectionTitle("分组金额分布", caption = "按原价口径，最多显示 8 个分组")
+            SectionTitle(
+                "分组金额分布",
+                caption = "条长按原价口径 · 已付按每笔记录勾选的分组归集",
+            )
             Spacer(Modifier.height(12.dp))
             GlassCard {
                 HorizontalBarChart(
@@ -314,7 +317,12 @@ private fun DashboardContent(
                         BarItem(
                             label = it.name,
                             value = it.listTotal,
-                            caption = "${Fmt.qty(it.qty)} 件",
+                            // 后端补了「各分组已付」就亮出来对照预算；字段缺失时保持件数
+                            caption = if (it.paidTotal > 0.0) {
+                                "已付 ${Fmt.money(it.paidTotal)}"
+                            } else {
+                                "${Fmt.qty(it.qty)} 件"
+                            },
                             color = Ink.Indigo,
                         )
                     },

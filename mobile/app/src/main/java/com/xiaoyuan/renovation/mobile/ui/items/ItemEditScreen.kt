@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -227,12 +228,27 @@ fun ItemEditScreen(
                                     singleLine = false,
                                 )
                                 Spacer(Modifier.height(12.dp))
+                                // 粘贴整段分享文案后焦点一离开，就把里面的链接
+                                // 提取回框里让用户看到；没提取到（口令码、纯文字）
+                                // 不动原值 —— 不能失焦悄悄清掉用户手输的内容。
+                                // linkTouched 挡住首次组合时那次 isFocused=false 的回调
+                                var linkTouched by remember { mutableStateOf(false) }
                                 AppTextField(
                                     value = form.link,
                                     onValueChange = { v -> vm.edit { it.copy(link = v) } },
                                     label = "商品链接",
-                                    placeholder = "https://…（选填，之后点开就能看商品页）",
+                                    placeholder = "粘贴商品链接或整段分享文案，自动提取链接",
                                     keyboardType = KeyboardType.Uri,
+                                    modifier = Modifier.onFocusChanged { state ->
+                                        if (state.isFocused) {
+                                            linkTouched = true
+                                        } else if (linkTouched) {
+                                            val extracted = LocalCompute.extractLink(form.link)
+                                            if (extracted.isNotEmpty() && extracted != form.link) {
+                                                vm.edit { it.copy(link = extracted) }
+                                            }
+                                        }
+                                    },
                                 )
                                 // 只有认得出的 http/https 才给"打开"入口：伪协议
                                 // 交给系统可能是执行而不是浏览，不当成链接

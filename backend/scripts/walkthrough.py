@@ -167,6 +167,12 @@ def run():
         # 带上 token 后，页面里的 fetch 和 ctx.request 都会自动鉴权
         ctx.set_extra_http_headers(auth_header)
         page = ctx.new_page()
+        # 欢迎引导对"第一次来的浏览器"自动弹一次，走查每次都是全新上下文、
+        # 必弹，弹了就挡住所有点击。走查不是新用户，预先把"已看过"写进
+        # localStorage 让它别弹 —— 比弹出后再找按钮点掉稳（按钮渲染有早晚）。
+        page.add_init_script(
+            "try { localStorage.setItem('guide.seen', '1');"
+            " localStorage.setItem('donate.enabled', '0'); } catch (e) {}")
         page.on("console", lambda m: CONSOLE_ERRORS.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: CONSOLE_ERRORS.append(str(e)))
 
@@ -321,7 +327,7 @@ def run():
 
         page.click('button:has-text("设置 / 数据")')
         page.wait_for_timeout(500)
-        page.click('.el-tabs__item:has-text("数据备份")')
+        page.click('.el-tabs__item:has-text("备份")')
         page.wait_for_timeout(300)
         page.click('label:has-text("按名称合并")')
         page.set_input_files('input[type="file"]', export_path)
@@ -355,6 +361,9 @@ def run():
                                    is_mobile=True, device_scale_factor=2)
         mctx.set_extra_http_headers(auth_header)
         mpage = mctx.new_page()
+        mpage.add_init_script(
+            "try { localStorage.setItem('guide.seen', '1');"
+            " localStorage.setItem('donate.enabled', '0'); } catch (e) {}")
         mpage.goto(BASE, wait_until="networkidle")
         mpage.screenshot(path=os.path.join(OUT, "05-mobile-dashboard.png"), full_page=True)
         mpage.click('.seg-item:has-text("物料清单")')

@@ -6,6 +6,7 @@ import { lists, loadLists, setCurrentList } from './lists'
 import { setSyncedHandler } from './api'
 import Dashboard from './views/Dashboard.vue'
 import Items from './views/Items.vue'
+import Records from './views/Records.vue'
 import Matrix from './views/Matrix.vue'
 import Login from './views/Login.vue'
 import NewListDialog from './components/NewListDialog.vue'
@@ -18,6 +19,7 @@ import HelpDialog from './components/HelpDialog.vue'
 const tabs = [
   { key: 'dashboard', label: '总览' },
   { key: 'items', label: '物料清单' },
+  { key: 'records', label: '采购流水' },
   { key: 'matrix', label: '分配矩阵' },
 ]
 const view = ref('dashboard')
@@ -152,6 +154,7 @@ async function onLogout() {
       <Transition name="page" mode="out-in">
         <Dashboard v-if="view === 'dashboard'" :key="`d${reloadKey}`" @go-items="view = 'items'" />
         <Items v-else-if="view === 'items'" :key="`i${reloadKey}`" />
+        <Records v-else-if="view === 'records'" :key="`r${reloadKey}`" />
         <Matrix v-else :key="`m${reloadKey}`" />
       </Transition>
     </el-main>

@@ -1,6 +1,9 @@
+import logging
 import os
+import posixpath
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
@@ -17,6 +20,9 @@ from .routers import (auth, base_data, backup, desktop, expenses, items, keys,
                       summary, transfer, trash)
 from .routers.items import records_router
 from .seed import init_db
+from .services import auto_backup
+
+log = logging.getLogger(__name__)
 
 # docs / redoc / openapi 都关掉自带的，文件末尾自己注册 —— 自带的那几个没
 # 法挂鉴权，而接口清单本身就是一张系统结构图，不该让局域网里谁都能翻。
@@ -45,6 +51,13 @@ app.add_middleware(
 
 init_db()
 
+# 启动即做一次每日快照：跨天才靠下面的请求惰性触发，长期不重启也能每天有。
+# 失败只记日志 —— 备份是兜底，不能反过来挡住服务启动
+try:
+    auto_backup.run_once()
+except Exception:  # noqa: BLE001
+    log.exception("启动时的每日自动快照失败")
+
 
 # 操作审计：所有写请求在响应完成后落一条日志（谁、干了什么、结果如何）。
 # 路由可以在执行过程中往 request.state 塞 audit_subject（对象叫什么）与
@@ -52,6 +65,14 @@ init_db()
 # 日志写失败只静默放弃：审计是锦上添花，不能反过来挡住用户的保存。
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
+    # 每日自动快照的惰性触发：快闸只比一次字符串，跨天后的第一个请求才真正
+    # 做 VACUUM（丢线程池，不阻塞事件循环）。失败只记日志不挡请求；当天内
+    # 后续请求会再尝试，磁盘腾出空间后自然补上
+    if auto_backup.needs_run():
+        try:
+            await run_in_threadpool(auto_backup.run_once)
+        except Exception:  # noqa: BLE001
+            log.exception("每日自动快照失败")
     response = await call_next(request)
     if request.method != "GET" and request.url.path.startswith("/api/"):
         db = SessionLocal()
@@ -212,7 +233,17 @@ if os.path.isdir(DIST_DIR):
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str):
-        target = os.path.join(DIST_DIR, full_path)
-        if full_path and os.path.isfile(target):
+        # 这个路由不挂鉴权（登录页自己也靠它加载 JS/CSS），而 full_path 是请求
+        # 原样拼进路径的 —— 不归一化的话，带 ../ 的请求能翻出 DIST_DIR 读到
+        # 数据目录里的整库备份与签名密钥（uvicorn 不会替我们归一化点段）。
+        # 先折算成统一形式，再强制结果落在 DIST_DIR 里，越界一律 404。
+        rel = posixpath.normpath(full_path.replace("\\", "/")).lstrip("/")
+        if not rel or rel == ".." or rel.startswith("../"):
+            raise HTTPException(404)
+        root = os.path.realpath(DIST_DIR)
+        target = os.path.realpath(os.path.join(root, *rel.split("/")))
+        if target != root and not target.startswith(root + os.sep):
+            raise HTTPException(404)
+        if os.path.isfile(target):
             return FileResponse(target)
-        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+        return FileResponse(os.path.join(root, "index.html"))

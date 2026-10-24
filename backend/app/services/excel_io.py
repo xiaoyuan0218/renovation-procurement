@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from openpyxl import Workbook, load_workbook
 
-from . import compute, dates, record_keys
+from . import compute, dates, link_text, record_keys
 
 PRODUCT_HEADER = {"灯具", "面板", "物料", "产品"}
 
@@ -145,6 +145,21 @@ def _num_checked(value, where, warnings):
 
 def _txt(x):
     return str(x).strip() if x is not None else ""
+
+
+def _extract_link_checked(value, where, warnings):
+    """从「商品链接」单元格提取第一个 http(s) URL；结果与原值不同就记一条 warning。
+
+    与 _num_checked 同一个道理：提取改变（或清空）了用户贴的内容，就得让用户
+    在导入报告里看得到，不能悄无声息。
+    """
+    picked = link_text.extract_link(value)
+    if picked != value:
+        if picked:
+            warnings.append(f"{where}的「商品链接」已自动提取为 {picked}")
+        else:
+            warnings.append(f"{where}的「商品链接」里没有可用的 http(s) 链接，已清空")
+    return picked
 
 
 # ---------------------------------------------------------------- 解析格式 A
@@ -422,6 +437,12 @@ def _parse_flat(path_or_bytes):
             continue
         label = f"物料汇总第 {r} 行"
         bought_cell = _txt(_v(ws_items, r, c_bought)) if c_bought else ""
+        # 链接列里贴的常常是整段分享文案：入库前提取第一个 http(s) URL。
+        # 提取与原值不同就在报告里报一声（提取出链接 / 清空），不静默——
+        # 用户看不到的话会以为贴的文案是原样入库的
+        link = _txt(_v(ws_items, r, c_link)) if c_link else None
+        if link:
+            link = _extract_link_checked(link, label, warnings)
         items.append({
             "item_id": int(_num(_vo(ws_items, r, c_id))) if c_id and _num(_vo(ws_items, r, c_id)) else None,
             "name": name,
@@ -441,9 +462,9 @@ def _parse_flat(path_or_bytes):
                                         f"{label}的「实付金额」", warnings),
             "bought": bought_cell in ("是", "TRUE", "True", "1"),
             "note": _txt(_v(ws_items, r, c_note)),
-            # 没有这一列（1.2.5 之前的老文件）时给 None：落库时保留原值，
+            # 没有这一列（1.2.5 之前的老文件）时保持 None：落库时保留原值，
             # 别把清单里已经填好的链接清空
-            "link": _txt(_v(ws_items, r, c_link)) if c_link else None,
+            "link": link,
             # 老文件没有这两列（返回 None），落库时按数据库默认值走
             "created_at": _parse_stamp(_vo(ws_items, r, c_created)),
             "updated_at": _parse_stamp(_vo(ws_items, r, c_updated)),

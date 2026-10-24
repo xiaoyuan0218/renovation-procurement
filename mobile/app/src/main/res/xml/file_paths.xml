@@ -2,4 +2,6 @@
 <paths>
     <cache-path name="exports" path="exports/" />
     <files-path name="shared" path="shared/" />
+    <!-- 每日自动备份的 xlsx：备份页里分享出去要走 FileProvider -->
+    <files-path name="auto-backups" path="auto-backups/" />
 </paths>

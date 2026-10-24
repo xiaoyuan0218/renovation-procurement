@@ -15,6 +15,7 @@ import com.xiaoyuan.renovation.data.model.ItemInDto
 import com.xiaoyuan.renovation.data.model.ItemListDto
 import com.xiaoyuan.renovation.data.model.ListInDto
 import com.xiaoyuan.renovation.data.model.LoginResultDto
+import com.xiaoyuan.renovation.data.model.LogsPageDto
 import com.xiaoyuan.renovation.data.model.MatrixCellInDto
 import com.xiaoyuan.renovation.data.model.MatrixDto
 import com.xiaoyuan.renovation.data.model.NameInDto
@@ -25,6 +26,7 @@ import com.xiaoyuan.renovation.data.model.RoomDto
 import com.xiaoyuan.renovation.data.model.PurgeResultDto
 import com.xiaoyuan.renovation.data.model.SummaryDto
 import com.xiaoyuan.renovation.data.model.TrashItemDto
+import com.xiaoyuan.renovation.data.model.UndoResultDto
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
@@ -186,6 +188,20 @@ interface ApiService {
 
     @DELETE("api/trash")
     suspend fun purgeTrash(): PurgeResultDto
+
+    /* ---------- 操作日志 ---------- */
+
+    /** 操作日志，最新在前。q 按动作描述模糊搜（动作里带物料名）。 */
+    @GET("api/logs")
+    suspend fun logs(
+        @Query("page") page: Int = 1,
+        @Query("page_size") pageSize: Int = 50,
+        @Query("q") query: String? = null,
+    ): LogsPageDto
+
+    /** 回退这条操作（服务端只允许回退最近一次写操作）。 */
+    @POST("api/logs/{id}/undo")
+    suspend fun undoLog(@Path("id") logId: Int): UndoResultDto
 
     /* ---------- 导入导出 ---------- */
 

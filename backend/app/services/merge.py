@@ -91,6 +91,21 @@ def _local_of(local_map: dict, kind: str, remote_id) -> int:
     return -max(remote_id or 0, 1)
 
 
+def _mine_ids_by_name(rows, name_of) -> dict:
+    """本地行按名字分组的 id 队列：同名多行按出现顺序排队，回退配对时一一认领。
+
+    用 `{name: id}` 的字典建索引的话，同名两行只剩最后一行 —— 回退配对时另一
+    条服务器行拿不到候选，会被当成「服务器新增」另起占位，本地同名行反被当作
+    「那边删了」处理，行数守恒但内容整体错位。
+    """
+    out: dict = {}
+    for row in rows:
+        rid = row.get("id")
+        if rid is not None:
+            out.setdefault(name_of(row), []).append(rid)
+    return out
+
+
 def _align_theirs(rows, name_of, mine_id_by_name, mapped_id):
     """把服务器的一批行对齐到本地 id 空间。
 
@@ -100,7 +115,7 @@ def _align_theirs(rows, name_of, mine_id_by_name, mapped_id):
     重插时行 id 会重排（删过东西留下的空洞被填掉），另一台设备手里的旧映射就
     对不上了，这些行会被当成「服务器新增」跟本地同名行合并出重复（同一份清单里
     冒出两条「示例分组」，推上去还撞服务端唯一约束）。名字是这种清单里最自然的
-    身份，按它配对最贴近事实。
+    身份，按它配对最贴近事实；同名多行按队列顺序一一认领，多出来的行才落占位。
     """
     used = set()
     by_key = {}
@@ -109,8 +124,12 @@ def _align_theirs(rows, name_of, mine_id_by_name, mapped_id):
         remote_id = row.get("id") or 0
         key = mapped_id(row)
         if key is None:
-            candidate = mine_id_by_name.get(name_of(row))
-            if candidate is not None and candidate not in used:
+            # 队列里取第一个还没被认领的本地 id：映射失配 + 同名多行时，
+            # 两条服务器行各自配上自己的同名本地行，而不是挤在同一个键上
+            candidate = next(
+                (cid for cid in mine_id_by_name.get(name_of(row)) or []
+                 if cid not in used), None)
+            if candidate is not None:
                 key = candidate
         if key is not None:
             used.add(key)
@@ -240,7 +259,12 @@ def _expense_row(expense, translate=None) -> tuple:
 
 
 def _expense_name(expense) -> str:
-    return f"{expense.get('kind') or '运费'} {expense.get('amount') or 0}"
+    # 键带上日期/商家/订单号：只按类型+金额配的话，同类型同金额但明显是两笔的
+    # 费用（不同天各下一单运费）会被并成一笔、静默丢掉较旧的那笔。手机端
+    # Merger.kt 的 mergeWithoutBase 用同一套键，两端行为必须一致。
+    return (f"{expense.get('kind') or '运费'} {expense.get('amount') or 0} "
+            f"{expense.get('date') or ''} {expense.get('vendor') or ''} "
+            f"{expense.get('order_no') or ''}")
 
 
 def _same_record(original, row: tuple) -> bool:
@@ -266,8 +290,8 @@ def merge(base: Baseline, mine: dict, theirs: dict, prefer_local: bool = False) 
     aligned_rooms, room_translate = _align_theirs(
         theirs.get("rooms", []),
         name_of=lambda r: r.get("name", ""),
-        mine_id_by_name={r["name"]: r["id"] for r in mine.get("rooms", [])
-                         if r.get("id") is not None},
+        mine_id_by_name=_mine_ids_by_name(mine.get("rooms", []),
+                                          lambda r: r.get("name", "")),
         mapped_id=lambda r: base_map.get(f"room:{r.get('id')}"),
     )
     merged_rooms = _merge_simple(
@@ -287,8 +311,8 @@ def merge(base: Baseline, mine: dict, theirs: dict, prefer_local: bool = False) 
     aligned_categories, category_translate = _align_theirs(
         theirs.get("categories", []),
         name_of=lambda r: r.get("name", ""),
-        mine_id_by_name={r["name"]: r["id"] for r in mine.get("categories", [])
-                         if r.get("id") is not None},
+        mine_id_by_name=_mine_ids_by_name(mine.get("categories", []),
+                                          lambda r: r.get("name", "")),
         mapped_id=lambda r: base_map.get(f"category:{r.get('id')}"),
     )
     merged_categories = _merge_simple(
@@ -308,8 +332,8 @@ def merge(base: Baseline, mine: dict, theirs: dict, prefer_local: bool = False) 
     aligned_items, item_translate = _align_theirs(
         theirs.get("items", []),
         name_of=lambda r: r.get("name", ""),
-        mine_id_by_name={r["name"]: r["id"] for r in mine.get("items", [])
-                         if r.get("id") is not None},
+        mine_id_by_name=_mine_ids_by_name(mine.get("items", []),
+                                          lambda r: r.get("name", "")),
         mapped_id=lambda r: base_map.get(f"item:{r.get('id')}"),
     )
 
@@ -341,8 +365,7 @@ def merge(base: Baseline, mine: dict, theirs: dict, prefer_local: bool = False) 
     aligned_expenses, _ = _align_theirs(
         theirs.get("expenses", []),
         name_of=_expense_name,
-        mine_id_by_name={_expense_name(r): r["id"] for r in mine.get("expenses", [])
-                         if r.get("id") is not None},
+        mine_id_by_name=_mine_ids_by_name(mine.get("expenses", []), _expense_name),
         mapped_id=lambda r: base_map.get(f"expense:{r.get('id')}"),
     )
     merged_expenses = _merge_simple(

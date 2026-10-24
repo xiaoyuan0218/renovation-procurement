@@ -101,6 +101,18 @@ object SummaryCompute {
         }
 
         /* ---------- 分组（按各物料的分配累加） ---------- */
+        // 各分组已付：按每笔记录勾选的涉及分组归集（与 by_category 的 paid_total 同名同义）。
+        // 没勾归属的钱不摊进任何分组 —— "先买哪间"系统无从知晓，猜错比不显示更坏
+        // （与 paidCover 同一哲学），所以各分组已付之和可能小于总已付，差额就是没勾归属的。
+        // 只写了单值 room_id 的老记录当成"只勾了那一间"，与 paidCover 同一读法。
+        val paidByRoom = HashMap<Int, Double>()
+        bundles.forEach { b ->
+            b.records.forEach { r ->
+                var roomIds = (b.recordRooms[r.id] ?: emptyList()).filter { it != 0 }
+                if (roomIds.isEmpty() && r.roomId != null) roomIds = listOf(r.roomId)
+                roomIds.forEach { id -> paidByRoom[id] = (paidByRoom[id] ?: 0.0) + r.amount }
+            }
+        }
         val byRoom = rooms.map { room ->
             var qty = 0.0
             var total = 0.0
@@ -110,7 +122,13 @@ object SummaryCompute {
                     total += a.qty * (a.priceOverride ?: b.item.price)
                 }
             }
-            RoomStatDto(id = room.id, name = room.name, qty = r2(qty), listTotal = r2(total))
+            RoomStatDto(
+                id = room.id,
+                name = room.name,
+                qty = r2(qty),
+                listTotal = r2(total),
+                paidTotal = r2(paidByRoom[room.id] ?: 0.0),
+            )
         }
 
         /* ---------- 未买齐（按日常价合计降序，先处理金额大的） ---------- */

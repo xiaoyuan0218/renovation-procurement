@@ -34,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -90,6 +91,12 @@ fun ItemEditScreen(
     val context = LocalContext.current
 
     var confirmDelete by remember { mutableStateOf(false) }
+    // 链接框被碰过才有“失焦回写”一说：没有这个标记，首次组合（还没碰输入框）
+    // 的 onFocusChanged 就会按“失焦”把库值改写一遍
+    var linkTouched by remember { mutableStateOf(false) }
+    // 框里有字但提取不出链接（口令码、纯文字、空 host）时保存会清掉它，
+    // 先弹窗问一句，不让用户糊里糊涂丢内容
+    var confirmLinkClear by remember { mutableStateOf(false) }
 
     LaunchedEffect(itemId) { vm.start(itemId) }
     LaunchedEffect(message) {
@@ -129,7 +136,14 @@ fun ItemEditScreen(
             }
             NeonButton(
                 text = "保存",
-                onClick = { vm.save { onClose() } },
+                onClick = {
+                    // 失焦回写不动原值，清空只发生在保存这一步，所以提示也放这里
+                    if (form.link.isNotBlank() && UrlOpener.extractHttp(form.link).isEmpty()) {
+                        confirmLinkClear = true
+                    } else {
+                        vm.save { onClose() }
+                    }
+                },
                 icon = Icons.Filled.Check,
                 loading = saving,
                 enabled = !loading,
@@ -231,8 +245,20 @@ fun ItemEditScreen(
                                 value = form.link,
                                 onValueChange = { v -> vm.edit { it.copy(link = v) } },
                                 label = "商品链接",
-                                placeholder = "https://…（选填，之后点开就能看商品页）",
+                                placeholder = "粘贴商品链接或整段分享文案，自动提取链接",
                                 keyboardType = KeyboardType.Uri,
+                                // 贴的是整段分享文案时，失焦就把提取出的链接回写进框里，
+                                // 用户能直接看到结果；提取不出（口令码、纯文字）不动原值
+                                modifier = Modifier.onFocusChanged { state ->
+                                    if (state.isFocused) {
+                                        linkTouched = true
+                                    } else if (linkTouched) {
+                                        val extracted = UrlOpener.extractHttp(form.link)
+                                        if (extracted.isNotEmpty() && extracted != form.link) {
+                                            vm.edit { it.copy(link = extracted) }
+                                        }
+                                    }
+                                },
                             )
                             // 只有认得出的 http/https 才给"打开"入口：伪协议
                             // 交给系统可能是执行而不是浏览，不当成链接
@@ -614,6 +640,19 @@ fun ItemEditScreen(
                 vm.delete { onClose() }
             },
             onDismiss = { confirmDelete = false },
+        )
+    }
+
+    if (confirmLinkClear) {
+        ConfirmDialog(
+            title = "没有识别到链接",
+            message = "「商品链接」里没有可打开的 http/https 链接，保存后这个字段会被清空。",
+            confirmText = "继续保存",
+            onConfirm = {
+                confirmLinkClear = false
+                vm.save { onClose() }
+            },
+            onDismiss = { confirmLinkClear = false },
         )
     }
 }

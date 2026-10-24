@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xiaoyuan.renovation.mobile.data.model.ItemDto
 import com.xiaoyuan.renovation.mobile.data.model.statusLabel
+import com.xiaoyuan.renovation.mobile.domain.r2
 import com.xiaoyuan.renovation.mobile.ui.design.AppDateField
 import com.xiaoyuan.renovation.mobile.ui.design.AppNumberField
 import com.xiaoyuan.renovation.mobile.data.model.RecordInDto
@@ -85,6 +86,10 @@ fun PurchaseSheet(
     }
     var confirmClear by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // 「已买 + 本次 > 总量」时先存起来等确认：数量录错（多打一个 0、没注意
+    // 已买 9 其实只差 1）是最常见的记账错误。确认过就是真实买超，放行 ——
+    // 口径不变，保存侧本来就不夹断数量。定金不推进到货数量，不存在超量
+    var pendingRecord by remember(item.id) { mutableStateOf<RecordInDto?>(null) }
 
     LaunchedEffect(item.id, item.paidQty) {
         // 记录变化后刷新默认值（比如刚点了"付清"）
@@ -251,7 +256,15 @@ fun PurchaseSheet(
                             q < 0 || a < 0 -> "不能填负数"
                             else -> null
                         }
-                        if (error == null) onAdd(recordInput(q, a))
+                        if (error != null) return@NeonButton
+                        val body = recordInput(q, a)
+                        // 只拦手滑不改口径：买超了给个确认框，写明差多少，确认就放行
+                        val over = r2(item.paidQty + q - item.totalQty)
+                        if (!isDeposit && q > 0 && over > 0) {
+                            pendingRecord = body
+                        } else {
+                            onAdd(body)
+                        }
                     },
                     icon = Icons.Filled.Add,
                     enabled = !busy,
@@ -339,6 +352,21 @@ fun PurchaseSheet(
                 onClear()
             },
             onDismiss = { confirmClear = false },
+        )
+    }
+
+    pendingRecord?.let { body ->
+        ConfirmDialog(
+            title = "买超确认",
+            message = "「${item.name}」总量 ${Fmt.qty(item.totalQty)}${item.unit}、" +
+                "已买 ${Fmt.qty(item.paidQty)}、本次 ${Fmt.qty(body.qty)}，" +
+                "将超 ${Fmt.qty(r2(item.paidQty + body.qty - item.totalQty))}。确认记下这笔？",
+            confirmText = "确认记下",
+            onConfirm = {
+                pendingRecord = null
+                onAdd(body)
+            },
+            onDismiss = { pendingRecord = null },
         )
     }
 }

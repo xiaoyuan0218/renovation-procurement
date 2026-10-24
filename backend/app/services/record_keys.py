@@ -77,9 +77,19 @@ def fill_missing_deposit(db: Session, list_id: int, payload: dict) -> dict:
 
 
 def item_link_index(db: Session, list_id: int) -> dict:
-    """物料名 → 已有的商品链接（只记非空的），给"老 payload 没带 link"回填用。"""
-    rows = db.query(Item.name, Item.link).filter(Item.list_id == list_id).all()
-    return {name: link for name, link in rows if name and link}
+    """物料名 → 已有的商品链接（只记非空的），给"老 payload 没带 link"回填用。
+
+    按 id 升序、同名的行先到先得 —— fill_missing_item_link 承诺"重名取第一条"，
+    不排序的话字典推导会让后行覆盖前行，取到哪条取决于 SQLite 的返回顺序。
+    """
+    rows = (db.query(Item.name, Item.link)
+            .filter(Item.list_id == list_id)
+            .order_by(Item.id).all())
+    index: dict = {}
+    for name, link in rows:
+        if name and link and name not in index:
+            index[name] = link
+    return index
 
 
 def fill_missing_item_link(db: Session, list_id: int, payload: dict) -> dict:

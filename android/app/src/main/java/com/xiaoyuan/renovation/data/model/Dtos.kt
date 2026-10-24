@@ -106,6 +106,8 @@ data class ItemDto(
     @SerialName("unpaid_qty") val unpaidQty: Double = 0.0,
     val unpaid: Double = 0.0,
     val status: String = STATUS_UNBOUGHT,
+    /** 乐观锁版本号：保存时原样带回（base_rev），对不上说明别处改过（409） */
+    val rev: Int = 1,
     val records: List<RecordDto> = emptyList(),
     val allocations: List<AllocationDto> = emptyList(),
 )
@@ -164,6 +166,8 @@ data class ItemInDto(
     val link: String = "",
     val allocations: List<AllocInDto>? = null,
     val records: List<RecordInDto>? = null,
+    /** 读取时拿到的 rev：不带的话老版本后端不校验，会静默覆盖别处刚记的采购 */
+    @SerialName("base_rev") val baseRev: Int? = null,
 )
 
 @Serializable
@@ -287,6 +291,11 @@ data class RoomStatDto(
     val name: String,
     val qty: Double = 0.0,
     @SerialName("list_total") val listTotal: Double = 0.0,
+    /**
+     * 该分组已付：按采购记录勾选的涉及分组归集（与 by_category 的 paid_total 同名同义）。
+     * 老后端没有这个字段时保持 0，界面就不亮出已付。
+     */
+    @SerialName("paid_total") val paidTotal: Double = 0.0,
 )
 
 @Serializable
@@ -389,6 +398,59 @@ data class LoginResultDto(
 
 @Serializable
 data class HealthDto(val status: String = "")
+
+/* ---------------- 操作日志 ---------------- */
+
+/** 操作日志里的一条：列表展示够用的字段，能不能一键回退由 can_undo 说了算。 */
+@Serializable
+data class LogDto(
+    val id: Int,
+    val at: String = "",
+    /** human 网页/手机上的人操作，api 拿密钥的脚本调用 */
+    @SerialName("actor_kind") val actorKind: String = "",
+    @SerialName("actor_name") val actorName: String = "",
+    /** 动作描述（带物料名），搜索就是按它模糊匹配 */
+    val action: String = "",
+    val method: String = "",
+    val path: String = "",
+    @SerialName("status_code") val statusCode: Int = 0,
+    @SerialName("can_undo") val canUndo: Boolean = false,
+    val undone: Boolean = false,
+)
+
+@Serializable
+data class LogsPageDto(
+    val total: Int = 0,
+    /** 当前能一键回退的那条日志 id（永远指向最新一条写操作） */
+    @SerialName("undoable_id") val undoableId: Int? = null,
+    val items: List<LogDto> = emptyList(),
+)
+
+@Serializable
+data class UndoResultDto(val ok: Boolean = true, val message: String = "")
+
+/* ---------------- 跨物料流水 ---------------- */
+
+/**
+ * 流水页里的一行：采购记录拼平上它所属物料的名字与单位。
+ * 记录随 /api/items 一起回来（每条物料自带 records），本地聚合即可，
+ * 与网页版流水页同一套做法 —— 没有单独的流水接口。
+ */
+data class LedgerRecordDto(
+    val itemId: Int = 0,
+    val recordId: Int = 0,
+    val itemName: String = "",
+    val unit: String = "",
+    val qty: Double = 0.0,
+    val amount: Double = 0.0,
+    val isDeposit: Boolean = false,
+    val date: String = "",
+    val note: String = "",
+    val vendor: String = "",
+    val orderNo: String = "",
+    val roomIds: List<Int> = emptyList(),
+    val createdAt: String = "",
+)
 
 /* ---------------- 状态常量 ---------------- */
 

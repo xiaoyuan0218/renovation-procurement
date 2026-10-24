@@ -68,10 +68,14 @@ import com.xiaoyuan.renovation.ui.items.NEW_ITEM_ID
 import com.xiaoyuan.renovation.ui.lists.ListsViewModel
 import com.xiaoyuan.renovation.ui.matrix.MatrixScreen
 import com.xiaoyuan.renovation.ui.matrix.MatrixViewModel
+import com.xiaoyuan.renovation.ui.records.RecordsScreen
+import com.xiaoyuan.renovation.ui.records.RecordsViewModel
 import com.xiaoyuan.renovation.ui.settings.AccountPage
 import com.xiaoyuan.renovation.ui.settings.BackupPage
 import com.xiaoyuan.renovation.ui.settings.ExpensesPage
 import com.xiaoyuan.renovation.ui.settings.ListsPage
+import com.xiaoyuan.renovation.ui.settings.LogsPage
+import com.xiaoyuan.renovation.ui.settings.LogsViewModel
 import com.xiaoyuan.renovation.ui.settings.RoomsPage
 import com.xiaoyuan.renovation.ui.settings.SettingsScreen
 import com.xiaoyuan.renovation.ui.settings.SettingsViewModel
@@ -103,6 +107,14 @@ fun AppShellHost(container: AppContainer, baseUrl: String) {
                 onEditItem = { id -> navController.navigate("item/$id") },
                 onEditServerAddress = { navController.navigate("server") },
                 onOpenSettingsPage = { page -> navController.navigate("settings/$page") },
+                onOpenRecords = { navController.navigate("records") },
+            )
+        }
+        // 跨物料的采购流水：从清单页顶部进来
+        composable("records") {
+            RecordsScreen(
+                vm = containerViewModel(container) { RecordsViewModel(it.repo) },
+                onBack = { navController.popBackStack() },
             )
         }
         // 设置里的各个子页面：设置页只做菜单，点开才进整页
@@ -135,6 +147,11 @@ fun AppShellHost(container: AppContainer, baseUrl: String) {
                     vm = containerViewModel(container) {
                         SettingsViewModel(it.repo, it.settings, it.appContextRef)
                     },
+                    onBack = back,
+                )
+
+                "logs" -> LogsPage(
+                    vm = containerViewModel(container) { LogsViewModel(it.repo) },
                     onBack = back,
                 )
 
@@ -182,6 +199,7 @@ private fun AppShell(
     onEditItem: (Int) -> Unit,
     onEditServerAddress: () -> Unit,
     onOpenSettingsPage: (String) -> Unit,
+    onOpenRecords: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(ShellTab.Dashboard) }
     val dataVersion by container.dataVersion.collectAsStateWithLifecycle()
@@ -223,6 +241,7 @@ private fun AppShell(
                         serverUrl = baseUrl,
                         refreshKey = dataVersion,
                         onEditItem = onEditItem,
+                        onOpenRecords = onOpenRecords,
                         onOpenServerSettings = onEditServerAddress,
                     )
 

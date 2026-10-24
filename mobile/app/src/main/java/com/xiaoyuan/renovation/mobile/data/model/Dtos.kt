@@ -286,6 +286,11 @@ data class RoomStatDto(
     val name: String,
     val qty: Double = 0.0,
     @SerialName("list_total") val listTotal: Double = 0.0,
+    /**
+     * 该分组已付：按采购记录勾选的涉及分组归集（与 by_category 的 paid_total 同名同义）。
+     * 旧版本数据里没有这个字段时保持 0，界面就不亮出已付。
+     */
+    @SerialName("paid_total") val paidTotal: Double = 0.0,
 )
 
 @Serializable
@@ -301,6 +306,29 @@ data class SummaryDto(
     @SerialName("expenses_total") val expensesTotal: Double = 0.0,
     @SerialName("expenses_by_kind") val expensesByKind: List<ExpenseKindDto> = emptyList(),
     @SerialName("expenses_count") val expensesCount: Int = 0,
+)
+
+/* ---------------- 跨物料流水 ---------------- */
+
+/**
+ * 流水页里的一行：采购记录拼平上它所属物料的名字与单位。
+ * 记录随 repo.items() 一起回来（每条物料自带 records），本地聚合即可，
+ * 与网页版流水页同一套做法 —— 没有单独的流水接口。
+ */
+data class LedgerRecordDto(
+    val itemId: Int = 0,
+    val recordId: Int = 0,
+    val itemName: String = "",
+    val unit: String = "",
+    val qty: Double = 0.0,
+    val amount: Double = 0.0,
+    val isDeposit: Boolean = false,
+    val date: String = "",
+    val note: String = "",
+    val vendor: String = "",
+    val orderNo: String = "",
+    val roomIds: List<Int> = emptyList(),
+    val createdAt: String = "",
 )
 
 /* ---------------- 导入报告 ---------------- */

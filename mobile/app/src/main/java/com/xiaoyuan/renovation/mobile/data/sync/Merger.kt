@@ -405,8 +405,14 @@ object Merger {
             )
         }
 
+        // 配对键带上日期/商家/订单号：只按类型+金额配的话，同类型同金额但
+        // 明显是两笔的费用（如不同天各下一单运费）会被并成一笔、静默丢掉
+        // 较旧的那笔 —— 与本函数"各自独有的都留着"的承诺相反。后端
+        // merge.py 的 _expense_name 用同一套键，两端行为必须一致。
         val expenses = pickByName(
-            mine.expenses, theirs.expenses, { "${it.kind} ${it.amount}" }, { it.updatedAt },
+            mine.expenses, theirs.expenses,
+            { "${it.kind} ${it.amount} ${it.date} ${it.vendor} ${it.orderNo}" },
+            { it.updatedAt },
         ).map { picked ->
             val row = picked.row
             SyncExpense(

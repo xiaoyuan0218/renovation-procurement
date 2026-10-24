@@ -183,6 +183,26 @@ def test_merge_without_base_pairs_by_name_and_renumbers():
     assert merged["rooms"][0]["sort"] == 5
 
 
+def test_merge_without_base_keeps_same_amount_expenses_apart():
+    """同类型同金额但日期不同的两笔费用是两笔，不能并成一笔丢掉较旧的。
+
+    配对键只看类型+金额时会静默吞钱；键里带上了日期/商家/订单号。
+    """
+    mine = _payload(expenses=[{"id": 1, "kind": "运费", "amount": 200,
+                               "date": "2026-03-05", "vendor": "", "order_no": "",
+                               "note": "", "item_id": None,
+                               "created_at": "2026-03-05 00:00:00",
+                               "updated_at": "2026-03-05 00:00:00"}])
+    theirs = _payload(expenses=[{"id": 2, "kind": "运费", "amount": 200,
+                                 "date": "2026-03-08", "vendor": "", "order_no": "",
+                                 "note": "", "item_id": None,
+                                 "created_at": "2026-03-08 00:00:00",
+                                 "updated_at": "2026-03-08 00:00:00"}])
+    merged = merge.merge_without_base(mine, theirs)
+    assert len(merged["expenses"]) == 2
+    assert sorted(e["date"] for e in merged["expenses"]) == ["2026-03-05", "2026-03-08"]
+
+
 def test_merge_without_base_rewrites_references():
     """引用要跟着新编号重写：物料的分配指向重编后的分组。"""
     mine = _payload(rooms=[_room(1, "客厅")],

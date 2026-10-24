@@ -52,9 +52,18 @@ def _parse_ts(text) -> datetime.datetime | None:
             continue
     # ISO 风格（带 T、可能带时区）也认一下：别家客户端或脚本可能这么发
     try:
-        return datetime.datetime.fromisoformat(text).replace(microsecond=0)
+        if text.endswith(("Z", "z")):
+            # Python 3.10 及更早的 fromisoformat 不认 Z 后缀，先折成数字偏移
+            text = text[:-1] + "+00:00"
+        parsed = datetime.datetime.fromisoformat(text)
     except ValueError:
         return None
+    if parsed.tzinfo is not None:
+        # 全端统一用 naive UTC 这一把尺子（见 models.utcnow）：带时区的值必须先
+        # 折算成 UTC 再落库，原样收下的话 +08:00 的时间会比真实时刻偏 8 小时，
+        # "谁改得更近"的判向跟着反转，较新的改动会被静默覆盖
+        parsed = parsed.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return parsed.replace(microsecond=0)
 
 
 def _ts_or_now(text) -> datetime.datetime:
@@ -218,10 +227,13 @@ def _canonical(payload: dict) -> str:
 
     canonical_items = []
     for item in items:
+        # 行自身的 id 与行内引用 id 都要剔掉：两端 id 空间各自独立，覆盖重插后
+        # 还会整体重排。漏掉任何一个，"语义一致仅 id 错位"的两份内容指纹就不同，
+        # 服务器没动也会被判成"本地有新改动"整份重推。
         records = [
-            {**_strip_ts(r),
-             "room_ids": sorted(_ref("rooms", room_name, rid)
-                                for rid in (r.get("room_ids") or []))}
+            {k: v for k, v in _strip_ts(r).items() if k != "id"}
+            | {"room_ids": sorted(_ref("rooms", room_name, rid)
+                                  for rid in (r.get("room_ids") or []))}
             for r in item.get("records", [])
         ]
         canonical_items.append({
@@ -230,14 +242,17 @@ def _canonical(payload: dict) -> str:
             "category": _ref("categories", category_name,
                              item.get("category_id")),
             "allocations": sorted(
-                ({**_strip_ts(a), "room": _ref("rooms", room_name,
-                                               a.get("room_id"))}
+                ({k: v for k, v in _strip_ts(a).items()
+                  if k not in ("id", "room_id")}
+                 | {"room": _ref("rooms", room_name, a.get("room_id"))}
                  for a in item.get("allocations", [])), key=key),
             "records": sorted(records, key=key),
         })
 
     canonical_expenses = sorted(
-        ({**_strip_ts(e), "item": _ref("items", item_name, e.get("item_id"))}
+        ({k: v for k, v in _strip_ts(e).items()
+          if k not in ("id", "item_id")}
+         | {"item": _ref("items", item_name, e.get("item_id"))}
          for e in payload.get("expenses", [])), key=key)
 
     normalized = {

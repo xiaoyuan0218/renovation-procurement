@@ -34,12 +34,20 @@ onUnmounted(() => {
 const cellDialog = ref(false)
 const cellForm = ref({ item_id: null, room_id: null, itemName: '', roomName: '', qty: 0, price_override: null, note: '' })
 const savingCell = ref(false)
+const loadFailed = ref(false)
 
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     data.value = await api.get('/api/matrix')
+  } catch (e) {
+    // 失败别渲染成一张空表（看着像"还没布点"）：给一条明确的错误提示
+    if (e.status !== 401) {
+      loadFailed.value = true
+      ElMessage.error(`加载失败：${e.message}`)
+    }
   } finally {
     loading.value = false
   }
@@ -123,7 +131,11 @@ function summaryMethod({ columns }) {
       <div v-show="loading && !filteredItems.length" class="table-box skeleton-pad">
         <el-skeleton :rows="8" animated />
       </div>
-      <div v-show="!loading || filteredItems.length" ref="tableBoxRef" class="table-box table-scroll">
+      <el-empty v-show="loadFailed && !filteredItems.length"
+                description="加载失败，可能是服务没启动或网络断了；切到别的页再切回来即可重试"
+                :image-size="80" />
+      <div v-show="(!loading && !loadFailed) || filteredItems.length"
+           ref="tableBoxRef" class="table-box table-scroll">
         <el-table :data="filteredItems" size="small" show-summary :height="tableHeight"
                   :summary-method="summaryMethod" class="matrix-table">
         <el-table-column prop="name" label="物料" width="260">

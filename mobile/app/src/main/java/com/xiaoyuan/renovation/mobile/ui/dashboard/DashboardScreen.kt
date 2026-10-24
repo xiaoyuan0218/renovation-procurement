@@ -297,15 +297,26 @@ private fun DashboardBody(data: DashboardData, onGoItems: () -> Unit) {
 
         /* ---------- 分组金额分布 ---------- */
         val roomBars = summary.byRoom
-            .filter { it.listTotal > 0 }
+            .filter { it.listTotal > 0 || it.paidTotal > 0 }
             .sortedByDescending { it.listTotal }
             .take(8)
         if (roomBars.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            SectionTitle("分组金额分布", caption = "按原价口径，最多显示 8 个分组")
+            SectionTitle(
+                "分组金额分布",
+                caption = "条长按原价口径 · 已付按每笔记录勾选的分组归集",
+            )
             GlassCard {
                 HorizontalBarChart(
-                    items = roomBars.map { BarItem(it.name, it.listTotal, caption = "原价") },
+                    items = roomBars.map {
+                        BarItem(
+                            label = it.name,
+                            value = it.listTotal,
+                            // 按记录归属归出的已付大于 0 就亮出来对照预算；没数据时保持原价口径
+                            caption = if (it.paidTotal > 0.0) "已付 ${Fmt.money(it.paidTotal)}" else "原价",
+                            color = Ink.Indigo,
+                        )
+                    },
                 )
             }
         }

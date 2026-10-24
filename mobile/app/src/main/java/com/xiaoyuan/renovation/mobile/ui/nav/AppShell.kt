@@ -73,6 +73,8 @@ import com.xiaoyuan.renovation.mobile.ui.items.NEW_ITEM_ID
 import com.xiaoyuan.renovation.mobile.ui.lists.ListsViewModel
 import com.xiaoyuan.renovation.mobile.ui.matrix.MatrixScreen
 import com.xiaoyuan.renovation.mobile.ui.matrix.MatrixViewModel
+import com.xiaoyuan.renovation.mobile.ui.records.RecordsScreen
+import com.xiaoyuan.renovation.mobile.ui.records.RecordsViewModel
 import com.xiaoyuan.renovation.mobile.ui.settings.AboutPage
 import com.xiaoyuan.renovation.mobile.ui.DonateDialog
 import com.xiaoyuan.renovation.mobile.ui.WelcomeDialog
@@ -128,7 +130,20 @@ fun AppShellHost(container: AppContainer) {
                     container = container,
                     snackbarHostState = snackbarHostState,
                     onEditItem = { id -> navController.navigate("item/$id") },
+                    onOpenRecords = { navController.navigate("records") },
                     onOpenSettingsPage = { page -> navController.navigate("settings/$page") },
+                )
+            }
+            // 跨物料的采购流水：从清单页页眉的「采购流水」进来
+            composable("records") {
+                val refreshKey by container.dataVersion.collectAsStateWithLifecycle()
+                val recordsVm: RecordsViewModel = containerViewModel(container) {
+                    RecordsViewModel(it.repo)
+                }
+                LaunchedEffect(refreshKey) { recordsVm.loadIfStale(refreshKey) }
+                RecordsScreen(
+                    vm = recordsVm,
+                    onBack = { navController.popBackStack() },
                 )
             }
             // 设置里的各个子页面：设置页只做菜单，点开才进整页
@@ -216,6 +231,7 @@ private fun AppShell(
     container: AppContainer,
     snackbarHostState: SnackbarHostState,
     onEditItem: (Int) -> Unit,
+    onOpenRecords: () -> Unit,
     onOpenSettingsPage: (String) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(ShellTab.Dashboard) }
@@ -292,6 +308,7 @@ private fun AppShell(
                     vm = itemsVm,
                     refreshKey = dataVersion,
                     onEditItem = onEditItem,
+                    onOpenRecords = onOpenRecords,
                 )
 
                 ShellTab.Matrix -> MatrixScreen(

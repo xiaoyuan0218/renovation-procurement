@@ -40,6 +40,17 @@ async function loadTrash() {
 //   - 回收站随时可能被别处改（比如手机上删了东西）。
 watch(visible, (open) => {
   if (open) {
+    // 上次会话留下的"一次性"状态先清掉：改密码填一半的输入、上次生成的密钥、
+    // 上次的导入报告与检查更新结果 —— 关掉再开还留着，容易被当成本次的结果
+    //（对照 NewListDialog / ExpensesDialog 打开即重置草稿的做法）。
+    oldPassword.value = newPassword.value = confirmPassword.value = ''
+    createdKey.value = ''
+    showKeyVisible.value = false
+    importReport.value = null
+    newRoom.value = ''
+    newCategory.value = ''
+    updateState.value = ''
+    updateInfo.value = ''
     loadRoomsAndCategories()
     loadTrash()
     loadApiKeys()
@@ -166,12 +177,19 @@ async function removeList(row) {
 // ---------- 分组 / 分类 ----------
 
 async function renameRoom(row) {
-  const { value } = await ElMessageBox.prompt('修改分组名', '重命名', {
-    inputValue: row.name, inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
-  })
-  const updated = await api.put(`/api/rooms/${row.id}`, { name: value.trim(), sort: row.sort })
-  Object.assign(row, updated)
-  ElMessage.success('已改名')
+  let value
+  try {
+    ;({ value } = await ElMessageBox.prompt('修改分组名', '重命名', {
+      inputValue: row.name, inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
+    }))
+  } catch { return } // 用户取消
+  try {
+    const updated = await api.put(`/api/rooms/${row.id}`, { name: value.trim(), sort: row.sort })
+    Object.assign(row, updated)
+    ElMessage.success('已改名')
+    // 矩阵的分组列、总览的分组图都显示这个名字，让外层整体刷新
+    emit('imported')
+  } catch (e) { ElMessage.error(e.message) }
 }
 
 async function addRoom() {
@@ -186,12 +204,16 @@ async function addRoom() {
 }
 
 async function removeRoom(row) {
-  await ElMessageBox.confirm(
-    `删除分组「${row.name}」会同时删除该分组的全部数量分配，确定？`, '删除分组', { type: 'warning' })
-  await api.del(`/api/rooms/${row.id}`)
-  rooms.value = rooms.value.filter((r) => r.id !== row.id)
-  ElMessage.success('已删除')
-  emit('imported') // 分配变了，刷新其他页面
+  try {
+    await ElMessageBox.confirm(
+      `删除分组「${row.name}」会同时删除该分组的全部数量分配，确定？`, '删除分组', { type: 'warning' })
+  } catch { return } // 用户取消
+  try {
+    await api.del(`/api/rooms/${row.id}`)
+    rooms.value = rooms.value.filter((r) => r.id !== row.id)
+    ElMessage.success('已删除')
+    emit('imported') // 分配变了，刷新其他页面
+  } catch (e) { ElMessage.error(e.message) }
 }
 
 async function addCategory() {
@@ -206,20 +228,31 @@ async function addCategory() {
 }
 
 async function renameCategory(row) {
-  const { value } = await ElMessageBox.prompt('修改分类名', '重命名', {
-    inputValue: row.name, inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
-  })
-  const updated = await api.put(`/api/categories/${row.id}`, { name: value.trim(), sort: row.sort })
-  Object.assign(row, updated)
-  ElMessage.success('已改名')
+  let value
+  try {
+    ;({ value } = await ElMessageBox.prompt('修改分类名', '重命名', {
+      inputValue: row.name, inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
+    }))
+  } catch { return } // 用户取消
+  try {
+    const updated = await api.put(`/api/categories/${row.id}`, { name: value.trim(), sort: row.sort })
+    Object.assign(row, updated)
+    ElMessage.success('已改名')
+    // 物料页的分类列、总览的分类图都显示这个名字，让外层整体刷新
+    emit('imported')
+  } catch (e) { ElMessage.error(e.message) }
 }
 
 async function removeCategory(row) {
-  await ElMessageBox.confirm(`确定删除分类「${row.name}」？`, '删除分类', { type: 'warning' })
+  try {
+    await ElMessageBox.confirm(`确定删除分类「${row.name}」？`, '删除分类', { type: 'warning' })
+  } catch { return } // 用户取消
   try {
     await api.del(`/api/categories/${row.id}`)
     categories.value = categories.value.filter((c) => c.id !== row.id)
     ElMessage.success('已删除')
+    // 物料页与总览显示着分类名，让外层整体刷新
+    emit('imported')
   } catch (e) { ElMessage.error(e.message) }
 }
 

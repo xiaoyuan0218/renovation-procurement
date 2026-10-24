@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (Allocation, Category, ExtraExpense, Item, ItemList,
                       PurchaseRecord, RecordRoom, Room)
-from . import codes
+from . import codes, link_text
 from .list_transfer import _parse_dt, _ts_or_now
 
 
@@ -98,6 +98,16 @@ def apply_payload(db: Session, lst: ItemList, payload: dict) -> dict:
 
     清单本身的名字不动 —— 覆盖的是内容，不是这份清单的归属。调用方负责 commit。
     """
+    # 远程 payload 的 link 可能还是整段分享文案（远程版本认识 link 字段但不做
+    # 提取的窗口期）。**就地改 payload** 而不是只改落库值：_save_binding 把这个
+    # dict 存成三方合并的基线，基线与落库不同源的话，下一轮合并（mine=导出的
+    # 提取值 vs base=未提取值）会把 link 差异误判成"本地改了链接"，多一轮推送
+    # 才收敛。对已是纯 URL 的值提取是幂等的；None（没带字段）不动，保持
+    # "老服务器 payload 沿用旧值"的语义。
+    for row in payload.get("items", []):
+        if row.get("link"):
+            row["link"] = link_text.extract_link(row["link"])
+
     rooms = db.query(Room).filter(Room.list_id == lst.id).all()
     categories = db.query(Category).filter(Category.list_id == lst.id).all()
     items = db.query(Item).filter(Item.list_id == lst.id).all()

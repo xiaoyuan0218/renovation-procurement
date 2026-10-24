@@ -334,7 +334,7 @@ object Snapshot {
 
         payload.expenses.forEach { expense ->
             val key = "${expense.kind}|${expense.amount}|${expense.date}|${expense.vendor}|${expense.orderNo}"
-            db.expenses().insert(
+            val newId = db.expenses().insert(
                 ExtraExpenseEntity(
                     id = spareExpenses[key]?.removeFirstOrNull() ?: 0,
                     listId = listId,
@@ -348,7 +348,11 @@ object Snapshot {
                     createdAt = expense.createdAt,
                     updatedAt = expense.updatedAt,
                 ).adopted(),
-            )
+            ).toInt()
+            // 费用没有名字可以回退配对，三方合并全靠这条映射认行：漏了它，服务器
+            // 删费用会被当成本地新增、改金额会配不上对弹假冲突（后端 local_apply
+            // 同样写 expense: 映射，两端必须一致）
+            expense.id?.let { map["expense:$it"] = newId }
         }
 
         map
@@ -372,16 +376,19 @@ object Snapshot {
         return out
     }
 
-    /** 在本地新建一份清单并灌入内容，返回新清单 id。 */
     /**
-     * 在本地新建一份清单并灌入内容。
+     * 在本地新建一份清单并灌入内容，返回 `清单 id to 「服务器 id → 本地 id」映射`。
+     *
+     * 映射必须跟清单一起交出去：拉到本地随即建立绑定的话，基线里没有它，下次
+     * 同步认不出"哪一行是同一行"（改名/删行会弹假冲突或被当成本地新增）——
+     * 与后端 create_list_from_payload 返回 (清单, 映射) 是同一套约定。
      *
      * `freshCode = true` 时强制分配新编号：用于"这份编号本地已经有人用了"的场合
      * （拉取撞车时把服务器那份另存到本地），直接沿用会撞唯一约束，也会让
      * "哪份是哪份"乱掉。
      */
     suspend fun createList(db: AppDatabase, payload: SyncPayload, name: String,
-                           freshCode: Boolean = false): Int {
+                           freshCode: Boolean = false): Pair<Int, Map<String, Int>> {
         val listId = db.lists().insert(
             ItemListEntity(
                 name = name,
@@ -395,7 +402,7 @@ object Snapshot {
                 else ListCodes.normalize(payload.list.code).ifEmpty { ListCodes.new() },
             ),
         ).toInt()
-        apply(db, listId, payload)
+        val map = apply(db, listId, payload)
         if (freshCode) {
             // apply 会把编号跟成 payload 那份（同一份要对上号）；「另存一份」要的是
             // 独立副本，编号必须换新，所以最后再盖一次
@@ -403,7 +410,7 @@ object Snapshot {
                 db.lists().update(it.copy(code = ListCodes.new()))
             }
         }
-        return listId
+        return listId to map
     }
 
     /** 清空一份清单的内容（覆盖前的准备）。先删挂在下层的，再删主表。 */

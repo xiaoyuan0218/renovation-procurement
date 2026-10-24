@@ -12,6 +12,7 @@ import com.xiaoyuan.renovation.mobile.data.repo.ApiResult
 import com.xiaoyuan.renovation.mobile.data.repo.LocalRepository
 import com.xiaoyuan.renovation.mobile.data.repo.okData
 import com.xiaoyuan.renovation.mobile.domain.Compute
+import com.xiaoyuan.renovation.mobile.domain.LocalCompute
 import com.xiaoyuan.renovation.mobile.util.Fmt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -326,6 +327,14 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
         }
 
         val allocs = toAllocInputs(form)
+        // 保存兜底再提取一次：粘贴完没失焦直接点保存会跳过失焦回写。
+        // 框里有字但提取不出链接（口令码、伪协议、纯文字）时提交空串 —— 库里
+        // 本来就存不了这种值（仓库层 cleanLink 同口径），但先喊一声，别等重开
+        // 页面才发现链接没了
+        val link = LocalCompute.extractLink(form.link)
+        if (form.link.isNotBlank() && link.isEmpty()) {
+            _message.value = "商品链接里没找到可用的 http/https 链接，保存后该字段会是空的"
+        }
         val body = ItemInDto(
             name = form.name.trim(),
             categoryId = form.categoryId,
@@ -341,8 +350,7 @@ class ItemEditViewModel(private val repo: LocalRepository) : ViewModel() {
             price = Fmt.parseNumberOrZero(form.price),
             discountPrice = Fmt.parseNumber(form.discountPrice),
             note = form.note.trim(),
-            // 伪协议（javascript: 之类）由仓库层统一清空，这里原样带上
-            link = form.link.trim(),
+            link = link,
             allocations = allocs,
             records = toRecordInputs(form),
         )

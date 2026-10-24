@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { api, money } from '../api'
 import ExpensesDialog from '../components/ExpensesDialog.vue'
@@ -8,6 +9,8 @@ import { pagedSlice } from '../paging'
 
 const emit = defineEmits(['go-items'])
 const summary = ref(null)
+// 加载失败要能从模板上分辨出来：不然骨架屏会永远转下去，像还在加载一样
+const loadFailed = ref(false)
 // 未采购清单可能有上百项，分页看；「未采购金额 Top 6」那张条形图不受影响
 const unboughtPage = ref(1)
 const pagedUnbought = pagedSlice(computed(() => summary.value?.unbought ?? []), unboughtPage)
@@ -59,7 +62,12 @@ const expensesVisible = ref(false)
  * 重画反而要拆掉再建一批 echarts 实例。
  */
 async function refreshSummary() {
-  summary.value = await api.get('/api/summary')
+  try {
+    summary.value = await api.get('/api/summary')
+  } catch (e) {
+    // 从额外费用弹窗回来刷数字失败不能静默，也不能把 rejection 抛给调用方
+    if (e.status !== 401) ElMessage.error(`刷新失败：${e.message}`)
+  }
 }
 
 // 优惠按「省下的钱」理解，负数是实付价高于原价/日常价，改用警示色而不是隐藏
@@ -73,7 +81,16 @@ function grad(top, bottom) {
 }
 
 onMounted(async () => {
-  summary.value = await api.get('/api/summary')
+  try {
+    summary.value = await api.get('/api/summary')
+  } catch (e) {
+    // 数据没到手图表就没法画：明确告知并停在错误态，别让骨架屏永远转
+    if (e.status !== 401) {
+      loadFailed.value = true
+      ElMessage.error(`加载失败：${e.message}`)
+    }
+    return
+  }
   await nextTick()
   renderCharts()
   window.addEventListener('resize', onResize)
@@ -206,17 +223,37 @@ function renderCharts() {
     ],
   })
 
-  // 5. 分组金额分布横向条形
+  // 5. 分组金额分布横向条形：清单价之外再画一列「已付」—— 按采购记录的归属
+  // 分组归集（by_room.paid_total，口径由服务端定）。老后端没这个字段时一条都
+  // 对不上数，整条 series 不出现，图表保持原样，不至于画出一排零高度的柱子
+  const hasRoomPaid = byRoom.some((r) => Number(r.paid_total) > 0)
+  const roomSeries = [{
+    name: '清单价', type: 'bar', data: byRoom.map((r) => r.list_total),
+    itemStyle: { color: '#5ac8fa', borderRadius: [0, 4, 4, 0] }, barMaxWidth: 14,
+  }]
+  if (hasRoomPaid) {
+    roomSeries.push({
+      name: '已付', type: 'bar', data: byRoom.map((r) => Number(r.paid_total) || 0),
+      itemStyle: { color: '#34c759', borderRadius: [0, 4, 4, 0] }, barMaxWidth: 14,
+    })
+  }
   makeChart(barRoomEl.value, {
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
-        const p = Array.isArray(params) ? params[0] : params
-        const room = summary.value.by_room.find((r) => r.name === p.name)
-        return `${p.name}<br/>￥${money(p.value)} · ${room ? room.qty : 0} 件`
+        const arr = Array.isArray(params) ? params : [params]
+        const main = arr[0]
+        const room = summary.value.by_room.find((r) => r.name === main.name)
+        const paid = arr.find((p) => p.seriesName === '已付')
+        let s = `${main.name}<br/>清单价 ￥${money(main.value)} · ${room ? room.qty : 0} 件`
+        if (paid) s += `<br/>已付 ￥${money(paid.value)}`
+        return s
       },
     },
-    grid: { left: 8, right: 24, top: 8, bottom: 0, containLabel: true },
+    legend: hasRoomPaid
+      ? { top: 0, right: 0, itemWidth: 14, itemHeight: 10, textStyle: { fontSize: 12, color: '#3c3c43' } }
+      : undefined,
+    grid: { left: 8, right: 24, top: hasRoomPaid ? 26 : 8, bottom: 0, containLabel: true },
     xAxis: {
       type: 'value', splitLine: { lineStyle: { color: hairline } }, axisLabel,
     },
@@ -225,10 +262,7 @@ function renderCharts() {
       axisTick: { show: false }, axisLine: { lineStyle: { color: hairline } },
       axisLabel: { color: '#3c3c43', fontSize: 12 },
     },
-    series: [{
-      type: 'bar', data: byRoom.map((r) => r.list_total),
-      itemStyle: { color: '#5ac8fa', borderRadius: [0, 4, 4, 0] }, barMaxWidth: 14,
-    }],
+    series: roomSeries,
   })
 
   // 6. 按月已付：付款记录里的日期，终于能回答"这个月花了多少"
@@ -278,7 +312,10 @@ function renderCharts() {
 
 <template>
   <div v-if="!summary" class="dash-board dash-skeleton">
-    <el-skeleton :rows="10" animated />
+    <el-empty v-if="loadFailed"
+              description="总览加载失败，可能是服务没启动或网络断了；切到别的页再切回来即可重试"
+              :image-size="80" />
+    <el-skeleton v-else :rows="10" animated />
   </div>
   <div v-else ref="rootEl" class="dash-board">
     <el-row :gutter="12" class="stats-row">

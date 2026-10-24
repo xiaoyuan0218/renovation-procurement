@@ -137,6 +137,19 @@ def item_status(item) -> str:
     return "unbought"
 
 
+def record_room_ids(r) -> set:
+    """这笔采购记录写明的分组集合。
+
+    勾了分组就按勾的算；只写了单值 room_id 的老记录当成"只勾了那一间"。
+    「哪间买齐」（allocation_paid_cover）与总览的分组已付都从这里取口径，
+    两处对同一笔记录的归属必须永远一致。
+    """
+    ids = {rr.room_id for rr in r.rooms if rr.room_id}
+    if not ids and r.room_id:
+        ids = {r.room_id}
+    return ids
+
+
 def allocation_paid_cover(item) -> dict:
     """各分组的已付覆盖 {分配id: 已付数量}。
 
@@ -169,10 +182,7 @@ def allocation_paid_cover(item) -> dict:
 
     for r in item.records:
         qty = r.qty or 0
-        # 勾了分组就按勾的算；只写了单值 room_id 的老记录当成"只勾了那一间"
-        room_ids = {rr.room_id for rr in r.rooms if rr.room_id}
-        if not room_ids and r.room_id:
-            room_ids = {r.room_id}
+        room_ids = record_room_ids(r)
         if room_ids:
             _fill(room_ids, qty)
         else:
@@ -191,6 +201,28 @@ def allocation_paid_cover(item) -> dict:
         return {}
     return {a.id: r2(min(a.qty or 0, covered.get(a.room_id, 0.0)))
             for a in allocations}
+
+
+def record_dict(r) -> dict:
+    """一条采购记录的统一输出视图（物料详情与跨物料流水共用同一形状）。"""
+    return {
+        "id": r.id,
+        "item_id": r.item_id,
+        "qty": r.qty,
+        "amount": r.amount,
+        "is_deposit": bool(r.is_deposit),
+        "unit_price": (r2(r.amount / r.qty) if (r.qty or 0) > 0 and r.amount else None),
+        # 老数据里可能存着 "2026-09-14 00:00:00" 这类脏值，读出来时归一化
+        "date": dates.for_read(r.date),
+        "note": r.note or "",
+        "vendor": r.vendor or "",
+        "order_no": r.order_no or "",
+        # room_ids 是现在的写法（可多选）；room_id 留给老客户端看
+        "room_ids": [rr.room_id for rr in r.rooms if rr.room_id],
+        "room_id": next((rr.room_id for rr in r.rooms if rr.room_id), None),
+        "created_at": r.created_at,
+        "updated_at": r.updated_at,
+    }
 
 
 def item_dict(item) -> dict:
@@ -224,27 +256,7 @@ def item_dict(item) -> dict:
         "rev": item.rev or 1,
         "created_at": item.created_at,
         "updated_at": item.updated_at,
-        "records": [
-            {
-                "id": r.id,
-                "item_id": r.item_id,
-                "qty": r.qty,
-                "amount": r.amount,
-                "is_deposit": bool(r.is_deposit),
-                "unit_price": (r2(r.amount / r.qty) if (r.qty or 0) > 0 and r.amount else None),
-                # 老数据里可能存着 "2026-09-14 00:00:00" 这类脏值，读出来时归一化
-                "date": dates.for_read(r.date),
-                "note": r.note or "",
-                "vendor": r.vendor or "",
-                "order_no": r.order_no or "",
-                # room_ids 是现在的写法（可多选）；room_id 留给老客户端看
-                "room_ids": [rr.room_id for rr in r.rooms if rr.room_id],
-                "room_id": next((rr.room_id for rr in r.rooms if rr.room_id), None),
-                "created_at": r.created_at,
-                "updated_at": r.updated_at,
-            }
-            for r in item.records
-        ],
+        "records": [record_dict(r) for r in item.records],
         "allocations": [
             {
                 "id": a.id,

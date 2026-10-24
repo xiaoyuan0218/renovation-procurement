@@ -6,8 +6,17 @@ import androidx.test.core.app.ApplicationProvider
 import com.xiaoyuan.renovation.mobile.data.db.AppDatabase
 import com.xiaoyuan.renovation.mobile.data.db.ItemEntity
 import com.xiaoyuan.renovation.mobile.data.db.ItemListEntity
+import com.xiaoyuan.renovation.mobile.data.model.ItemInDto
+import com.xiaoyuan.renovation.mobile.data.prefs.AppPrefs
+import com.xiaoyuan.renovation.mobile.data.repo.CurrentListHolder
+import com.xiaoyuan.renovation.mobile.data.repo.LocalRepository
+import com.xiaoyuan.renovation.mobile.data.repo.okData
 import com.xiaoyuan.renovation.mobile.domain.ItemBundle
 import com.xiaoyuan.renovation.mobile.domain.LocalCompute
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -21,6 +30,9 @@ import org.robolectric.annotation.Config
 /**
  * 商品链接（1.2.5 起）在「界面读回」与「表格导出导入」两条路上都不能丢，而且
  * 只认 http/https —— 这个值最终会被渲染成可点的链接，伪协议等于脚本执行。
+ *
+ * 存库口径是「统一链接提取规范」：从输入里提取第一个 http(s) 链接（整段分享
+ * 文案也认），没有就清空；对已清洗过的纯 URL 幂等，读回路径不受影响。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -74,6 +86,94 @@ class ItemLinkRoundTripTest {
         assertEquals("没有协议头的裸网址不当链接",
             "", LocalCompute.cleanLink("item.jd.com/1.html"))
         assertEquals("", LocalCompute.cleanLink(null))
+    }
+
+    /*
+     * 下面是「统一链接提取规范」的用例。四条样例文案按方案给定的链接域
+     * （3.cn / xhslink.com / e.tb.cn / mobile.yangkeduo.com）于 2026-10-25
+     * 依 testCases 的描述构造，不是真实抓取的原文 —— 方案只固定了域名与
+     * 关键参数形态（@ 完整、tk= 保留），样例改版时以此为对照基线。
+     */
+
+    @Test
+    fun `从整段分享文案里提取第一个 http 链接`() {
+        assertEquals("https://3.cn/38K-9pPI?jkl=@YC8fI3EmHbBY@",
+            LocalCompute.extractLink(
+                "【京东】好物推荐 https://3.cn/38K-9pPI?jkl=@YC8fI3EmHbBY@ 点击下单"))
+        assertEquals("https://xhslink.com/m/2x3IQ9yoNdZ49IKkEhFMOG",
+            LocalCompute.extractLink(
+                "【小红书】看看这个 https://xhslink.com/m/2x3IQ9yoNdZ49IKkEhFMOG"))
+        assertEquals("淘宝的 tk= 参数要原样保留",
+            "https://e.tb.cn/h.TnDmJ5?tk=abCdEf12",
+            LocalCompute.extractLink(
+                "【淘宝】复制整段打开淘宝 https://e.tb.cn/h.TnDmJ5?tk=abCdEf12 抢好物"))
+        assertEquals("纯 URL 输出原值", "https://mobile.yangkeduo.com/goods.html?goods_id=88888",
+            LocalCompute.extractLink("https://mobile.yangkeduo.com/goods.html?goods_id=88888"))
+
+        assertEquals("两个链接取第一个（确定性规则，同步两端才不会互相覆盖）",
+            "https://a.com/1", LocalCompute.extractLink("先看 https://a.com/1 再看 https://b.com/2"))
+        assertEquals("口令码里没有 http 链接", "",
+            LocalCompute.extractLink("口令：￥a1b2c3￥"))
+    }
+
+    @Test
+    fun `尾部标点剥除，收括号看配对`() {
+        // 候选 "https://x.com/a_(page))"：( 出现 1 次、) 出现 2 次，只剥外面
+        // 多出来的那一个；URL 自己配对的 "(page)" 不能被剥坏
+        assertEquals("https://x.com/a_(page)",
+            LocalCompute.extractLink("see https://x.com/a_(page)) thanks"))
+        assertEquals("URL 里没有开括号时，尾部的右括号是包裹符，剥净", "https://x.com/a",
+            LocalCompute.extractLink("(see https://x.com/a))"))
+        assertEquals("https://x.com/a_(page)", LocalCompute.extractLink("https://x.com/a_(page)"))
+    }
+
+    @Test
+    fun `空 host 与超长 URL 清空，scheme 大小写保留`() {
+        assertEquals("", LocalCompute.extractLink("https://..."))
+        assertEquals("", LocalCompute.extractLink("https://)"))
+        assertEquals("", LocalCompute.extractLink("https://./x"))
+        assertEquals("无路径的短链要放行", "https://a", LocalCompute.extractLink("https://a"))
+        assertEquals("https://1.2.3.4/x", LocalCompute.extractLink("https://1.2.3.4/x"))
+        assertEquals("https://localhost:8000/x",
+            LocalCompute.extractLink("https://localhost:8000/x"))
+        assertEquals("600 字符的 URL 截断就坏，整体放弃", "",
+            LocalCompute.extractLink("https://example.com/" + "a".repeat(600)))
+        assertEquals("scheme 大小写保留原样（正则里的 $ 若被字符串模板吃掉，这条会挂）",
+            "HTTP://X.COM/A", LocalCompute.extractLink("HTTP://X.COM/A"))
+        assertEquals("大小写混写的 scheme 与域名照常提取", "Https://E.TB.CN/a?tk=1",
+            LocalCompute.extractLink("看这个 Https://E.TB.CN/a?tk=1 好"))
+    }
+
+    @Test
+    fun `cleanLink 幂等，提取两次结果一致`() {
+        val text = "【京东】 https://3.cn/38K-9pPI?jkl=@YC8fI3EmHbBY@ 下单"
+        val once = LocalCompute.cleanLink(text)
+        assertEquals(once, LocalCompute.cleanLink(once))
+    }
+
+    @Test
+    fun `存库入口把整段文案收口成提取结果`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        try {
+            // LocalRepository 是本地写库的唯一出口；它经 cleanLink 走提取，
+            // 超长 URL 在这里就清空，不会出现「本地存了、同步时被清」的落差
+            val repo = LocalRepository(db, CurrentListHolder(AppPrefs(context), db, scope))
+            val extracted = repo.createItem(
+                ItemInDto(
+                    name = "整段文案",
+                    link = "【京东】好物推荐 https://3.cn/38K-9pPI?jkl=@YC8fI3EmHbBY@ 点击下单",
+                ),
+            ).okData!!
+            assertEquals("https://3.cn/38K-9pPI?jkl=@YC8fI3EmHbBY@", extracted.link)
+
+            val tooLong = repo.createItem(
+                ItemInDto(name = "超长链接", link = "https://example.com/" + "a".repeat(600)),
+            ).okData!!
+            assertEquals("600 字符 URL 落库即为空", "", tooLong.link)
+        } finally {
+            scope.cancel()
+        }
     }
 
     @Test

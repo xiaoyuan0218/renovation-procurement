@@ -11,6 +11,10 @@ const q = ref('')
 const categoryId = ref(null)
 const brand = ref('')
 const statusFilter = ref('all')
+// 按分组筛选：选一个分组，得到它的"出门购物清单"——该分组分到、但还没买齐的
+// 物料各占一行，配上还差几个。分配数据（allocations）随 /api/items 一起回来，
+// 纯前端过滤，不用额外的接口
+const roomFilter = ref(null)
 
 // 品牌下拉的选项从当前清单实际用到的品牌里取（去重、排序、忽略空值）——
 // 写死一份品牌表没意义，家具家电和年货的品牌完全不是一回事
@@ -34,18 +38,30 @@ function safeLink(url) {
   return /^https?:\/\//i.test(text) ? text : ''
 }
 
+// 已付定也是"没买齐"：钱付了货还没到，出门采购时照样得盯着
+const NOT_DONE = new Set(['unbought', 'partial', 'deposit'])
+
 const filtered = computed(() => items.value.filter((it) => {
   if (categoryId.value && it.category_id !== categoryId.value) return false
   if (brand.value && (it.brand || '').trim() !== brand.value) return false
   if (statusFilter.value !== 'all' && it.status !== statusFilter.value) return false
   if (q.value && !it.name.includes(q.value)) return false
+  // 分组筛选的语义是"采购单"：只看分到这间、还没买齐的（其余状态交给状态筛选）
+  if (roomFilter.value) {
+    if (!it.allocations?.some((a) => a.room_id === roomFilter.value)) return false
+    if (!NOT_DONE.has(it.status)) return false
+  }
   return true
 }))
 
-// 空清单和"筛不出结果"是两回事：前者要告诉人怎么开始
+// 空清单和"筛不出结果"是两回事：前者要告诉人怎么开始。
+// 加载失败也得跟这两者区分开：数据没到手就显示"清单是空的"，用户会以为数据丢了
 const emptyText = computed(() => {
+  if (loadFailed.value) {
+    return '加载失败，可能是服务没启动或网络断了；切到别的页再切回来即可重试'
+  }
   const untouched = !items.value.length && !q.value && !categoryId.value
-    && !brand.value && statusFilter.value === 'all'
+    && !brand.value && statusFilter.value === 'all' && !roomFilter.value
   return untouched
     ? '这个清单还是空的：点「新增物料」加第一条，分组可以在「设置 / 数据 → 分组」里建'
     : '没有符合条件的物料'
@@ -85,7 +101,7 @@ function onSizeChange(v) {
   pageSize.value = Number.isFinite(n) && n >= 1 ? Math.min(n, 10000) : 20
 }
 // 筛选一改就回第一页，否则可能停在一个空页上
-watch([q, categoryId, brand, statusFilter], () => { page.value = 1 })
+watch([q, categoryId, brand, statusFilter, roomFilter], () => { page.value = 1 })
 
 // 先排序、再切页：排序必须作用于**全量**筛选结果，
 // 交给 el-table 自己排的话只会在当前页内排，翻到第二页数字就乱了
@@ -125,6 +141,7 @@ function onSortChange({ prop, order }) {
 const dialogVisible = ref(false)
 const editing = ref(null)
 const loading = ref(false)
+const loadFailed = ref(false)
 const selectedIds = ref([])
 function onSelectionChange(rows) {
   selectedIds.value = rows.map(r => r.id)
@@ -153,10 +170,17 @@ onUnmounted(() => {
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   try {
     ;[items.value, rooms.value, categories.value] = await Promise.all([
       api.get('/api/items'), api.get('/api/rooms'), api.get('/api/categories'),
     ])
+  } catch (e) {
+    // 401 已由全局跳登录处理，这里只提示其余失败（内置服务挂了、断网等）
+    if (e.status !== 401) {
+      loadFailed.value = true
+      ElMessage.error(`加载失败：${e.message}`)
+    }
   } finally {
     loading.value = false
     selectedIds.value = []
@@ -213,6 +237,22 @@ function _applyPay(updated) {
   payVisible.value = false
 }
 
+// 「已买 + 本次 > 总量」时拦一下：数量录错（多打一个 0、没注意已买 9 其实只差 1）
+// 是最常见的记账错误。确认过就是真实买超，放行 —— 口径不变，服务端本来就不夹断数量。
+// 定金与纯金额记录不推进到货数量（qty 按 0 算），不存在超量，直接放行。
+async function confirmOverrun(row, qty) {
+  const total = Number(row?.total_qty) || 0
+  const bought = Number(row?.paid_qty) || 0
+  const over = Math.round((bought + qty - total) * 100) / 100
+  if (!(qty > 0) || over <= 0) return true
+  try {
+    await ElMessageBox.confirm(
+      `总量 ${fmtQty(total)}${row?.unit || ''}、已买 ${fmtQty(bought)}、本次 ${fmtQty(qty)}，将超 ${fmtQty(over)}。确认记下这笔？`,
+      '买超确认', { type: 'warning', confirmButtonText: '确认记下' })
+    return true
+  } catch { return false }
+}
+
 async function addRecord() {
   const f = payForm.value
   // 定金只记钱，不看数量；普通采购至少要有一个数
@@ -224,6 +264,7 @@ async function addRecord() {
     ElMessage.warning('定金要填金额')
     return
   }
+  if (!(await confirmOverrun(f.row, f.is_deposit ? 0 : Number(f.qty) || 0))) return
   payBusy.value = true
   try {
     const updated = await api.post(`/api/items/${f.id}/records`, {
@@ -245,6 +286,14 @@ async function addRecord() {
 
 async function quickPaid() {
   const f = payForm.value
+  // 没填单价（或总量为 0）时日常价合计是 0：照发会记下 qty=全部、amount=0 的
+  // 零额记录并把状态直接推成"已买完"。比照手动记一笔的门槛，先拦下来
+  if (!Number(f.row?.discount_total)) {
+    ElMessage.warning('这个物料的日常价合计为 0（未填单价或数量为 0），请先补全单价，或用「记一笔」手动填金额')
+    return
+  }
+  // 「付清」按总量整笔记：已买过一部分再点，必然把已买推过总量，必须确认
+  if (!(await confirmOverrun(f.row, Number(f.totalQty) || 0))) return
   payBusy.value = true
   try {
     const updated = await api.post(`/api/items/${f.id}/records`, {
@@ -330,6 +379,10 @@ function onSaved() {
       <el-input v-model="q" placeholder="搜索物料名称" clearable class="search" />
       <el-select v-model="categoryId" placeholder="全部分类" clearable class="cat-select">
         <el-option v-for="c in categories" :key="c.id" :label="c.name" :value="c.id" />
+      </el-select>
+      <!-- 分组筛选：选中即"出门购物清单"，只看这间分到且没买齐的 -->
+      <el-select v-model="roomFilter" placeholder="全部分组" clearable class="cat-select">
+        <el-option v-for="r in rooms" :key="r.id" :label="r.name" :value="r.id" />
       </el-select>
       <el-select v-model="brand" placeholder="全部品牌" clearable filterable
                  class="brand-select">
@@ -420,6 +473,10 @@ function onSaved() {
                 {{ fmtQty(row.paid_qty) }}/{{ fmtQty(row.total_qty) }}
               </span>
             </el-tag>
+            <!-- 选中分组筛选时这张表就是采购单：把"还差几个"写出来，不用心算 -->
+            <div v-if="roomFilter && row.unpaid_qty > 0" class="room-diff">
+              差 {{ fmtQty(row.unpaid_qty) }}{{ row.unit ? ` ${row.unit}` : '' }}
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="note" label="备注" min-width="110" show-overflow-tooltip />
@@ -497,7 +554,9 @@ function onSaved() {
           </div>
         </el-form-item>
         <el-form-item label="实付数量">
-          <el-input-number v-model="payForm.qty" :min="0" :max="payForm.totalQty"
+          <!-- 不设 max：真实买超要能输进去，超量由提交前的「买超确认」把关，
+               输入框先夹断的话用户就买超不了 -->
+          <el-input-number v-model="payForm.qty" :min="0"
                            :disabled="payForm.is_deposit"
                            controls-position="right" style="width: 100%" />
         </el-form-item>
@@ -595,6 +654,8 @@ function onSaved() {
 .unpaid-cell.cleared { color: var(--ios-green); }
 .status-tag { cursor: pointer; font-weight: 600; }
 .tag-ratio { font-weight: 500; }
+/* 分组筛选下的"还差几个"：状态标签下面一行小字，橙色，扫一眼就是采购数量 */
+.room-diff { font-size: 11px; color: var(--ios-orange); margin-top: 2px; }
 .pay-sum {
   display: flex;
   flex-wrap: wrap;

@@ -43,6 +43,9 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
     private val _categoryId = MutableStateFlow<Int?>(null)
     val categoryId: StateFlow<Int?> = _categoryId.asStateFlow()
 
+    private val _roomId = MutableStateFlow<Int?>(null)
+    val roomId: StateFlow<Int?> = _roomId.asStateFlow()
+
     private val _status = MutableStateFlow(StatusFilter.All)
     val status: StateFlow<StatusFilter> = _status.asStateFlow()
 
@@ -102,6 +105,18 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
         _categoryId.value = id
     }
 
+    /**
+     * 按分组筛选：出门购物场景 —— 选个分组就得到一张该分组的采购单。
+     * 选中时状态还停在「全部」的话自动切到「未买齐」，已买完的不再占屏幕；
+     * 用户之后手动改状态筛选仍然有效。
+     */
+    fun setRoom(id: Int?) {
+        _roomId.value = id
+        if (id != null && _status.value == StatusFilter.All) {
+            _status.value = StatusFilter.Pending
+        }
+    }
+
     fun setStatus(value: StatusFilter) {
         _status.value = value
     }
@@ -111,16 +126,20 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
         _status.value = StatusFilter.Pending
         _query.value = ""
         _categoryId.value = null
+        _roomId.value = null
     }
 
     fun filtered(data: ItemsData): List<ItemDto> {
         val keyword = _query.value.trim()
         val categoryId = _categoryId.value
+        val roomId = _roomId.value
         val filter = _status.value
         return data.items
             .filter { item ->
                 val matchKeyword = keyword.isEmpty() || item.name.contains(keyword, ignoreCase = true)
                 val matchCategory = categoryId == null || item.categoryId == categoryId
+                // 分组口径：这个分组下布过点（有分配）的物料才算 —— 与矩阵页的 cells 同源
+                val matchRoom = roomId == null || item.allocations.any { it.roomId == roomId }
                 val matchStatus = when (filter) {
                     StatusFilter.All -> true
                     StatusFilter.Pending -> item.status == "unbought" ||
@@ -130,7 +149,7 @@ class ItemsViewModel(private val repo: RenovationRepository) : ViewModel() {
                     StatusFilter.Partial -> item.status == "partial"
                     StatusFilter.Done -> item.status == "done"
                 }
-                matchKeyword && matchCategory && matchStatus
+                matchKeyword && matchCategory && matchRoom && matchStatus
             }
             // 默认按添加时间倒序：最近加的在最上面，与网页版表格的默认排序同一口径。
             // 时间戳是等宽字符串（yyyy-MM-dd HH:mm:ss），字典序就是时间序；

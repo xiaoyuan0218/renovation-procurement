@@ -16,6 +16,9 @@
 
 import json
 import re
+import threading
+import time
+from collections import deque
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -92,6 +95,27 @@ SKIPPED = {
 LOG_LIMIT = 2000
 LOG_KEEP = 1800
 
+# 未认证（401）写请求的限速：发它们不需要登录，不限速的话局域网里随便一台设备
+# 灌 401 就能把真实操作的日志连同 undo 快照一起挤出回看窗口、被 _trim 物理裁掉，
+# 一键回退随之失效。留痕的本意是「有人试过」要能看见，一个窗口内保留前几条足够；
+# 正常用户登录失败重试几次完全够用，已认证的写请求不受影响。
+UNAUTH_LOG_WINDOW = 60.0
+UNAUTH_LOG_MAX = 10
+_unauth_log_times: deque = deque()
+_unauth_log_lock = threading.Lock()
+
+
+def _unauth_log_allowed() -> bool:
+    """滑动窗口限速：窗口内还没满就记账并放行，满了就丢弃这条日志。"""
+    now = time.monotonic()
+    with _unauth_log_lock:
+        while _unauth_log_times and now - _unauth_log_times[0] > UNAUTH_LOG_WINDOW:
+            _unauth_log_times.popleft()
+        if len(_unauth_log_times) >= UNAUTH_LOG_MAX:
+            return False
+        _unauth_log_times.append(now)
+        return True
+
 _NUMBERS = re.compile(r"/\d+(?=/|$)")
 
 
@@ -135,6 +159,9 @@ def write_log(db: Session, request, status_code: int) -> None:
     """中间件在响应完成后调用：落一条日志，超出上限就裁旧的。"""
     method, path = request.method, request.url.path
     if (method, path) in SKIPPED:
+        return
+    # 未认证的写请求限速记录：挡住灌 401 挤掉真实日志的攻击（见上面的注释）
+    if status_code == 401 and not _unauth_log_allowed():
         return
     action = action_name(method, path) or f"{method} {normalize_path(path)}"
     subject = getattr(request.state, "audit_subject", None)
@@ -281,6 +308,8 @@ def undoable_id(db: Session) -> int | None:
     for row in rows:
         if row.undone_at is not None:
             continue  # 快照已被回退消费掉，跳过它继续往前找
+        if row.status_code == 401:
+            continue  # 被登录墙挡回去的请求什么都没改，别把回退入口堵在这里
         if (row.method, normalize_path(row.path)) in NON_DATA:
             continue
         return row.id if row.undo_kind else None
